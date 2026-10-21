@@ -1,0 +1,1 @@
+ALTER TABLE "org"."payslips" ADD COLUMN "recognition_bonus" numeric(12, 2) DEFAULT '0' NOT NULL;

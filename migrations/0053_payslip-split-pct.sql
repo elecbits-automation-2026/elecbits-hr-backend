@@ -1,0 +1,2 @@
+ALTER TABLE "org"."payslips" ADD COLUMN "basic_percent" numeric(5, 2) DEFAULT '50' NOT NULL;--> statement-breakpoint
+ALTER TABLE "org"."payslips" ADD COLUMN "hra_percent" numeric(5, 2) DEFAULT '25' NOT NULL;

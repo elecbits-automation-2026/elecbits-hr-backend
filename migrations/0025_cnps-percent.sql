@@ -1,0 +1,1 @@
+ALTER TABLE "org"."employee_salary" ADD COLUMN "cnps_percent" numeric(5, 2);

@@ -1,0 +1,1 @@
+ALTER TABLE "org"."leave_requests" ADD COLUMN "hr_required" boolean DEFAULT true NOT NULL;

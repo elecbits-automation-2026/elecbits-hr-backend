@@ -1,0 +1,384 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790677049012,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790835413183,
+      "tag": "0001_employee-profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790841135340,
+      "tag": "0002_trim-profile-fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790841136726,
+      "tag": "0003_backfill-claimed-status",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790850716401,
+      "tag": "0004_leave-management",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790851611697,
+      "tag": "0005_leave-hr-waiver",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790852063392,
+      "tag": "0006_attendance",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790854422948,
+      "tag": "0007_payroll",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791179920793,
+      "tag": "0008_attendance-geo",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791180620498,
+      "tag": "0009_attendance-geo-policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791186342433,
+      "tag": "0010_punch-zones",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791202840294,
+      "tag": "0011_attendance-round3",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791274620408,
+      "tag": "0012_claim-tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791292927950,
+      "tag": "0013_checkout-zone-flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791346587325,
+      "tag": "0014_drop-checkout-zone-flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791364940655,
+      "tag": "0015_feedback-notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791434493284,
+      "tag": "0016_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791435200251,
+      "tag": "0017_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791441903156,
+      "tag": "0018_recognitions",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791442276175,
+      "tag": "0019_career-tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791454344488,
+      "tag": "0020_policy-documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791455561380,
+      "tag": "0021_leave-policy-types",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791455566958,
+      "tag": "0022_leave-policy-data-fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791456574316,
+      "tag": "0023_revert-grade-structure",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791460300616,
+      "tag": "0024_erp-sheet-payslips",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791460788926,
+      "tag": "0025_cnps-percent",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791521119531,
+      "tag": "0026_performance",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791887820540,
+      "tag": "0027_org-settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791955538454,
+      "tag": "0028_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791956981048,
+      "tag": "0029_refresh-tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791962947714,
+      "tag": "0030_policy-retire",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791963136948,
+      "tag": "0031_recognitions-cadence-arbiter",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791969876392,
+      "tag": "0032_recognitions-catalog-types",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791970162966,
+      "tag": "0033_payslip-recognition-bonus",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791970541075,
+      "tag": "0034_employee-work-hours",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791972238674,
+      "tag": "0035_work-update-late-entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791972931265,
+      "tag": "0036_career-history-notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791974539217,
+      "tag": "0037_payslip-corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791978479221,
+      "tag": "0038_reimbursement-claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792045098745,
+      "tag": "0039_pt-state-variable-pay",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792046538881,
+      "tag": "0040_goal-categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792046569310,
+      "tag": "0041_quarter-reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792048376206,
+      "tag": "0042_scheduler",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792050774053,
+      "tag": "0043_concerns-open-door",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792067113002,
+      "tag": "0044_ops-retire-shell",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792067214538,
+      "tag": "0045_asset-manager",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792135397020,
+      "tag": "0046_exits-retire-shell",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792135470657,
+      "tag": "0047_exit-module",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792139431558,
+      "tag": "0048_onboarding-handoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792139667128,
+      "tag": "0049_probation-reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792140048284,
+      "tag": "0050_loans",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792140333236,
+      "tag": "0051_pips",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792140545305,
+      "tag": "0052_claim-receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792140791986,
+      "tag": "0053_payslip-split-pct",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+CREATE TYPE "public"."goal_category" AS ENUM('fundamental', 'corporate', 'general');--> statement-breakpoint
+ALTER TABLE "org"."goals" ADD COLUMN "category" "goal_category" DEFAULT 'fundamental' NOT NULL;

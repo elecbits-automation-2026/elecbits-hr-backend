@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "recognitions_approved_cycle_uq" ON "org"."recognitions" USING btree ("type","cycle") WHERE status = 'approved';

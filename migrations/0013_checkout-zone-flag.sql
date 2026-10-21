@@ -1,0 +1,1 @@
+ALTER TABLE "org"."attendance" ADD COLUMN "check_out_out_of_zone" boolean;
