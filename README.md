@@ -19,7 +19,7 @@ changes: `DATABASE_URL` + `PGSSL`/`PGSSL_CA`).
 
 ```bash
 npm install
-copy .env.example .env          # then edit DATABASE_URL etc.
+copy .env.example .env          # Windows; on macOS/Linux use cp. Then edit DATABASE_URL etc.
 createdb elecbits_hr            # or create the DB in pgAdmin
 
 npm run db:generate -- --name init   # generate SQL migrations from src/db/schema
