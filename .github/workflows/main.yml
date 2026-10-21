@@ -1,0 +1,428 @@
+name: Main Branch CI/CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer run supersedes an older one that is still queued. An in-flight
+# deployment is never cancelled: killing the job between "old container removed"
+# and "new container healthy" would strand production half-deployed.
+concurrency:
+  group: main-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Every environment-specific value comes from the Production environment's
+# variables (Settings -> Environments -> Production -> Variables), so this file
+# describes the pipeline and says nothing about which account, host, or
+# repository it targets. Those variables are readable only by a job that
+# declares `environment:`, which is why the env blocks below are per-job rather
+# than workflow-level.
+
+jobs:
+  build:
+    name: Validate, build, and publish image
+    # workflow_dispatch can target another ref; production publishing cannot.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: Production
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # GitHub OIDC token; no stored AWS access keys are used.
+    env:
+      ECR_REGION: ${{ vars.ECR_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+    outputs:
+      image_uri: ${{ steps.image.outputs.uri }}
+
+    steps:
+      # A variable that was never created expands to an empty string rather than
+      # failing the expression, so without this the run would get as far as
+      # pushing to a registry path with a missing segment before complaining.
+      - name: Require the Production environment variables
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for name in ECR_REGION ECR_REPOSITORY AWS_ROLE_ARN; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is not set in the Production environment variables."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Check out the exact commit being deployed
+        uses: actions/checkout@v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      # `tsc --noEmit` reports the same diagnostics as a full compile, and the
+      # image is built from source in the Dockerfile regardless, so emitting
+      # dist/ on the runner would only produce artifacts nothing consumes.
+      - name: Type-check
+        run: npm run typecheck
+
+      # Advisories are published upstream on their own schedule, so a finding
+      # here usually says nothing about the commit being deployed. Report it and
+      # carry on rather than blocking a release on unrelated news.
+      - name: Audit production dependencies (non-blocking)
+        run: |
+          set -Eeuo pipefail
+          if npm audit --omit=dev --audit-level=high; then
+            echo "No high or critical advisories in production dependencies."
+          else
+            echo "::warning::npm audit reported high or critical advisories in production dependencies. See this step's log."
+          fi
+
+      - name: Configure AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4.3.1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.ECR_REGION }}
+          role-session-name: github-${{ github.run_id }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2.1.6
+
+      - name: Resolve the immutable image reference
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: echo "uri=$REGISTRY/$ECR_REPOSITORY:sha-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3.12.0
+
+      # The layer cache spares a full `npm ci` on every deploy. Provenance is off
+      # so the tag resolves to a plain image rather than an index with extra
+      # attestation manifests, which keeps what EC2 pulls easy to reason about.
+      - name: Build and push immutable image to ECR
+        uses: docker/build-push-action@v6.19.2
+        with:
+          context: .
+          pull: true
+          push: true
+          provenance: false
+          tags: ${{ steps.image.outputs.uri }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy the validated image to EC2 over SSH
+    needs: build # A failed validation, build, or push can never deploy.
+    # Redundant with `needs` today, but it keeps the ref rule stated on the job
+    # that actually touches the server rather than inherited from another job.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: Production
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      SECRETS_MANAGER_REGION: ${{ vars.SECRETS_MANAGER_REGION }}
+      SECRETS_MANAGER_ARN: ${{ vars.SECRETS_MANAGER_ARN }}
+      EC2_HOST: ${{ vars.EC2_HOST }}
+      EC2_USER: ${{ vars.EC2_USER }}
+      EC2_KNOWN_HOSTS: ${{ vars.EC2_KNOWN_HOSTS }}
+      DOCKER_CONTAINER_NAME: ${{ vars.DOCKER_CONTAINER_NAME }}
+      ENV_DIR: ${{ vars.ENV_DIR }}
+
+    steps:
+      - name: Require the Production environment variables
+        run: |
+          set -Eeuo pipefail
+          missing=0
+          for name in SECRETS_MANAGER_REGION SECRETS_MANAGER_ARN EC2_HOST EC2_USER \
+                      EC2_KNOWN_HOSTS DOCKER_CONTAINER_NAME ENV_DIR; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is not set in the Production environment variables."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Configure SSH trust
+        env:
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$EC2_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::EC2_SSH_PRIVATE_KEY is not set in the Production environment secrets."
+            exit 1
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinning the host key is what makes StrictHostKeyChecking=yes
+          # meaningful: without it the runner would hand the deploy key and the
+          # SSH session to whoever answers on that address.
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Pull, start, and verify on EC2
+        env:
+          IMAGE_URI: ${{ needs.build.outputs.image_uri }}
+        run: |
+          set -Eeuo pipefail
+          # Anything that fails without explaining itself still names its line
+          # and status, so the step can never end with an empty log.
+          trap 'echo "::error::Deploy step failed at line $LINENO (exit $?)."' ERR
+
+          if [[ -z "$IMAGE_URI" ]]; then
+            echo "::error::The build job published no image URI, so there is nothing to deploy."
+            exit 1
+          fi
+
+          echo "Deploying $IMAGE_URI to $EC2_USER@$EC2_HOST"
+
+          # The heredoc is quoted, so nothing below is expanded here: the script
+          # crosses to EC2 verbatim and reads its values as positional arguments.
+          remote_script="$(cat <<'REMOTE'
+          set -Eeuo pipefail
+          # -E above propagates this into functions and subshells. Without it an
+          # unguarded failure (docker pull, mv, docker run) would end the session
+          # with nothing but an exit code, which is what a deploy that "fails
+          # silently" actually is.
+          trap 'echo "Remote deploy failed at line $LINENO (exit $?)." >&2' ERR
+
+          IMAGE_URI="$1"
+          SECRETS_MANAGER_ARN="$2"
+          SECRETS_MANAGER_REGION="$3"
+          CONTAINER_NAME="$4"
+          ENV_DIR="$5"
+
+          ENV_FILE="$ENV_DIR/app.env"
+          NEXT_ENV_FILE="$ENV_DIR/app.env.next"
+
+          # Reading the secret and logging in to ECR both need AWS CLI v2.
+          # Install it only when it is genuinely absent, so a normal deploy pays
+          # nothing and a freshly re-imaged instance still works unattended.
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "AWS CLI not found on this host; installing v2."
+            if ! command -v unzip >/dev/null 2>&1; then
+              sudo apt-get update -qq
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip
+            fi
+            installer="$(mktemp -d)"
+            # uname -m yields x86_64 or aarch64, which are exactly the names AWS
+            # publishes, so this covers Graviton instances too.
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" \
+              -o "$installer/awscliv2.zip"
+            unzip -q "$installer/awscliv2.zip" -d "$installer"
+            sudo "$installer/aws/install"
+            rm -rf "$installer"
+            hash -r # bash caches lookups; drop the failed one from this shell
+          fi
+
+          # A secret written in the console's Key/value editor comes back as a
+          # JSON object, and jq is what turns it into the dotenv lines docker
+          # wants. Same install-only-when-absent reasoning as the AWS CLI above.
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found on this host; installing it."
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq
+            hash -r
+          fi
+
+          # 700 and owned by the deploy user: this directory holds the production
+          # dotenv in plaintext, and nothing after this line should need sudo.
+          sudo install -d -m 700 -o "$(id -un)" -g "$(id -gn)" "$ENV_DIR"
+          umask 077
+
+          # Staged under .next and promoted only at the swap, so a truncated
+          # download can never overwrite a configuration that currently works.
+          # Every check below reports what went wrong: these run before any
+          # output, so a bare `test` here fails the deploy with an empty log.
+          echo "Fetching the application secret."
+          if ! aws secretsmanager get-secret-value --region "$SECRETS_MANAGER_REGION" \
+               --secret-id "$SECRETS_MANAGER_ARN" --query SecretString --output text \
+               > "$NEXT_ENV_FILE"; then
+            echo "Could not read $SECRETS_MANAGER_ARN in $SECRETS_MANAGER_REGION." >&2
+            echo "Check the instance role allows secretsmanager:GetSecretValue on it." >&2
+            exit 1
+          fi
+
+          if [[ ! -s "$NEXT_ENV_FILE" ]]; then
+            echo "Secrets Manager returned an empty SecretString. A secret stored as" >&2
+            echo "SecretBinary rather than SecretString reads back empty this way." >&2
+            exit 1
+          fi
+
+          # Secrets Manager hands back exactly what the secret holds, and the
+          # console writes two different things: its Key/value editor stores a
+          # JSON object, its Plaintext editor stores the text as typed. Accept
+          # both, so a rotation done in either mode deploys instead of failing
+          # here on a distinction the operator never chose to make.
+          if jq -e 'type == "object"' "$NEXT_ENV_FILE" >/dev/null 2>&1; then
+            echo "The secret is a JSON object; converting it to dotenv lines."
+            # docker --env-file reads each line literally: it strips no quotes,
+            # honours no continuation, and ends every value at the newline. A
+            # value that cannot survive that is rejected here rather than
+            # reaching the app silently mangled.
+            if ! jq -r '
+                   to_entries[]
+                   | .key as $k
+                   | .value as $v
+                   | (if $v == null then "" else ($v | tostring) end) as $s
+                   | if ($k | test("^[A-Za-z_][A-Za-z0-9_]*$") | not)
+                     then error("\($k) is not a usable environment variable name")
+                     elif ($v | type) == "object" or ($v | type) == "array"
+                     then error("\($k) holds a JSON \($v | type), and docker --env-file carries only scalars")
+                     elif ($s | test("\n"))
+                     then error("\($k) holds a value containing a newline, which docker --env-file cannot express")
+                     else "\($k)=\($s)"
+                     end
+                 ' "$NEXT_ENV_FILE" > "$NEXT_ENV_FILE.tmp"; then
+              echo "Could not turn the JSON secret into dotenv lines; see the jq error above." >&2
+              rm -f "$NEXT_ENV_FILE" "$NEXT_ENV_FILE.tmp"
+              exit 1
+            fi
+            if [[ ! -s "$NEXT_ENV_FILE.tmp" ]]; then
+              echo "The JSON secret is an empty object, so it defines no configuration." >&2
+              rm -f "$NEXT_ENV_FILE" "$NEXT_ENV_FILE.tmp"
+              exit 1
+            fi
+            mv "$NEXT_ENV_FILE.tmp" "$NEXT_ENV_FILE"
+          fi
+
+          if ! grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=' "$NEXT_ENV_FILE"; then
+            echo "The secret holds neither dotenv KEY=value lines nor a JSON object," >&2
+            echo "so there is nothing here the app can read as configuration." >&2
+            rm -f "$NEXT_ENV_FILE"
+            exit 1
+          fi
+
+          # The app reads PORT from this file, so the same value decides what the
+          # host publishes. No default: guessing would map a port the app is not
+          # listening on and fail /ready for a reason nothing points at.
+          PORT="$(sed -n 's/^PORT=//p' "$NEXT_ENV_FILE" | tail -n 1 | tr -d "\"' \t\r")"
+          if [[ -z "$PORT" ]]; then
+            echo "PORT is not set in the Secrets Manager dotenv; nothing to publish." >&2
+            exit 1
+          fi
+
+          # An ECR hostname carries its own region (<acct>.dkr.ecr.<region>.
+          # amazonaws.com), so reading it back off the image makes a login
+          # against the wrong region impossible rather than merely unlikely.
+          ECR_REGISTRY="${IMAGE_URI%%/*}"
+          ECR_REGION="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          if [[ -z "$ECR_REGION" ]]; then
+            echo "Could not read a region out of the registry host '$ECR_REGISTRY'." >&2
+            exit 1
+          fi
+
+          echo "Pulling $IMAGE_URI"
+          if ! aws ecr get-login-password --region "$ECR_REGION" \
+               | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null; then
+            echo "ECR login failed. Check the instance role allows ecr:GetAuthorizationToken." >&2
+            exit 1
+          fi
+          docker pull "$IMAGE_URI"
+
+          # Migrations run from the new image before the old container is
+          # touched, so a failed migration aborts the deploy with the current
+          # release still serving. dist/scripts/migrate.js resolves
+          # ../../migrations, which is /app/migrations inside the image.
+          echo "Running database migrations"
+          if ! docker run --rm --env-file "$NEXT_ENV_FILE" "$IMAGE_URI" \
+               node dist/scripts/migrate.js; then
+            echo "Database migrations failed; the running container was left untouched." >&2
+            rm -f "$NEXT_ENV_FILE"
+            exit 1
+          fi
+
+          # SIGTERM first so the app's own shutdown runs: it drains in-flight
+          # HTTP and closes the DB pools, capped at 10s in server.ts. Docker
+          # escalates to SIGKILL at the timeout, which is the backstop, not the
+          # plan. `rm -f` then clears the stopped container (and any container
+          # that was already dead).
+          echo "Replacing container $CONTAINER_NAME on port $PORT"
+          docker stop --timeout 15 "$CONTAINER_NAME" >/dev/null 2>&1 || true
+          docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+          mv "$NEXT_ENV_FILE" "$ENV_FILE"
+          docker run -d --restart unless-stopped --name "$CONTAINER_NAME" --env-file "$ENV_FILE" \
+            -p "$PORT:$PORT" "$IMAGE_URI" >/dev/null
+
+          probe() {
+            curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$PORT/$1" >/dev/null
+          }
+
+          # Both probes must pass: /health says the process is serving, /ready
+          # additionally says the database answered. A release is only good when
+          # both are true.
+          echo "Waiting for /health and /ready on port $PORT"
+          ready=0
+          attempt=0
+          for attempt in $(seq 1 30); do
+            if probe health && probe ready; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" -ne 1 ]]; then
+            # Re-probing /health alone separates the two failures that otherwise
+            # look identical: a process that never started, and one that started
+            # but cannot reach its database.
+            if probe health; then
+              echo "Deploy failed: /health answers but /ready did not within 60s." >&2
+              echo "The app is serving; its database is unreachable or still starting." >&2
+            else
+              echo "Deploy failed: /health did not answer within 60s." >&2
+              echo "The process is not serving HTTP at all - check the logs below for a boot error." >&2
+            fi
+            echo "docker ps for $CONTAINER_NAME:" >&2
+            docker ps -a --filter "name=^/$CONTAINER_NAME$" \
+              --format 'status={{.Status}} ports={{.Ports}}' >&2 || true
+            echo "Last 200 log lines from $CONTAINER_NAME:" >&2
+            docker logs --tail 200 "$CONTAINER_NAME" >&2 || true
+            exit 1
+          fi
+
+          echo "Both probes passed after $attempt attempt(s)."
+
+          # Every deploy pulls a new immutable tag, so without a prune the root
+          # volume fills up and a later release dies mid-pull on a full disk.
+          # The image backing the running container is never removed.
+          docker image prune --all --force --filter 'until=168h' >/dev/null
+
+          echo "Deployed $IMAGE_URI successfully on port $PORT"
+          REMOTE
+          )"
+
+          # `|| status=$?` keeps set -e from ending the step before the exit code
+          # can be named. ssh reports its own transport and authentication
+          # failures as 255 and otherwise passes the remote script's status
+          # through, so the two are worth telling apart in the log.
+          status=0
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+            -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" \
+            bash -s -- "$IMAGE_URI" "$SECRETS_MANAGER_ARN" "$SECRETS_MANAGER_REGION" \
+              "$DOCKER_CONTAINER_NAME" "$ENV_DIR" <<<"$remote_script" || status=$?
+
+          if [[ "$status" -eq 255 ]]; then
+            echo "::error::SSH could not reach or authenticate to $EC2_USER@$EC2_HOST (exit 255)."
+            echo "Check EC2_HOST and EC2_USER, that the security group admits the runner," >&2
+            echo "that EC2_KNOWN_HOSTS still matches the instance host key, and that" >&2
+            echo "EC2_SSH_PRIVATE_KEY is the whole PEM including its BEGIN/END lines." >&2
+            exit "$status"
+          fi
+
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::The deploy script failed on $EC2_HOST (exit $status). See the remote output above."
+            exit "$status"
+          fi
