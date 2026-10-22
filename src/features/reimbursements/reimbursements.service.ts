@@ -129,6 +129,13 @@ export const createReimbursementsService = (deps: {
     }
     const amount = money(Number(row.amount));
     const now = new Date();
+    // Receipts are always mandatory (user decision 2026-10-22): nobody
+    // approves a claim without the file. Declining one stays possible.
+    if (input.decision === 'approve' && !(await repo.receiptInfo([id])).has(id)) {
+      throw createError(422, 'Attach the receipt before this claim can be approved', {
+        code: 'RECEIPT_REQUIRED',
+      });
+    }
 
     if (row.status === 'pending_rm') {
       const owner = await repo.findEmployee(row.employeeId);

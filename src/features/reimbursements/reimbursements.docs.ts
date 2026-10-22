@@ -115,6 +115,7 @@ export const registerReimbursementsDocs = (registry: OpenAPIRegistry): void => {
       200: jsonResponse('Claim', reimbursementClaimSchema),
       403: errorResponse('Not the approver for this step, or your own claim'),
       409: errorResponse('Already decided'),
+      422: errorResponse('Approving a claim with no receipt file (RECEIPT_REQUIRED)'),
     },
   });
 };
