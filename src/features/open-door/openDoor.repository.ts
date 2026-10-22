@@ -18,6 +18,7 @@ import {
   openDoorBookings,
   openDoorRequests,
   openDoorSlots,
+  orgOwner,
 } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 
@@ -200,7 +201,10 @@ export const createOpenDoorRepository = (db: DbClient) => ({
 
   // ── Session requests ──────────────────────────────────────────────────────
 
-  /** Active people at L5–L6 or in `ids` — the hosts a request may go to. */
+  /**
+   * Active people at L5–L6 or in `ids` — the hosts a request may go to. The
+   * Owner-linked administration account is not a person, so never a host.
+   */
   hostCandidates: (ids: string[]) =>
     db.orm
       .select({
@@ -209,9 +213,11 @@ export const createOpenDoorRepository = (db: DbClient) => ({
         designation: employees.designation,
       })
       .from(employees)
+      .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
       .where(
         and(
           eq(employees.status, 'active'),
+          isNull(orgOwner.employeeId),
           ids.length
             ? or(inArray(employees.level, ['L5', 'L6']), inArray(employees.id, ids))
             : inArray(employees.level, ['L5', 'L6']),
