@@ -22,6 +22,8 @@ import {
   isCompanyEmail,
   newClaimToken,
 } from '../../shared/helpers/helpers.js';
+import { logger } from '../../config/logger.js';
+import type { OnboardingService } from '../onboarding/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import { toEmployee } from './employees.dto.js';
 import type { ActorContext, EmployeesRepository } from './employees.repository.js';
@@ -48,14 +50,31 @@ const isFkViolation = (err: unknown): boolean => pgCode(err) === '23503';
  *  - deactivate, never delete (§10) — deactivation happens via the exits flow,
  *    not here;
  *  - new hires get the people.newHireDefaults notice period / probation when
- *    the inviter leaves them blank; claim links live INVITE_LINK_DAYS.
+ *    the inviter leaves them blank; claim links live INVITE_LINK_DAYS;
+ *  - every door that creates a record (or first sets a joining date) starts
+ *    the onboarding journey, so OPS and payroll are told on day one.
  */
 export const createEmployeesService = (deps: {
   repo: EmployeesRepository;
   settings: SettingsReader;
   authz: AuthzRepository;
+  onboarding?: Pick<OnboardingService, 'ensureForNewHire'>;
 }) => {
-  const { repo, settings, authz } = deps;
+  const { repo, settings, authz, onboarding } = deps;
+
+  /**
+   * Start the joiner's onboarding (OPS + payroll hand-off bells). The record
+   * is already committed, so a failure here is logged, never surfaced — the
+   * journey still auto-creates on the joiner's first visit.
+   */
+  const startOnboarding = async (employeeId: string, actor: ActorContext): Promise<void> => {
+    if (!onboarding) return;
+    try {
+      await onboarding.ensureForNewHire(employeeId, actor);
+    } catch (err) {
+      logger.warn({ err, employeeId }, 'onboarding start after intake failed');
+    }
+  };
 
   /** Which intake details a record still lacks (empty = complete). */
   const missingIntake = (row: {
@@ -137,6 +156,7 @@ export const createEmployeesService = (deps: {
         },
         actor,
       );
+      await startOnboarding(row.id, actor);
       return {
         employee: toEmployee(row),
         employeeBatchAttached,
@@ -208,6 +228,7 @@ export const createEmployeesService = (deps: {
         },
         actor,
       );
+      await startOnboarding(row.id, actor);
       return {
         employee: toEmployee(row),
         employeeBatchAttached,
@@ -324,6 +345,9 @@ export const createEmployeesService = (deps: {
       );
       if (!row)
         throw createError(404, 'Employee not found', { code: 'EMPLOYEE_NOT_FOUND' });
+      // A joining date filled in later (incomplete record) starts onboarding
+      // then; ensureForNewHire is a no-op when a journey already exists.
+      if (input.dateOfJoining) await startOnboarding(row.id, actor);
       return toEmployee(row);
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -605,6 +629,7 @@ export const createEmployeesService = (deps: {
       }),
       actor,
     );
+    for (const row of created) await startOnboarding(row.id, actor);
     return {
       dryRun: false,
       valid: true,
