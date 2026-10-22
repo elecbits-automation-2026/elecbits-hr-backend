@@ -212,6 +212,10 @@ export const payrollController = {
     res.json(await service(req).myPayslips(req.auth!.employeeId));
   },
 
+  compensationPeople: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).compensationPeople());
+  },
+
   tdsEstimates: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).tdsEstimates());
   },

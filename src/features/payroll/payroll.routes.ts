@@ -38,6 +38,8 @@ import {
  *   PATCH  /loans/:id                 -> new rate / months left (… update)
  *   POST   /loans/:id/close           -> settled outside payroll (… update)
  *   GET    /loans/mine[/:id]          -> own loans + schedule (me scope)
+ *   GET    /people                    -> Compensation people list, invited joiners
+ *                                        included (pr.payroll.compensation read)
  *   GET    /exits/:exitId/recoveries  -> F&F recovery lines (pr.payroll read)
  *   POST   /exits/:exitId/recoveries  -> add one            (pr.payroll update)
  *   DELETE /exits/:exitId/recoveries/:recoveryId            (pr.payroll update)
@@ -102,6 +104,15 @@ payrollRoutes.delete(
   payrollController.removeExitRecovery,
 );
 payrollRoutes.get('/exits/:exitId/statement', payrollController.exitStatementPdf);
+
+// The Compensation panel's people list: everyone payroll may put on payroll,
+// invited joiners included. Names only, but it is the compensation door's
+// directory, so it sits behind the same child grant.
+payrollRoutes.get(
+  '/people',
+  requireAccess('pr.payroll.compensation', 'read', { orgOnly: true }),
+  payrollController.compensationPeople,
+);
 
 // TDS calculator (ERP sheet's TDS tab). It shows annual CTCs, so BOTH doors
 // sit behind the compensation child module — a plain pr.payroll grant never

@@ -19,6 +19,7 @@ import type {
   PayslipDto,
   SalaryAnnexureDto,
   TdsEstimateDto,
+  CompensationPersonDto,
   UpdatePayslipInput,
   UpdateTdsInput,
 } from './payroll.schema.js';
@@ -1219,6 +1220,15 @@ export const createPayrollService = (deps: {
     await repo.deleteRun(run, actor).catch(mapRunConflict);
   };
 
+  /** Everyone payroll may set a salary for (route gated compensation read, org). */
+  const compensationPeople = async (): Promise<CompensationPersonDto[]> =>
+    (await repo.listCompensationPeople()).map((p) => ({
+      id: p.id,
+      name: p.name,
+      employeeCode: p.employeeCode,
+      status: p.status as CompensationPersonDto['status'],
+    }));
+
   /** The TDS calculator rows — the ERP sheet's TDS tab from live data. */
   const tdsEstimates = async (): Promise<TdsEstimateDto[]> => {
     const fy = fyBounds();
@@ -1652,6 +1662,7 @@ export const createPayrollService = (deps: {
     markPaid,
     deleteRun,
     myPayslips,
+    compensationPeople,
     tdsEstimates,
     updateTds,
     annexure,

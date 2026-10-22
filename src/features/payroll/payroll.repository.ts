@@ -213,6 +213,26 @@ export const createPayrollRepository = (db: DbClient) => ({
       .orderBy(employees.name);
   },
 
+  /** The compensation people list: invited / active / exiting, Owner excluded. */
+  listCompensationPeople: async () => {
+    return db.orm
+      .select({
+        id: employees.id,
+        name: employees.name,
+        employeeCode: employees.employeeCode,
+        status: employees.status,
+      })
+      .from(employees)
+      .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
+      .where(
+        and(
+          inArray(employees.status, ['invited', 'active', 'exiting']),
+          isNull(orgOwner.employeeId),
+        ),
+      )
+      .orderBy(employees.name);
+  },
+
   /** TDS calculator inputs: live people with a CTC on record. */
   listTdsInputs: async () => {
     return db.orm
