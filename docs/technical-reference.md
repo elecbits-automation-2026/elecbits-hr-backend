@@ -436,6 +436,7 @@ All `*org*`.
 | `POST /payroll/runs` · `/runs/:id/regenerate` · `PATCH /runs/:id/payslips/:payslipId` · `/finalize` · `/mark-paid` · `DELETE /runs/:id` | `pr.payroll` create/update/delete | reimbursement is not editable (claims only)                                    |
 | `GET /payroll/corrections` · `POST /payroll/payslips/:id/corrections` · `POST /payroll/corrections/:id/cancel`                          | `pr.payroll` read/update          |                                                                                |
 | `GET /payroll/tds` · `PATCH /payroll/tds/:employeeId` · `GET /payroll/annexure?ctc=&ptState=&variablePay=&basicPercent=&hraPercent=`    | `pr.payroll.compensation`         | annexure refuses Basic + HRA + LTA > 100                                       |
+| `GET /payroll/people`                                                                                                                   | `pr.payroll.compensation` _org_   | Compensation people list: invited / active / exiting, Owner excluded           |
 | `GET /payroll/loans` · `/loans/:loanId` · `POST /payroll/loans` · `PATCH /loans/:loanId` · `POST /loans/:loanId/close`                  | `pr.payroll.compensation`         | record (eligibility: confirmed, full-time, not leaving), re-price, close early |
 | `GET /payroll/loans/mine` · `/loans/mine/:loanId`                                                                                       | auth                              | own loans + schedule                                                           |
 | `GET`/`POST /payroll/exits/:exitId/recoveries` · `GET /payroll/exits/:exitId/statement`                                                 | `pr.payroll` read / update        | F&F recovery lines; the settled statement PDF                                  |
@@ -459,7 +460,7 @@ All `*org*`.
 | `PATCH /goals/:id/progress`                                                                                                 | service                    | owner only, open quarter                                                             |
 | `GET /work-updates/mine` · `/team` · `/team/:employeeId` · `POST /work-updates`                                             | auth / service             | server strip, late entry for a missed day, goal tags                                 |
 | `GET /work-updates/late` · `POST /work-updates/:id/late-decision`                                                           | service                    | the RM's late-entry queue                                                            |
-| `GET /quarter-reports/cycles` · `GET /quarter-reports/cycles/:name` · `/mine` · `/people/:employeeId`                       | auth / service             | what the viewer manages + HR reach; own; person sheet                                |
+| `GET /quarter-reports/cycles` · `GET /quarter-reports/cycles/:name` · `/mine` · `/people/:employeeId`                       | auth / service             | what the viewer manages + HR reach (`?as=rm`: managed only); own; person sheet       |
 | `POST /quarter-reports/cycles/:name/close`                                                                                  | `hrbp.people update` _org_ | `early: true` for the running quarter                                                |
 | `PATCH /quarter-reports/:id/score`                                                                                          | service                    | manager at close or HR reach; never self                                             |
 | `GET /career/mine` · `POST /career/request`                                                                                 | auth                       | self-request minimums apply                                                          |
@@ -515,6 +516,8 @@ All `*org*`.
 | `POST /concerns/follow-up` · `/follow-up/notes`                                                            | auth + code + key (anonymous raiser)                                             |
 | `GET /open-door/slots` · `/me` · `POST /slots/:id/book` · `/bookings/:id/cancel`                           | auth                                                                             |
 | `POST /open-door/slots` · `/slots/:id/cancel` · `/bookings/:id/mark`                                       | service — publishers (`hrbp.grievances update` or level L5–L6); the slot's owner |
+| `GET /open-door/hosts` · `/requests` · `POST /requests` · `/requests/:id/cancel`                           | auth; a concern request needs your own named live case (service)                 |
+| `POST /open-door/requests/:id/offer` · `/requests/:id/decline`                                             | service — the host, or the case's current handlers                               |
 
 ---
 
@@ -530,8 +533,11 @@ period, probation → confirmation date) come from `people.newHireDefaults`. The
 person claims with the single-use token. Level changes write promotion history
 (§5.10).
 
-**Onboarding** (journey per hire, auto-created inside
-`ONBOARDING_AUTO_CREATE_WINDOW_DAYS` (90) of joining): three phases, tasks owned by the
+**Onboarding** (journey per hire): **started the moment HR creates, invites or
+imports a joiner with a joining date — or first sets one later** (2026-10-22),
+so OPS and payroll hear on day one; the joiner's first visit still auto-creates
+it as a fallback. Both doors use `ONBOARDING_AUTO_CREATE_WINDOW_DAYS` (90): an
+older joining date stays a conscious HR start. Three phases, tasks owned by the
 employee, the RM, HR, Admin, **OPS** ("Issue the joiner kit" — done by itself
 when `assets/kit-check` shows every kit line held) and **payroll** ("Salary and
 bank details on record" — done by itself when the salary row has a CTC and
@@ -556,7 +562,9 @@ and the scheduler's reminders (§5.12). Email is out of scope (v2).
 - Quotas (policy v1): sick 6 / earned 18 per year use / menstrual 12 /
   vacation_family 5 / compassionate 3 / unpaid. Earned accrues 1.5/month and
   menstrual 1/month **from the joining month** (the joining month counts);
-  fixed quotas are prorated in the joining year to the nearest half day.
+  sick and vacation_family are prorated in the joining year to the nearest
+  half day. **Compassionate is never prorated** — a joiner gets all 3 (user
+  decision 2026-10-22; rows stored before that keep their old allocation).
 - Application window: earned and vacation_family must be raised
   `leaves.applicationWindowDays` ahead.
 - Dual approval (RM + HR), declines need a reason, an HRBP's own leave skips
@@ -568,6 +576,10 @@ and the scheduler's reminders (§5.12). Email is out of scope (v2).
 ### 5.4 Attendance
 
 - Geo gate over `punch_zones` (any zone, own radius); remote approval lifts it.
+  A refused punch names the nearest zone, the distance and the radius
+  ("You are 1.3 km from Aerocity (allowed 250 m)…"). The web client takes the
+  sharpest fresh fix over ~5 s (never a cached one); Admin → Punch zones can
+  fill lat/lng from the device ("Use my current location").
 - Classifier computes day status: holiday → weekend (Sundays; Saturdays per
   `attendance.workWeek`, e.g. 1st & 3rd off from its start date) → leave →
   remote → punch → absent. Hour rules (`attendance.hourRules`, from their start
@@ -624,9 +636,12 @@ tags, monthly miss allowance with a flag and a one-time RM bell.
 Employee claims → effective RM → org payroll (self-governed / no-RM skip the RM
 step) → approved claims shift open drafts at once and are carried by the next
 draft for the spend month or later → finalize marks them paid. Bells at each
-step; nobody decides their own claim. The claimant can attach the **receipt
-file** (PDF / JPG / PNG, replaceable while the claim is live); the effective RM
-and org payroll open it from their queues.
+step; nobody decides their own claim. The **receipt file is mandatory**
+(user decision 2026-10-22): the new-claim form requires it (PDF / JPG / PNG,
+10 MB) and uploads it with the claim, and approving a claim without one is
+refused at either step (422 `RECEIPT_REQUIRED`; declining still works). It is
+replaceable while the claim is live; the effective RM and org payroll open it
+from their queues.
 
 ### 5.8 R&R
 
@@ -643,7 +658,10 @@ working days, months over the miss allowance, attendance and late check-ins,
 awards, feedback notes, at-risk goals, **PIP candidate** (< 50) and **appraisal
 eligibility** (six months' service by the quarter end). The manager at close (or
 HR whose grant reaches them) sets a final score with a reason; no approval step.
-Employees see their own; the person sheet shows the latest.
+Employees see their own; the person sheet shows the latest. The board on My
+performance passes `?as=rm` (only the viewer's own people); HR → Quarter
+reports keeps the HR reach. My performance and My growth split into
+**Mine | My team** tabs (team tab only for RMs, badge = items waiting).
 
 ### 5.10 Career & growth
 
@@ -720,6 +738,21 @@ Open door: publishers offer slots (date, time, seats, note); anyone books up to
 owner sees; the slot row is locked while booking so the last seat can't be
 taken twice. The owner marks met / no-show after the start; cancelling a slot
 rings every booker.
+
+**Session requests** (`open_door_requests`, migration 0054, 2026-10-22): when no
+slot suits, ask a host (L5–L6 or `hrbp.grievances` holders; never the
+administration account) for a date range, or — the raiser of a **named** live
+concern — ask whoever handles the case now (`concern_id`, host resolved at read
+time; anonymous cases 404). One waiting request per target (409
+`REQUEST_PENDING`). The host offers a time — one transaction creates a 1-seat
+slot booked for the requester — or declines with a reason; the requester may
+withdraw while it waits. Concern requests leave system lines on the case. The
+`open-door-requests` job rings unanswered hosts on the approval-reminder pacing
+(kind `open_door_request`).
+
+**UI**: Concerns, Open door and Requests are tabs of one **Grievances** page
+(`/grievances?tab=concerns|open-door|requests`); `/concerns` and `/open-door`
+redirect there, and bells link to the tabs.
 
 ### 5.14 OPS asset manager
 
