@@ -191,6 +191,15 @@ export const openDoorBookingStatusEnum = pgEnum('open_door_booking_status', [
   'cancelled',
   'no_show',
 ]);
+// A session asked for when no published slot suits (test-pass fix
+// 2026-10-22): the host offers a time (→ offered, a booked 1-seat slot) or
+// declines; the requester may withdraw while it waits.
+export const openDoorRequestStatusEnum = pgEnum('open_door_request_status', [
+  'requested',
+  'offered',
+  'declined',
+  'cancelled',
+]);
 
 // OPS asset manager (user decisions 2026-10-15). An asset always sits in a
 // punch zone; `assigned` means a person also holds it. Scrapped / gifted /

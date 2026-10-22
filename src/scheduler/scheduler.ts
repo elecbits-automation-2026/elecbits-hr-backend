@@ -6,6 +6,7 @@ import {
   createExitsService,
 } from '../features/exits/index.js';
 import { createOpsCustodyReader } from '../features/ops/index.js';
+import { openDoorServiceFor } from '../features/open-door/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/index.js';
@@ -37,6 +38,7 @@ const service = () =>
     }),
     probation: probationServiceFor(db),
     pip: pipServiceFor(db),
+    openDoor: openDoorServiceFor(db),
     concerns: createConcernsService({
       repo: createConcernsRepository(db),
       authz: createAuthzRepository(db),

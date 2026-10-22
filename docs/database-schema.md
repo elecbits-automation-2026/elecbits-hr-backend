@@ -6,13 +6,13 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**70 tables · 46 enums.**
+**71 tables · 47 enums.**
 
 | Schema   | Tables | Holds                                                                                        |
 | -------- | ------ | -------------------------------------------------------------------------------------------- |
 | `access` | 11     | Owner, modules, batches, grants, requests, audit log                                         |
 | `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                               |
-| `org`    | 45     | People, departments, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `org`    | 46     | People, departments, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
 | `public` | 2      | Sign-in identities and refresh tokens                                                        |
 
 ## Enums
@@ -51,6 +51,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `onboarding_status`         | `open`, `done`                                                                        |
 | `onboarding_task_owner`     | `employee`, `hr`, `manager`, `admin`, `ops`, `payroll`                                |
 | `open_door_booking_status`  | `booked`, `done`, `cancelled`, `no_show`                                              |
+| `open_door_request_status`  | `requested`, `offered`, `declined`, `cancelled`                                       |
 | `payroll_run_status`        | `draft`, `finalized`, `paid`                                                          |
 | `payslip_correction_status` | `pending`, `applied`, `cancelled`                                                     |
 | `pip_checkin_rating`        | `on_track`, `at_risk`, `off_track`                                                    |
@@ -889,6 +890,30 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `created_at`  | timestamp with time zone |      | `now()`             |                            |
 
 - Unique index `open_door_bookings_slot_employee_uq` (`slot_id`, `employee_id`)
+
+### open_door_requests
+
+| Column           | Type                     | Null | Default             | Notes                      |
+| ---------------- | ------------------------ | ---- | ------------------- | -------------------------- |
+| `id`             | uuid                     |      | `gen_random_uuid()` | PK                         |
+| `employee_id`    | uuid                     |      |                     | → `org.employees.id`       |
+| `host_id`        | uuid                     | yes  |                     | → `org.employees.id`       |
+| `concern_id`     | uuid                     | yes  |                     | → `org.concerns.id`        |
+| `preferred_from` | date                     |      |                     |                            |
+| `preferred_to`   | date                     |      |                     |                            |
+| `topic`          | text                     | yes  |                     |                            |
+| `status`         | open_door_request_status |      | `requested`         |                            |
+| `slot_id`        | uuid                     | yes  |                     | → `org.open_door_slots.id` |
+| `decline_reason` | text                     | yes  |                     |                            |
+| `decided_by`     | uuid                     | yes  |                     | → `org.employees.id`       |
+| `decided_at`     | timestamp with time zone | yes  |                     |                            |
+| `created_at`     | timestamp with time zone |      | `now()`             |                            |
+
+- Index `open_door_requests_status_idx` (`status`)
+- Index `open_door_requests_employee_idx` (`employee_id`)
+- Index `open_door_requests_host_idx` (`host_id`)
+- Check `open_door_requests_target_ck`: `… IS NOT NULL OR … IS NOT NULL`
+- Check `open_door_requests_range_ck`: `… >= …`
 
 ### open_door_slots
 

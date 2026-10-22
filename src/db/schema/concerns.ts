@@ -19,6 +19,7 @@ import {
   concernStatusEnum,
   concernTrackEnum,
   openDoorBookingStatusEnum,
+  openDoorRequestStatusEnum,
 } from './enums.js';
 
 /**
@@ -135,4 +136,41 @@ export const openDoorBookings = orgSchema.table(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('open_door_bookings_slot_employee_uq').on(t.slotId, t.employeeId)],
+);
+
+/**
+ * "Request a session" (test-pass fix 2026-10-22): asked of a chosen host
+ * (`host_id`), or — for a named concern — of whoever handles the case now
+ * (`concern_id`, host resolved at read time). An offer creates a 1-seat slot
+ * booked for the requester (`slot_id`). The topic is private to the host(s).
+ */
+export const openDoorRequests = orgSchema.table(
+  'open_door_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employees.id),
+    hostId: uuid('host_id').references(() => employees.id),
+    concernId: uuid('concern_id').references(() => concerns.id),
+    preferredFrom: date('preferred_from').notNull(),
+    preferredTo: date('preferred_to').notNull(),
+    topic: text('topic'),
+    status: openDoorRequestStatusEnum('status').notNull().default('requested'),
+    slotId: uuid('slot_id').references(() => openDoorSlots.id),
+    declineReason: text('decline_reason'),
+    decidedBy: uuid('decided_by').references(() => employees.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('open_door_requests_status_idx').on(t.status),
+    index('open_door_requests_employee_idx').on(t.employeeId),
+    index('open_door_requests_host_idx').on(t.hostId),
+    check(
+      'open_door_requests_target_ck',
+      sql`${t.hostId} IS NOT NULL OR ${t.concernId} IS NOT NULL`,
+    ),
+    check('open_door_requests_range_ck', sql`${t.preferredTo} >= ${t.preferredFrom}`),
+  ],
 );

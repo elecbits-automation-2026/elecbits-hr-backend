@@ -6,21 +6,43 @@ import type {
   ActorContext,
   BookingRow,
   OpenDoorRepository,
+  RequestRow,
   SlotRow,
 } from './openDoor.repository.js';
 import type {
   BookInput,
+  CreateRequestInput,
   CreateSlotInput,
+  DeclineRequestInput,
+  HostDto,
   MarkInput,
   MyBookingDto,
+  OfferRequestInput,
   OpenDoorMeDto,
   OwnerSlotDto,
+  RequestDto,
+  RequestsDto,
   SlotDto,
 } from './openDoor.schema.js';
 
-const LINK = '/open-door';
+const LINK = '/grievances?tab=open-door';
+const REQUESTS_LINK = '/grievances?tab=requests';
 const hhmm = (t: string) => t.slice(0, 5);
 const nowHhmm = () => new Date().toTimeString().slice(0, 5);
+
+/**
+ * What open door needs from concerns for "request a meeting about this
+ * case" — injected by the composition root so the dependency stays one-way
+ * (open door → concerns), never a cycle.
+ */
+export interface ConcernMeetings {
+  meetingTarget(
+    id: string,
+    actorId: string,
+  ): Promise<{ id: string; code: string; handlers: string[] }>;
+  handlersFor(id: string): Promise<string[]>;
+  noteMeeting(id: string, body: string, actor: ActorContext): Promise<void>;
+}
 
 /**
  * Open door (Batch 4 — a product feature; no policy covers it). HR
@@ -33,9 +55,14 @@ const nowHhmm = () => new Date().toTimeString().slice(0, 5);
 export const createOpenDoorService = (deps: {
   repo: OpenDoorRepository;
   authz: AuthzRepository;
+  concerns?: ConcernMeetings;
 }) => {
   const { repo, authz } = deps;
   const today = () => localDateOf(new Date());
+  const concerns = (): ConcernMeetings => {
+    if (!deps.concerns) throw new Error('open door built without the concerns port');
+    return deps.concerns;
+  };
 
   const canPublish = async (employeeId: string): Promise<boolean> => {
     const me = await repo.findEmployee(employeeId);
@@ -239,7 +266,312 @@ export const createOpenDoorService = (deps: {
     return me(actor.actorEmployeeId);
   };
 
-  return { slots, me, createSlot, cancelSlot, book, cancelBooking, mark, canPublish };
+  // ── Session requests (test-pass fix 2026-10-22) ──────────────────────────
+  // When no published slot suits, ask: a chosen host, or — for your own named
+  // concern — whoever handles the case now. The answer is an offered time (a
+  // 1-seat slot booked for you) or a decline with a reason.
+
+  /** Who a request may go to: department heads (L5–L6) and HR holding hrbp.grievances. */
+  const hosts = async (viewerId: string): Promise<HostDto[]> => {
+    const hr = await authz.listBroadHolders('hrbp.grievances', 'update');
+    return (await repo.hostCandidates(hr)).filter((h) => h.id !== viewerId);
+  };
+
+  /** Who answers a request: its host, or the case's current handlers. */
+  const answerersOf = async (r: RequestRow): Promise<string[]> =>
+    r.hostId ? [r.hostId] : r.concernId ? concerns().handlersFor(r.concernId) : [];
+
+  const requests = async (viewerId: string): Promise<RequestsDto> => {
+    const [mineRaw, toAnswerRaw] = await Promise.all([
+      repo.requestsOf(viewerId),
+      repo.requestsToAnswer(viewerId),
+    ]);
+    // Concern requests reach this viewer only if they handle that case now.
+    const handlerCache = new Map<string, string[]>();
+    const incomingRaw: RequestRow[] = [];
+    for (const r of toAnswerRaw) {
+      if (r.employeeId === viewerId) continue;
+      if (r.hostId === viewerId) {
+        incomingRaw.push(r);
+        continue;
+      }
+      if (!r.concernId || !deps.concerns) continue;
+      if (!handlerCache.has(r.concernId)) {
+        handlerCache.set(r.concernId, await deps.concerns.handlersFor(r.concernId));
+      }
+      if (handlerCache.get(r.concernId)!.includes(viewerId)) incomingRaw.push(r);
+    }
+    const all = [...mineRaw, ...incomingRaw];
+    const slotIds = all.map((r) => r.slotId).filter((id): id is string => !!id);
+    const [slotRows, codes] = await Promise.all([
+      Promise.all(slotIds.map((id) => repo.findSlot(id))),
+      repo.concernCodes([
+        ...new Set(all.map((r) => r.concernId).filter((id): id is string => !!id)),
+      ]),
+    ]);
+    const slotsById = new Map(
+      slotRows.filter((s): s is SlotRow => !!s).map((s) => [s.id, s]),
+    );
+    const bookings = await repo.bookingsFor([...slotsById.keys()]);
+    const names = await repo.namesByIds([
+      ...new Set(
+        all
+          .flatMap((r) => [r.employeeId, r.hostId, r.decidedBy])
+          .concat([...slotsById.values()].map((s) => s.ownerId))
+          .filter((id): id is string => !!id),
+      ),
+    ]);
+    const person = (id: string | null) => (id ? { id, name: names.get(id) ?? '' } : null);
+    const toDto = (r: RequestRow): RequestDto => {
+      const s = r.slotId ? slotsById.get(r.slotId) : undefined;
+      return {
+        id: r.id,
+        employee: person(r.employeeId)!,
+        host: person(r.hostId),
+        concern: r.concernId
+          ? { id: r.concernId, code: codes.get(r.concernId) ?? '' }
+          : null,
+        preferredFrom: r.preferredFrom,
+        preferredTo: r.preferredTo,
+        topic: r.topic,
+        status: r.status,
+        slot: s ? toSlot(s, names, bookings, r.employeeId) : null,
+        declineReason: r.declineReason,
+        decidedBy: person(r.decidedBy),
+        createdAt: r.createdAt.toISOString(),
+      };
+    };
+    return { mine: mineRaw.map(toDto), incoming: incomingRaw.map(toDto) };
+  };
+
+  const createRequest = async (input: CreateRequestInput, actor: ActorContext) => {
+    const t = today();
+    if (input.preferredFrom < t) {
+      throw createError(422, 'Pick dates from today on', { code: 'PAST_RANGE' });
+    }
+    if (input.preferredTo > addDaysIso(t, OPEN_DOOR_HORIZON_DAYS)) {
+      throw createError(
+        422,
+        `Ask for a time within the next ${OPEN_DOOR_HORIZON_DAYS} days`,
+        { code: 'BEYOND_HORIZON' },
+      );
+    }
+    const pending = (await repo.requestsOf(actor.actorEmployeeId)).find(
+      (r) =>
+        r.status === 'requested' &&
+        ((input.hostId && r.hostId === input.hostId) ||
+          (input.concernId && r.concernId === input.concernId)),
+    );
+    if (pending) {
+      throw createError(409, 'You already have a request waiting there', {
+        code: 'REQUEST_PENDING',
+      });
+    }
+    const who = (await repo.findEmployee(actor.actorEmployeeId))?.name ?? 'Someone';
+    const range = `${input.preferredFrom} → ${input.preferredTo}`;
+    if (input.hostId) {
+      if (input.hostId === actor.actorEmployeeId) {
+        throw createError(422, 'You cannot ask yourself', { code: 'OWN_REQUEST' });
+      }
+      if (!(await canPublish(input.hostId))) {
+        throw createError(422, 'Sessions are held by HR and department heads', {
+          code: 'NOT_A_HOST',
+        });
+      }
+      await repo.insertRequest(
+        {
+          employeeId: actor.actorEmployeeId,
+          hostId: input.hostId,
+          preferredFrom: input.preferredFrom,
+          preferredTo: input.preferredTo,
+          topic: input.topic ?? null,
+        },
+        actor,
+        {
+          to: [input.hostId],
+          event: {
+            type: 'open_door.requested',
+            title: `${who} asked you for an open-door session (${range})`,
+            link: REQUESTS_LINK,
+          },
+        },
+      );
+    } else {
+      const target = await concerns().meetingTarget(
+        input.concernId!,
+        actor.actorEmployeeId,
+      );
+      if (target.handlers.length === 0) {
+        throw createError(422, 'Nobody is handling this case yet — try again shortly', {
+          code: 'NO_HANDLER',
+        });
+      }
+      await repo.insertRequest(
+        {
+          employeeId: actor.actorEmployeeId,
+          concernId: target.id,
+          preferredFrom: input.preferredFrom,
+          preferredTo: input.preferredTo,
+          topic: input.topic ?? null,
+        },
+        actor,
+        {
+          to: target.handlers,
+          event: {
+            type: 'open_door.requested',
+            title: `A meeting was requested on ${target.code} (${range})`,
+            link: REQUESTS_LINK,
+          },
+        },
+      );
+      await concerns().noteMeeting(
+        target.id,
+        `The raiser asked for a meeting (${range}).`,
+        actor,
+      );
+    }
+    return requests(actor.actorEmployeeId);
+  };
+
+  /** A request the caller may answer, still waiting. */
+  const toAnswer = async (id: string, actorId: string): Promise<RequestRow> => {
+    const r = await repo.findRequest(id);
+    if (!r || !(await answerersOf(r)).includes(actorId)) {
+      throw createError(404, 'Request not found', { code: 'REQUEST_NOT_FOUND' });
+    }
+    if (r.status !== 'requested') {
+      throw createError(409, 'This request was already answered', {
+        code: 'REQUEST_CLOSED',
+      });
+    }
+    return r;
+  };
+
+  const offerRequest = async (
+    id: string,
+    input: OfferRequestInput,
+    actor: ActorContext,
+  ) => {
+    const r = await toAnswer(id, actor.actorEmployeeId);
+    if (
+      input.date < today() ||
+      (input.date === today() && input.startTime <= nowHhmm())
+    ) {
+      throw createError(422, 'Pick a time in the future', { code: 'PAST_SLOT' });
+    }
+    const host = (await repo.findEmployee(actor.actorEmployeeId))?.name ?? 'Your host';
+    const when = `${input.date} at ${input.startTime}`;
+    const done = await repo.offer(
+      r,
+      {
+        ownerId: actor.actorEmployeeId,
+        date: input.date,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        note: input.note ?? null,
+      },
+      actor,
+      {
+        to: [r.employeeId],
+        event: {
+          type: 'open_door.offered',
+          title: `${host} set your open-door session for ${when}`,
+          link: REQUESTS_LINK,
+        },
+      },
+    );
+    if (!done) {
+      throw createError(409, 'This request was already answered', {
+        code: 'REQUEST_CLOSED',
+      });
+    }
+    if (r.concernId) {
+      await concerns().noteMeeting(
+        r.concernId,
+        `Meeting set with ${host} on ${when}–${input.endTime}.`,
+        actor,
+      );
+    }
+    return requests(actor.actorEmployeeId);
+  };
+
+  const declineRequest = async (
+    id: string,
+    input: DeclineRequestInput,
+    actor: ActorContext,
+  ) => {
+    const r = await toAnswer(id, actor.actorEmployeeId);
+    const done = await repo.closeRequest(id, 'declined', input.reason, actor, {
+      to: [r.employeeId],
+      event: {
+        type: 'open_door.declined',
+        title: 'Your open-door request was declined',
+        body: input.reason,
+        link: REQUESTS_LINK,
+      },
+    });
+    if (!done) {
+      throw createError(409, 'This request was already answered', {
+        code: 'REQUEST_CLOSED',
+      });
+    }
+    if (r.concernId) {
+      await concerns().noteMeeting(
+        r.concernId,
+        `Meeting request declined: ${input.reason}`,
+        actor,
+      );
+    }
+    return requests(actor.actorEmployeeId);
+  };
+
+  const cancelRequest = async (id: string, actor: ActorContext) => {
+    const r = await repo.findRequest(id);
+    if (!r || r.employeeId !== actor.actorEmployeeId) {
+      throw createError(404, 'Request not found', { code: 'REQUEST_NOT_FOUND' });
+    }
+    const done = await repo.closeRequest(id, 'cancelled', null, actor, {
+      to: await answerersOf(r),
+      event: {
+        type: 'open_door.cancelled',
+        title: 'An open-door request to you was withdrawn',
+        link: REQUESTS_LINK,
+      },
+    });
+    if (!done) {
+      throw createError(409, 'This request was already answered', {
+        code: 'REQUEST_CLOSED',
+      });
+    }
+    return requests(actor.actorEmployeeId);
+  };
+
+  /** Waiting requests with who should answer — the open-door-requests job. */
+  const unanswered = async () => {
+    const out: Array<{ request: RequestRow; answerers: string[] }> = [];
+    for (const r of await repo.openRequests()) {
+      out.push({ request: r, answerers: await answerersOf(r) });
+    }
+    return out;
+  };
+
+  return {
+    slots,
+    me,
+    createSlot,
+    cancelSlot,
+    book,
+    cancelBooking,
+    mark,
+    canPublish,
+    hosts,
+    requests,
+    createRequest,
+    offerRequest,
+    declineRequest,
+    cancelRequest,
+    unanswered,
+  };
 };
 
 export type OpenDoorService = ReturnType<typeof createOpenDoorService>;

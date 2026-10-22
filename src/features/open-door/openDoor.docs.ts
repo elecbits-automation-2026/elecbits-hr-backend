@@ -3,9 +3,14 @@ import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
 import { z } from '../../shared/zod.js';
 import {
   bookSchema,
+  createRequestSchema,
   createSlotSchema,
+  declineRequestSchema,
+  hostSchema,
   markSchema,
   meSchema,
+  offerRequestSchema,
+  requestsSchema,
   slotSchema,
 } from './openDoor.schema.js';
 
@@ -87,6 +92,82 @@ export const registerOpenDoorDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: jsonResponse('Me', meSchema),
       409: errorResponse('Not started or already marked'),
+    },
+  });
+
+  // ── Session requests ────────────────────────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/open-door/hosts',
+    tags,
+    summary:
+      'Who a session request may go to: department heads (L5–L6) and HR (hrbp.grievances)',
+    security: bearer,
+    responses: { 200: jsonResponse('Hosts', z.array(hostSchema)) },
+  });
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/open-door/requests',
+    tags,
+    summary:
+      'My session requests, and the ones I am asked to answer (as host, or as the current handler of a concern)',
+    security: bearer,
+    responses: { 200: jsonResponse('Requests', requestsSchema) },
+  });
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/open-door/requests',
+    tags,
+    summary:
+      'Ask for a session when no slot suits: a host (hostId), or the handlers of my own named concern (concernId)',
+    security: bearer,
+    request: { body: jsonBody(createRequestSchema) },
+    responses: {
+      201: jsonResponse('Requests', requestsSchema),
+      404: errorResponse('Concern not found (anonymous or not yours)'),
+      409: errorResponse('REQUEST_PENDING, CONCERN_CLOSED'),
+      422: errorResponse(
+        'PAST_RANGE, BEYOND_HORIZON, OWN_REQUEST, NOT_A_HOST, NO_HANDLER',
+      ),
+    },
+  });
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/open-door/requests/{id}/offer',
+    tags,
+    summary: 'The host offers a time: a 1-seat slot booked for the requester',
+    security: bearer,
+    request: { body: jsonBody(offerRequestSchema) },
+    responses: {
+      200: jsonResponse('Requests', requestsSchema),
+      404: errorResponse('Not yours to answer'),
+      409: errorResponse('REQUEST_CLOSED'),
+      422: errorResponse('PAST_SLOT'),
+    },
+  });
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/open-door/requests/{id}/decline',
+    tags,
+    summary: 'The host declines, with a reason the requester sees',
+    security: bearer,
+    request: { body: jsonBody(declineRequestSchema) },
+    responses: {
+      200: jsonResponse('Requests', requestsSchema),
+      404: errorResponse('Not yours to answer'),
+      409: errorResponse('REQUEST_CLOSED'),
+    },
+  });
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/open-door/requests/{id}/cancel',
+    tags,
+    summary: 'The requester withdraws a request that is still waiting',
+    security: bearer,
+    responses: {
+      200: jsonResponse('Requests', requestsSchema),
+      404: errorResponse('Not your request'),
+      409: errorResponse('REQUEST_CLOSED'),
     },
   });
 };

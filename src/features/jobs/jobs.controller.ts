@@ -6,6 +6,7 @@ import {
   createExitsService,
 } from '../exits/index.js';
 import { createOpsCustodyReader } from '../ops/index.js';
+import { openDoorServiceFor } from '../open-door/index.js';
 import type { Request, Response } from 'express';
 import { env } from '../../config/env.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
@@ -29,6 +30,7 @@ const service = (req: Request) =>
     }),
     probation: probationServiceFor(req.db),
     pip: pipServiceFor(req.db),
+    openDoor: openDoorServiceFor(req.db),
     concerns: createConcernsService({
       repo: createConcernsRepository(req.db),
       authz: createAuthzRepository(req.db),
