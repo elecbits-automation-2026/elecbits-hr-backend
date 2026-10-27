@@ -53,6 +53,9 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       shift,
       leave,
       selfGoverned,
+      seats,
+      hiringApprover,
+      hasInterviews,
     ] = await Promise.all([
       repo.listBatchNames(employeeId),
       repo.isOwner(employeeId),
@@ -68,6 +71,9 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       (employee.leaveApprover ?? employee.reportsTo)
         ? repo.isOwner((employee.leaveApprover ?? employee.reportsTo)!)
         : Promise.resolve(false),
+      repo.openSeats(employeeId),
+      repo.isHiringApprover(employeeId),
+      repo.hasInterviews(employeeId),
     ]);
     return {
       id: employee.id,
@@ -111,6 +117,9 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       isSuperadmin,
       hasReports,
       selfGoverned,
+      seats,
+      hiringApprover,
+      hasInterviews,
     };
   };
 

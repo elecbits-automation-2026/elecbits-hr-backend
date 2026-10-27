@@ -329,7 +329,8 @@ export const remindersSent = opsSchema.table(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     // leave | remote_work | regularization | reimbursement | late_update | access_request |
-    // nomination | concern_overdue | return_due | return_due_ops | return_escalated
+    // nomination | concern_overdue | return_due | return_due_ops | return_escalated |
+    // hiring_plan:<quarter> (per department) | hiring_plan_due:<quarter> (per recipient)
     kind: text('kind').notNull(),
     subjectId: uuid('subject_id').notNull(),
     recipientId: uuid('recipient_id')

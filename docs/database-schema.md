@@ -6,66 +6,80 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**71 tables · 47 enums.**
+**83 tables · 60 enums.**
 
-| Schema   | Tables | Holds                                                                                        |
-| -------- | ------ | -------------------------------------------------------------------------------------------- |
-| `access` | 11     | Owner, modules, batches, grants, requests, audit log                                         |
-| `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                               |
-| `org`    | 46     | People, departments, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
-| `public` | 2      | Sign-in identities and refresh tokens                                                        |
+| Schema   | Tables | Holds                                                                                               |
+| -------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `access` | 11     | Owner, modules, batches, grants, requests, audit log                                                |
+| `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
+| `org`    | 47     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `public` | 2      | Sign-in identities and refresh tokens                                                               |
+| `ta`     | 11     | Hiring: quarterly plans, requisitions, interview rounds, approvals                                  |
 
 ## Enums
 
-| Enum                        | Values                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `action`                    | `create`, `read`, `update`, `delete`                                                  |
-| `approval_status`           | `pending`, `partially_approved`, `approved`, `declined`, `cancelled`                  |
-| `asset_category_kind`       | `equipment`, `lab`                                                                    |
-| `asset_condition`           | `new`, `good`, `fair`, `damaged`                                                      |
-| `asset_incident_kind`       | `damage`, `loss`, `theft`                                                             |
-| `asset_request_status`      | `open`, `in_progress`, `fulfilled`, `declined`                                        |
-| `asset_request_type`        | `new`, `upgrade`, `replacement`, `repair`, `return`                                   |
-| `asset_status`              | `assigned`, `idle`, `in_use_shared`, `needs_repair`, `scrapped`, `gifted`, `lost`     |
-| `attendance_source`         | `office`, `remote`, `regularized`                                                     |
-| `career_track_status`       | `open`, `met`, `closed`                                                               |
-| `concern_note_kind`         | `note`, `reply`, `decision`, `system`                                                 |
-| `concern_status`            | `open`, `acknowledged`, `investigating`, `decided`, `resolved`, `closed`, `declined`  |
-| `concern_track`             | `dispute`, `complaint`, `whistleblower`                                               |
-| `employee_status`           | `invited`, `active`, `exiting`, `inactive`                                            |
-| `exit_clearance_kind`       | `hr`, `manager`, `ops`, `payroll`                                                     |
-| `exit_kind`                 | `resignation`, `termination`                                                          |
-| `exit_status`               | `submitted`, `accepted`, `relieved`, `settled`, `withdrawn`, `cancelled`              |
-| `feedback_type`             | `appreciation`, `concern`                                                             |
-| `gate_pass_status`          | `requested`, `approved`, `declined`, `returned`                                       |
-| `goal_category`             | `fundamental`, `corporate`, `general`                                                 |
-| `leave_day_part`            | `full`, `first_half`, `second_half`                                                   |
-| `leave_status`              | `pending`, `partially_approved`, `approved`, `declined`, `cancelled`                  |
-| `leave_type`                | `casual`, `sick`, `earned`, `unpaid`, `menstrual`, `vacation_family`, `compassionate` |
-| `level`                     | `L1`, `L2`, `L3`, `L4`, `L5`, `L6`                                                    |
-| `loan_kind`                 | `loan`, `advance`                                                                     |
-| `loan_repayment_kind`       | `emi`, `fnf`, `outside`                                                               |
-| `loan_status`               | `active`, `closed`, `recovered_at_exit`                                               |
-| `notice_shortfall_action`   | `waive`, `recover`                                                                    |
-| `onboarding_phase`          | `before_start`, `week_one`, `first_30`                                                |
-| `onboarding_status`         | `open`, `done`                                                                        |
-| `onboarding_task_owner`     | `employee`, `hr`, `manager`, `admin`, `ops`, `payroll`                                |
-| `open_door_booking_status`  | `booked`, `done`, `cancelled`, `no_show`                                              |
-| `open_door_request_status`  | `requested`, `offered`, `declined`, `cancelled`                                       |
-| `payroll_run_status`        | `draft`, `finalized`, `paid`                                                          |
-| `payslip_correction_status` | `pending`, `applied`, `cancelled`                                                     |
-| `pip_checkin_rating`        | `on_track`, `at_risk`, `off_track`                                                    |
-| `pip_status`                | `pending_hr`, `active`, `passed`, `not_passed`, `cancelled`                           |
-| `policy_category`           | `conduct`, `handbook`, `performance`, `time`, `culture`, `other`                      |
-| `probation_outcome`         | `confirm`, `end`                                                                      |
-| `probation_status`          | `pending`, `recommended`, `confirmed`, `ended`                                        |
-| `recognition_status`        | `pending`, `approved`, `declined`                                                     |
-| `reimbursement_status`      | `pending_rm`, `pending_payroll`, `approved`, `paid`, `declined`, `cancelled`          |
-| `remote_work_type`          | `wfh`, `client_visit`, `remote`                                                       |
-| `request_status`            | `pending`, `approved`, `approved_narrower`, `declined`, `cancelled`                   |
-| `scope`                     | `me`, `team_direct`, `team`, `dept`, `org`                                            |
-| `stock_movement_kind`       | `in`, `issue`, `transfer_out`, `transfer_in`, `adjust`                                |
-| `termination_mode`          | `serve`, `pay_in_lieu`                                                                |
+| Enum                        | Values                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`                    | `create`, `read`, `update`, `delete`                                                                                                                                         |
+| `application_stage`         | `sourced`, `shortlisted`, `interviewing`, `interviewed`, `decision`, `selected`, `offered`, `hired`, `offer_declined`, `offer_withdrawn`, `no_show`, `rejected`, `withdrawn` |
+| `approval_decision`         | `approve`, `reject`                                                                                                                                                          |
+| `approval_status`           | `pending`, `partially_approved`, `approved`, `declined`, `cancelled`                                                                                                         |
+| `approval_subject`          | `requisition`, `jd`, `scorecard`, `hire`                                                                                                                                     |
+| `approver_role`             | `ta_head`, `hr_head`, `admin`, `dept_head`, `ta_rm`                                                                                                                          |
+| `asset_category_kind`       | `equipment`, `lab`                                                                                                                                                           |
+| `asset_condition`           | `new`, `good`, `fair`, `damaged`                                                                                                                                             |
+| `asset_incident_kind`       | `damage`, `loss`, `theft`                                                                                                                                                    |
+| `asset_request_status`      | `open`, `in_progress`, `fulfilled`, `declined`                                                                                                                               |
+| `asset_request_type`        | `new`, `upgrade`, `replacement`, `repair`, `return`                                                                                                                          |
+| `asset_status`              | `assigned`, `idle`, `in_use_shared`, `needs_repair`, `scrapped`, `gifted`, `lost`                                                                                            |
+| `attendance_source`         | `office`, `remote`, `regularized`                                                                                                                                            |
+| `bgv_status`                | `not_started`, `in_progress`, `clear`, `failed`                                                                                                                              |
+| `candidate_source`          | `naukri`, `linkedin`, `internshala`, `careers_page`, `agency`, `campus`, `social`, `referral`, `internal`, `other`                                                           |
+| `career_track_status`       | `open`, `met`, `closed`                                                                                                                                                      |
+| `concern_note_kind`         | `note`, `reply`, `decision`, `system`                                                                                                                                        |
+| `concern_status`            | `open`, `acknowledged`, `investigating`, `decided`, `resolved`, `closed`, `declined`                                                                                         |
+| `concern_track`             | `dispute`, `complaint`, `whistleblower`                                                                                                                                      |
+| `employee_status`           | `invited`, `active`, `exiting`, `inactive`                                                                                                                                   |
+| `exit_clearance_kind`       | `hr`, `manager`, `ops`, `payroll`                                                                                                                                            |
+| `exit_kind`                 | `resignation`, `termination`                                                                                                                                                 |
+| `exit_status`               | `submitted`, `accepted`, `relieved`, `settled`, `withdrawn`, `cancelled`                                                                                                     |
+| `feedback_type`             | `appreciation`, `concern`                                                                                                                                                    |
+| `gate_pass_status`          | `requested`, `approved`, `declined`, `returned`                                                                                                                              |
+| `goal_category`             | `fundamental`, `corporate`, `general`                                                                                                                                        |
+| `interview_recommendation`  | `hire`, `no_hire`                                                                                                                                                            |
+| `interview_round`           | `hr`, `technical`, `practical`, `managerial`, `hr_final`                                                                                                                     |
+| `leave_day_part`            | `full`, `first_half`, `second_half`                                                                                                                                          |
+| `leave_status`              | `pending`, `partially_approved`, `approved`, `declined`, `cancelled`                                                                                                         |
+| `leave_type`                | `casual`, `sick`, `earned`, `unpaid`, `menstrual`, `vacation_family`, `compassionate`                                                                                        |
+| `level`                     | `L1`, `L2`, `L3`, `L4`, `L5`, `L6`                                                                                                                                           |
+| `loan_kind`                 | `loan`, `advance`                                                                                                                                                            |
+| `loan_repayment_kind`       | `emi`, `fnf`, `outside`                                                                                                                                                      |
+| `loan_status`               | `active`, `closed`, `recovered_at_exit`                                                                                                                                      |
+| `notice_shortfall_action`   | `waive`, `recover`                                                                                                                                                           |
+| `onboarding_phase`          | `before_start`, `week_one`, `first_30`                                                                                                                                       |
+| `onboarding_status`         | `open`, `done`                                                                                                                                                               |
+| `onboarding_task_owner`     | `employee`, `hr`, `manager`, `admin`, `ops`, `payroll`                                                                                                                       |
+| `open_door_booking_status`  | `booked`, `done`, `cancelled`, `no_show`                                                                                                                                     |
+| `open_door_request_status`  | `requested`, `offered`, `declined`, `cancelled`                                                                                                                              |
+| `payroll_run_status`        | `draft`, `finalized`, `paid`                                                                                                                                                 |
+| `payslip_correction_status` | `pending`, `applied`, `cancelled`                                                                                                                                            |
+| `pip_checkin_rating`        | `on_track`, `at_risk`, `off_track`                                                                                                                                           |
+| `pip_status`                | `pending_hr`, `active`, `passed`, `not_passed`, `cancelled`                                                                                                                  |
+| `policy_category`           | `conduct`, `handbook`, `performance`, `time`, `culture`, `other`                                                                                                             |
+| `position_status`           | `awaiting_docs`, `open`, `interviewing`, `offer`, `filled`, `cancelled`                                                                                                      |
+| `probation_outcome`         | `confirm`, `end`                                                                                                                                                             |
+| `probation_status`          | `pending`, `recommended`, `confirmed`, `ended`                                                                                                                               |
+| `recognition_status`        | `pending`, `approved`, `declined`                                                                                                                                            |
+| `reimbursement_status`      | `pending_rm`, `pending_payroll`, `approved`, `paid`, `declined`, `cancelled`                                                                                                 |
+| `remote_work_type`          | `wfh`, `client_visit`, `remote`                                                                                                                                              |
+| `request_status`            | `pending`, `approved`, `approved_narrower`, `declined`, `cancelled`                                                                                                          |
+| `requisition_status`        | `draft`, `queued`, `submitted`, `returned`, `approved`, `cancelled`                                                                                                          |
+| `scope`                     | `me`, `team_direct`, `team`, `dept`, `org`                                                                                                                                   |
+| `seat`                      | `dept_head`, `vp_hr_head`, `ta_head`                                                                                                                                         |
+| `stock_movement_kind`       | `in`, `issue`, `transfer_out`, `transfer_in`, `adjust`                                                                                                                       |
+| `ta_document_kind`          | `jd`, `scorecard`                                                                                                                                                            |
+| `ta_document_status`        | `draft`, `in_review`, `returned`, `approved`                                                                                                                                 |
+| `termination_mode`          | `serve`, `pay_in_lieu`                                                                                                                                                       |
 
 ## `access`
 
@@ -721,11 +735,13 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `weight`      | numeric(5, 1)            |      |                     |                          |
 | `progress`    | integer                  |      | `0`                 |                          |
 | `due_on`      | date                     |      |                     |                          |
+| `position_id` | uuid                     | yes  |                     | → `ta.positions.id`      |
 | `created_by`  | uuid                     |      |                     | → `org.employees.id`     |
 | `created_at`  | timestamp with time zone |      | `now()`             |                          |
 | `updated_at`  | timestamp with time zone |      | `now()`             |                          |
 
 - Index `goals_employee_cycle_idx` (`employee_id`, `cycle_id`)
+- Unique index `goals_position_cycle_uq` (`position_id`, `cycle_id`) where `… IS NOT NULL`
 
 ### holidays
 
@@ -1250,6 +1266,26 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `closed_by`  | uuid                     | yes  |                     | → `org.employees.id` |
 | `created_at` | timestamp with time zone |      | `now()`             |                      |
 
+### seats
+
+| Column          | Type                     | Null | Default             | Notes                  |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `seat`          | seat                     |      |                     |                        |
+| `department_id` | uuid                     | yes  |                     | → `org.departments.id` |
+| `employee_id`   | uuid                     |      |                     | → `org.employees.id`   |
+| `acting`        | boolean                  |      | `false`             |                        |
+| `assigned_by`   | uuid                     | yes  |                     | → `org.employees.id`   |
+| `started_at`    | timestamp with time zone |      | `now()`             |                        |
+| `ended_at`      | timestamp with time zone | yes  |                     |                        |
+| `ended_reason`  | text                     | yes  |                     |                        |
+| `ended_by`      | uuid                     | yes  |                     | → `org.employees.id`   |
+
+- Unique index `seats_open_dept_uq` (`seat`, `department_id`) where `… IS NULL AND … IS NOT NULL`
+- Unique index `seats_open_org_uq` (`seat`) where `… IS NULL AND … IS NULL`
+- Index `seats_employee_idx` (`employee_id`)
+- Check `seats_department_ck`: `(… = 'dept_head') = (… IS NOT NULL)`
+
 ### wfh_requests
 
 | Column            | Type                     | Null | Default             | Notes                |
@@ -1337,3 +1373,201 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `updated_at`    | timestamp with time zone |      | `now()`             |                               |
 
 - Index `users_email_idx` (`email`)
+
+## `ta`
+
+### applications
+
+| Column                  | Type                     | Null | Default             | Notes                |
+| ----------------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`                    | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `candidate_id`          | uuid                     |      |                     | → `ta.candidates.id` |
+| `position_id`           | uuid                     |      |                     | → `ta.positions.id`  |
+| `stage`                 | application_stage        |      | `sourced`           |                      |
+| `shortlisted_by`        | uuid                     | yes  |                     | → `org.employees.id` |
+| `shortlisted_at`        | timestamp with time zone | yes  |                     |                      |
+| `interviews_started_at` | timestamp with time zone | yes  |                     |                      |
+| `outcome_reason`        | text                     | yes  |                     |                      |
+| `decision_started_at`   | timestamp with time zone | yes  |                     |                      |
+| `selected_at`           | timestamp with time zone | yes  |                     |                      |
+| `offered_ctc`           | numeric(12, 2)           | yes  |                     |                      |
+| `joining_date`          | date                     | yes  |                     |                      |
+| `offered_at`            | timestamp with time zone | yes  |                     |                      |
+| `bgv_status`            | bgv_status               |      | `not_started`       |                      |
+| `bgv_notes`             | text                     | yes  |                     |                      |
+| `bgv_updated_at`        | timestamp with time zone | yes  |                     |                      |
+| `employee_id`           | uuid                     | yes  |                     | → `org.employees.id` |
+| `hired_at`              | timestamp with time zone | yes  |                     |                      |
+| `created_by`            | uuid                     |      |                     | → `org.employees.id` |
+| `created_at`            | timestamp with time zone |      | `now()`             |                      |
+| `updated_at`            | timestamp with time zone |      | `now()`             |                      |
+
+- Unique index `applications_candidate_position_uq` (`candidate_id`, `position_id`)
+- Index `applications_position_idx` (`position_id`)
+
+### approvals
+
+| Column         | Type                     | Null | Default             | Notes                |
+| -------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`           | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `subject_kind` | approval_subject         |      |                     |                      |
+| `subject_id`   | uuid                     |      |                     |                      |
+| `version`      | integer                  |      |                     |                      |
+| `role`         | approver_role            |      |                     |                      |
+| `decided_by`   | uuid                     |      |                     | → `org.employees.id` |
+| `decision`     | approval_decision        |      |                     |                      |
+| `reason`       | text                     | yes  |                     |                      |
+| `decided_at`   | timestamp with time zone |      | `now()`             |                      |
+
+- Unique index `ta_approvals_uq` (`subject_kind`, `subject_id`, `version`, `role`)
+- Check `ta_approvals_reason_ck`: `… = 'approve' OR coalesce(btrim(…), '') <> ''`
+
+### candidate_cvs
+
+| Column         | Type                     | Null | Default | Notes                     |
+| -------------- | ------------------------ | ---- | ------- | ------------------------- |
+| `candidate_id` | uuid                     |      |         | PK · → `ta.candidates.id` |
+| `file_name`    | text                     |      |         |                           |
+| `content_type` | text                     |      |         |                           |
+| `size_bytes`   | integer                  |      |         |                           |
+| `data`         | bytea                    |      |         |                           |
+| `uploaded_by`  | uuid                     |      |         | → `org.employees.id`      |
+| `uploaded_at`  | timestamp with time zone |      | `now()` |                           |
+
+### candidates
+
+| Column          | Type                     | Null | Default             | Notes                |
+| --------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `name`          | text                     |      |                     |                      |
+| `email`         | text                     | yes  |                     |                      |
+| `phone`         | text                     | yes  |                     |                      |
+| `source`        | candidate_source         |      |                     |                      |
+| `referred_by`   | uuid                     | yes  |                     | → `org.employees.id` |
+| `notes`         | text                     | yes  |                     |                      |
+| `consent_at`    | timestamp with time zone |      |                     |                      |
+| `retain_until`  | date                     |      |                     |                      |
+| `anonymised_at` | timestamp with time zone | yes  |                     |                      |
+| `created_by`    | uuid                     |      |                     | → `org.employees.id` |
+| `created_at`    | timestamp with time zone |      | `now()`             |                      |
+| `updated_at`    | timestamp with time zone |      | `now()`             |                      |
+
+- Unique index `candidates_email_uq` (`email`) where `… IS NOT NULL`
+- Index `candidates_phone_idx` (`phone`)
+
+### documents
+
+| Column           | Type                     | Null | Default             | Notes                  |
+| ---------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`             | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `requisition_id` | uuid                     |      |                     | → `ta.requisitions.id` |
+| `kind`           | ta_document_kind         |      |                     |                        |
+| `version`        | integer                  |      | `1`                 |                        |
+| `status`         | ta_document_status       |      | `draft`             |                        |
+| `content`        | jsonb                    |      |                     |                        |
+| `written_by`     | uuid                     |      |                     | → `org.employees.id`   |
+| `submitted_at`   | timestamp with time zone | yes  |                     |                        |
+| `return_reason`  | text                     | yes  |                     |                        |
+| `approved_at`    | timestamp with time zone | yes  |                     |                        |
+| `created_at`     | timestamp with time zone |      | `now()`             |                        |
+| `updated_at`     | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `ta_documents_req_kind_uq` (`requisition_id`, `kind`)
+
+### hiring_plans
+
+| Column          | Type                     | Null | Default             | Notes                  |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `department_id` | uuid                     |      |                     | → `org.departments.id` |
+| `quarter`       | text                     |      |                     |                        |
+| `created_by`    | uuid                     | yes  |                     | → `org.employees.id`   |
+| `created_at`    | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `hiring_plans_dept_quarter_uq` (`department_id`, `quarter`)
+
+### interview_scores
+
+| Column           | Type                     | Null | Default             | Notes                  |
+| ---------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`             | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `application_id` | uuid                     |      |                     | → `ta.applications.id` |
+| `round`          | interview_round          |      |                     |                        |
+| `interviewer_id` | uuid                     |      |                     | → `org.employees.id`   |
+| `scores`         | jsonb                    |      |                     |                        |
+| `recommendation` | interview_recommendation |      |                     |                        |
+| `notes`          | text                     | yes  |                     |                        |
+| `submitted_at`   | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `interview_scores_app_round_uq` (`application_id`, `round`)
+
+### offer_letters
+
+| Column           | Type                     | Null | Default | Notes                       |
+| ---------------- | ------------------------ | ---- | ------- | --------------------------- |
+| `application_id` | uuid                     |      |         | PK · → `ta.applications.id` |
+| `file_name`      | text                     |      |         |                             |
+| `content_type`   | text                     |      |         |                             |
+| `size_bytes`     | integer                  |      |         |                             |
+| `data`           | bytea                    |      |         |                             |
+| `uploaded_by`    | uuid                     |      |         | → `org.employees.id`        |
+| `uploaded_at`    | timestamp with time zone |      | `now()` |                             |
+
+### positions
+
+| Column           | Type                     | Null | Default             | Notes                  |
+| ---------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`             | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `requisition_id` | uuid                     |      |                     | → `ta.requisitions.id` |
+| `number`         | integer                  |      |                     |                        |
+| `status`         | position_status          |      | `awaiting_docs`     |                        |
+| `recruiter_id`   | uuid                     | yes  |                     | → `org.employees.id`   |
+| `opened_at`      | timestamp with time zone | yes  |                     |                        |
+| `created_at`     | timestamp with time zone |      | `now()`             |                        |
+| `updated_at`     | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `positions_req_number_uq` (`requisition_id`, `number`)
+
+### requisition_rounds
+
+| Column           | Type            | Null | Default             | Notes                  |
+| ---------------- | --------------- | ---- | ------------------- | ---------------------- |
+| `id`             | uuid            |      | `gen_random_uuid()` | PK                     |
+| `requisition_id` | uuid            |      |                     | → `ta.requisitions.id` |
+| `round`          | interview_round |      |                     |                        |
+| `interviewer_id` | uuid            | yes  |                     | → `org.employees.id`   |
+
+- Unique index `requisition_rounds_uq` (`requisition_id`, `round`)
+
+### requisitions
+
+| Column                | Type                     | Null | Default             | Notes                  |
+| --------------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`                  | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `plan_id`             | uuid                     | yes  |                     | → `ta.hiring_plans.id` |
+| `department_id`       | uuid                     |      |                     | → `org.departments.id` |
+| `role_title`          | text                     |      |                     |                        |
+| `quantity`            | integer                  |      |                     |                        |
+| `notes`               | text                     | yes  |                     |                        |
+| `budget_min`          | numeric(12, 2)           | yes  |                     |                        |
+| `budget_max`          | numeric(12, 2)           | yes  |                     |                        |
+| `version`             | integer                  |      | `1`                 |                        |
+| `status`              | requisition_status       |      | `draft`             |                        |
+| `urgent`              | boolean                  |      | `false`             |                        |
+| `urgent_requested_by` | uuid                     | yes  |                     | → `org.employees.id`   |
+| `created_by`          | uuid                     |      |                     | → `org.employees.id`   |
+| `submitted_by`        | uuid                     | yes  |                     | → `org.employees.id`   |
+| `submitted_at`        | timestamp with time zone | yes  |                     |                        |
+| `return_reason`       | text                     | yes  |                     |                        |
+| `approved_at`         | timestamp with time zone | yes  |                     |                        |
+| `ta_rm_id`            | uuid                     | yes  |                     | → `org.employees.id`   |
+| `ta_rm_assigned_at`   | timestamp with time zone | yes  |                     |                        |
+| `ta_rm_assigned_by`   | uuid                     | yes  |                     | → `org.employees.id`   |
+| `created_at`          | timestamp with time zone |      | `now()`             |                        |
+| `updated_at`          | timestamp with time zone |      | `now()`             |                        |
+
+- Index `requisitions_ta_rm_idx` (`ta_rm_id`)
+- Index `requisitions_status_idx` (`status`)
+- Index `requisitions_plan_idx` (`plan_id`)
+- Check `requisitions_quantity_ck`: `… BETWEEN 1 AND 50`
+- Check `requisitions_budget_ck`: `… IS NULL OR (… > 0 AND … >= …)`

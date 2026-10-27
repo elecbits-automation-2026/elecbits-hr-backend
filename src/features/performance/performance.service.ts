@@ -106,6 +106,7 @@ const toGoal = (row: GoalRow, names: Map<string, string>): GoalDto => ({
   weight: Number(row.weight),
   progress: row.progress,
   dueOn: row.dueOn,
+  positionId: row.positionId,
   createdByName: names.get(row.createdBy) ?? null,
   createdAt: row.createdAt.toISOString(),
 });
@@ -150,6 +151,19 @@ export const createPerformanceService = (deps: {
   const selfGoverned = createSelfGovernance(authz);
   /** Goals and work updates are people data: HR opens them with hrbp.people. */
   const PEOPLE_HR: HrDoor = { moduleKey: 'hrbp.people', action: 'update' };
+
+  /**
+   * A recruiter's hiring goal (TA design) is linked to a position: its stage
+   * drives the progress, and assignment happens in hiring — so the goals
+   * page never edits, deletes or moves it.
+   */
+  const refuseHiringGoal = (goal: GoalRow): void => {
+    if (goal.positionId) {
+      throw createError(409, 'This is a hiring goal — it follows its position in Hiring', {
+        code: 'HIRING_GOAL',
+      });
+    }
+  };
 
   /** A closed quarter (HR closed it early) takes no new goals. */
   const requireOpen = (cycle: CycleRow): void => {
@@ -264,6 +278,7 @@ export const createPerformanceService = (deps: {
    * and only while the goal's cycle is the open (current) quarter.
    */
   const requireGoalEditor = async (goal: GoalRow, actor: ActorContext): Promise<void> => {
+    refuseHiringGoal(goal);
     const cycle = await currentCycle();
     if (goal.cycleId !== cycle.id || cycle.closedAt) {
       throw createError(
@@ -333,6 +348,7 @@ export const createPerformanceService = (deps: {
   ): Promise<GoalDto> => {
     const goal = await repo.findGoal(goalId);
     if (!goal) throw createError(404, 'Goal not found', { code: 'GOAL_NOT_FOUND' });
+    refuseHiringGoal(goal);
     if (goal.employeeId !== actor.actorEmployeeId) {
       throw createError(403, 'Only the person who owns a goal moves its progress', {
         code: 'OWNER_ONLY',

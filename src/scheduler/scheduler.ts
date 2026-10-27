@@ -15,6 +15,7 @@ import {
   createConcernsRepository,
   createConcernsService,
 } from '../features/concerns/index.js';
+import { hiringJobsFor } from '../features/hiring/index.js';
 import { createJobsRepository, createJobsService } from '../features/jobs/index.js';
 import { createSettingsRepository } from '../features/settings/index.js';
 
@@ -38,6 +39,7 @@ const service = () =>
     }),
     probation: probationServiceFor(db),
     pip: pipServiceFor(db),
+    hiring: hiringJobsFor(db),
     openDoor: openDoorServiceFor(db),
     concerns: createConcernsService({
       repo: createConcernsRepository(db),

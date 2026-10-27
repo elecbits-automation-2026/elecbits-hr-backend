@@ -1,0 +1,3 @@
+ALTER TABLE "ta"."requisitions" ADD COLUMN "budget_min" numeric(12, 2);--> statement-breakpoint
+ALTER TABLE "ta"."requisitions" ADD COLUMN "budget_max" numeric(12, 2);--> statement-breakpoint
+ALTER TABLE "ta"."requisitions" ADD CONSTRAINT "requisitions_budget_ck" CHECK ("ta"."requisitions"."budget_min" IS NULL OR ("ta"."requisitions"."budget_min" > 0 AND "ta"."requisitions"."budget_max" >= "ta"."requisitions"."budget_min"));

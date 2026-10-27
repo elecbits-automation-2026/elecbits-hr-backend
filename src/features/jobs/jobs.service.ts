@@ -16,6 +16,7 @@ import type { ExitsService } from '../exits/index.js';
 import type { OpenDoorService } from '../open-door/index.js';
 import type { ProbationService } from '../probation/index.js';
 import type { PipService } from '../pip/index.js';
+import type { HiringJobsService } from '../hiring/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { JobRunRow, JobsRepository, ReminderToSend } from './jobs.repository.js';
 import type { JobDto, JobRunDto } from './jobs.schema.js';
@@ -59,8 +60,10 @@ export const createJobsService = (deps: {
   exits: ExitsService;
   probation: ProbationService;
   pip: PipService;
+  hiring: HiringJobsService;
 }) => {
-  const { repo, authz, settings, concerns, openDoor, exits, probation, pip } = deps;
+  const { repo, authz, settings, concerns, openDoor, exits, probation, pip, hiring } =
+    deps;
 
   const approvalReminders = async (now: Date): Promise<Record<string, number>> => {
     const today = localDate(now);
@@ -456,7 +459,7 @@ export const createJobsService = (deps: {
     },
     'exit-day': {
       description:
-        "On a leaver's last working day asks for the exit interview and tells OPS; afterwards relieves them (login off, open requests cancelled, team without an RM — HR told).",
+        "On a leaver's last working day asks for the exit interview and tells OPS; afterwards relieves them (login off, open requests cancelled, team without an RM, seats they held ended — HR told).",
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => exits.daily(now),
     },
@@ -477,6 +480,24 @@ export const createJobsService = (deps: {
         'Asks holders of overdue lab loans and gate-pass items whether they are back; escalates to OPS and the RM.',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: returnReminders,
+    },
+    'hiring-plan-window': {
+      description:
+        'Before each quarter, reminds department heads (once) to add their hiring needs by the deadline; after it, sends every submitted line to the HR head and Admin together and moves leftover drafts to the next quarter (setting hiring.planWindow).',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.planWindow(now),
+    },
+    'talent-pool-retention': {
+      description:
+        'Anonymises candidates 6 months after they were last considered, when nothing is in play and they were never hired: name, contact, CV, notes and offer letters go; the counts stay.',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.retention(now),
+    },
+    'hiring-goals': {
+      description:
+        "Carries a recruiter's hiring goal into the current quarter for every position still being worked (same weight, progress from the position's stage).",
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.carryOver(now),
     },
   };
 

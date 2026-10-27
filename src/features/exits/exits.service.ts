@@ -3,6 +3,7 @@ import { addDaysIso, hasOrgScope, localDateOf } from '../../shared/helpers/helpe
 import { reachesIn, type PeopleScope } from '../access/index.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import type { OpsCustodyReader } from '../ops/index.js';
+import type { SeatKind } from '../seats/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { ExitsFnf } from './exits.fnf.js';
 import { renderExitLetter } from './exits.letters.js';
@@ -31,6 +32,8 @@ import {
 const LINK_HR = '/hr/exits';
 const LINK_ME = '/resignation';
 const LINK_TEAM = '/my-team';
+const SEAT_LABEL = (seat: SeatKind, department: string | null) =>
+  seat === 'dept_head' ? `head for ${department ?? 'a department'}` : 'VP';
 const LIVE: ExitRow['status'][] = ['submitted', 'accepted', 'relieved'];
 const today = () => localDateOf(new Date());
 const daysBetween = (a: string, b: string) =>
@@ -872,6 +875,7 @@ export const createExitsService = (deps: {
     }
     let relieved = 0;
     let orphaned = 0;
+    let emptied = 0;
     for (const x of await repo.dueToRelieve(t)) {
       const res = await repo.relieve(x, system);
       if (!res.ok) continue;
@@ -891,8 +895,24 @@ export const createExitsService = (deps: {
           },
         ]);
       }
+      if (res.emptySeats.length) {
+        emptied += res.emptySeats.length;
+        const leaver = await repo.person(x.employee_id);
+        const admin = await repo.ownerEmployeeId();
+        const names = res.emptySeats.map((s) => SEAT_LABEL(s.seat, s.department_name));
+        await repo.transition(x.id, ['relieved'], {}, system, 'exit.seat_empty', [
+          {
+            to: admin ? [admin] : [],
+            event: {
+              type: 'exit.seat_empty',
+              title: `${leaver?.name ?? 'A leaver'} has left — assign an acting ${names.join(', ')}`,
+              link: '/admin/seats',
+            },
+          },
+        ]);
+      }
     }
-    return { lastDay: reminded, relieved, orphaned };
+    return { lastDay: reminded, relieved, orphaned, emptied };
   };
 
   return {

@@ -9,6 +9,7 @@ import {
 } from '../../db/schema/index.js';
 import { revokeEmployeeRefreshTokens } from '../auth/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
+import { endSeatsOfLeaver, type SeatKind } from '../seats/index.js';
 
 export type ExitRow = typeof exits.$inferSelect;
 export type ClearanceRow = typeof exitClearances.$inferSelect;
@@ -62,6 +63,12 @@ const ring = async (tx: DbClient, bells: Bell[] = []) => {
 
 /** The only place the exits feature touches the database. */
 export const createExitsRepository = (db: DbClient) => ({
+  /** The Admin (Owner) account — it assigns seats, so it hears about emptied ones. */
+  ownerEmployeeId: async (): Promise<string | null> =>
+    (
+      await db.query<{ employee_id: string }>(`SELECT employee_id FROM access.org_owner`)
+    )[0]?.employee_id ?? null,
+
   person: async (id: string): Promise<ExitPerson | undefined> =>
     (
       await db.query<ExitPerson>(
@@ -274,19 +281,24 @@ export const createExitsRepository = (db: DbClient) => ({
    * Relieve one leaver after their last working day, all in one transaction:
    * login off (status inactive + every refresh token revoked), their pending
    * requests cancelled, and their team left without an RM — the team's
-   * waiting RM approvals fall to HR. Returns who lost their RM.
+   * waiting RM approvals fall to HR; any seat they held ends. Returns who lost
+   * their RM and which seats are now empty.
    */
   relieve: (
     exit: { id: string; employee_id: string },
     actor: ActorContext,
-  ): Promise<{ ok: boolean; orphans: Array<{ id: string; name: string }> }> =>
+  ): Promise<{
+    ok: boolean;
+    orphans: Array<{ id: string; name: string }>;
+    emptySeats: Array<{ seat: SeatKind; department_name: string | null }>;
+  }> =>
     db.transaction(async (tx) => {
       const moved = await tx.query<{ id: string }>(
         `UPDATE org.exits SET status = 'relieved', relieved_at = now(), updated_at = now()
           WHERE id = $1 AND status = 'accepted' RETURNING id`,
         [exit.id],
       );
-      if (!moved[0]) return { ok: false, orphans: [] };
+      if (!moved[0]) return { ok: false, orphans: [], emptySeats: [] };
       const who = exit.employee_id;
       await tx.query(
         `UPDATE org.employees SET status = 'inactive', updated_at = now() WHERE id = $1`,
@@ -361,7 +373,9 @@ export const createExitsRepository = (db: DbClient) => ({
       await audit(tx, actor, 'exit.relieved', exit.id, {
         orphanedReports: orphans.length,
       });
-      return { ok: true, orphans };
+      // Seats they held (dept head, VP) end; HR assigns an acting holder.
+      const emptySeats = await endSeatsOfLeaver(tx, who);
+      return { ok: true, orphans, emptySeats };
     }),
 
   saveInterview: (
