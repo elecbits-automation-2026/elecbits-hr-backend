@@ -340,7 +340,11 @@ export const requisitionStatusEnum = pgEnum('requisition_status', [
   'returned',
   'approved',
   'cancelled',
+  // HRBP turned it down for good (2026-10-27); "returned" still means "fix and resubmit".
+  'rejected',
 ]);
+// How urgent a hiring request is (TA workflow deck, 2026-10-27).
+export const hiringPriorityEnum = pgEnum('hiring_priority', ['high', 'normal', 'low']);
 // The TA doc's five interview rounds; the head picks which apply.
 export const interviewRoundEnum = pgEnum('interview_round', [
   'hr',
@@ -358,6 +362,8 @@ export const approverRoleEnum = pgEnum('approver_role', [
   'admin',
   'dept_head',
   'ta_rm',
+  // Any HRBP-batch holder approves a hiring request (2026-10-27).
+  'hrbp',
 ]);
 // What an approval is about — later TA steps add their documents and decisions.
 export const approvalSubjectEnum = pgEnum('approval_subject', [
@@ -419,10 +425,38 @@ export const applicationStageEnum = pgEnum('application_stage', [
   'no_show',
   'rejected',
   'withdrawn',
+  // HRBP confirmed the actual joining (workflow deck: accepted ≠ joined, 2026-10-27).
+  'joined',
+]);
+// The offer's terms, approved and signed by the HR Head before TA shares them.
+export const offerStatusEnum = pgEnum('offer_status', ['draft', 'pending', 'approved', 'returned']);
+// A document asked of the candidate after the last round.
+export const candidateDocStatusEnum = pgEnum('candidate_doc_status', [
+  'requested',
+  'received',
+  'not_applicable',
 ]);
 export const interviewRecommendationEnum = pgEnum('interview_recommendation', [
   'hire',
   'no_hire',
+]);
+// TA Step 4 (2026-10-27): when and how a round happens. A round is scheduled,
+// then done (scored), cancelled (or rescheduled), or the candidate did not show.
+export const interviewModeEnum = pgEnum('interview_mode', ['in_person', 'video', 'phone']);
+// TA workflow deck (2026-10-27): every contact with a candidate is logged.
+export const taActivityKindEnum = pgEnum('ta_activity_kind', ['call', 'email', 'whatsapp', 'meeting']);
+export const taActivityOutcomeEnum = pgEnum('ta_activity_outcome', [
+  'connected',
+  'no_answer',
+  'busy',
+  'wrong_number',
+  'other',
+]);
+export const interviewSlotStatusEnum = pgEnum('interview_slot_status', [
+  'scheduled',
+  'done',
+  'cancelled',
+  'no_show',
 ]);
 // Background verification with the previous employer (TA Step E), in parallel with the offer.
 export const bgvStatusEnum = pgEnum('bgv_status', ['not_started', 'in_progress', 'clear', 'failed']);

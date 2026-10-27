@@ -7,7 +7,6 @@ import type { HiringJobsRepository, QuarterlyBell } from './hiringJobs.repositor
 
 const LINK_PLAN = '/hiring/plan';
 const LINK_APPROVALS = '/hiring/approvals';
-const LINK_ADMIN_APPROVALS = '/admin/hiring-approvals';
 
 /** The quarter after the one containing `today`, with its first day. */
 const nextQuarter = (today: string) => {
@@ -51,9 +50,7 @@ export const createHiringJobsService = (deps: {
 
     // Closed plans first — every day, so a missed run can't strand lines.
     const planning = planningQuarter(today, window).quarter;
-    const h = await hiring.approverHolders(
-      (await settings.effective('hiring.hrDepartment')).departmentId,
-    );
+    const hrbp = await hiring.hrbpHolders();
     const closed = await repo.releasePlans(planning, (rows) => {
       if (rows.length === 0) return [];
       const quarters = [...new Set(rows.map((r) => r.quarter))].sort().join(', ');
@@ -63,12 +60,11 @@ export const createHiringJobsService = (deps: {
         if (r.submitted_by) perHead.set(r.submitted_by, (perHead.get(r.submitted_by) ?? 0) + 1);
       }
       return [
-        ...(h.hr_head ? [{ to: [h.hr_head], type: 'hiring.plan_due', title, link: LINK_APPROVALS }] : []),
-        ...(h.admin ? [{ to: [h.admin], type: 'hiring.plan_due', title, link: LINK_ADMIN_APPROVALS }] : []),
+        ...(hrbp.length ? [{ to: hrbp, type: 'hiring.plan_due', title, link: LINK_APPROVALS }] : []),
         ...[...perHead].map(([head, n]) => ({
           to: [head],
           type: 'hiring.plan_sent',
-          title: `${n} of your hiring line(s) for ${quarters} went to the HR head and Admin`,
+          title: `${n} of your hiring line(s) for ${quarters} went to HRBP for approval`,
           link: LINK_PLAN,
         })),
       ];

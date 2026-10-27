@@ -2,9 +2,7 @@ import type { DbClient } from '../../db/client.js';
 import { auditLog } from '../../db/schema/index.js';
 import { insertNotifications } from '../notifications/index.js';
 import type { ActorContext, Bell, PositionStatus } from './hiring.repository.js';
-import { HIRE_ROLES } from './candidates.schema.js';
-
-export type HireRole = (typeof HIRE_ROLES)[number];
+import type { CandidateDocStatus } from './hire.schema.js';
 
 const audit = (
   tx: DbClient,
@@ -79,7 +77,9 @@ const movePosition = async (
   );
 };
 
-/** DB access for the final decision, offer, BGV and hire (TA Step E). */
+type LetterFile = { fileName: string; contentType: string; data: Buffer };
+
+/** DB access for documents, the HR Head-approved offer and the hire (TA, 2026-10-27). */
 export const createHireRepository = (db: DbClient) => ({
   /** Where an application stands, for the rules (locked inside a write). */
   findApplication: async (id: string) =>
@@ -89,6 +89,7 @@ export const createHireRepository = (db: DbClient) => ({
         stage: string;
         candidate_id: string;
         candidate_name: string;
+        candidate_code: string | null;
         candidate_phone: string | null;
         position_id: string;
         position_number: number;
@@ -96,18 +97,23 @@ export const createHireRepository = (db: DbClient) => ({
         requisition_id: string;
         ta_rm_id: string | null;
         requisition_status: string;
-        budget_max: string | null;
         role_title: string;
         department_id: string;
         department_name: string;
+        offered_ctc: string | null;
         joining_date: string | null;
+        offer_terms: string | null;
+        offer_status: 'draft' | 'pending' | 'approved' | 'returned' | null;
         offered_at: Date | null;
         employee_id: string | null;
+        next_action: string | null;
       }>(
-        `SELECT a.id, a.stage::text, a.candidate_id, c.name AS candidate_name, c.phone AS candidate_phone,
+        `SELECT a.id, a.stage::text, a.candidate_id, c.name AS candidate_name,
+                c.candidate_code, c.phone AS candidate_phone,
                 a.position_id, p.number AS position_number, p.recruiter_id, p.requisition_id,
-                q.ta_rm_id, q.status::text AS requisition_status, q.budget_max::text, q.role_title, q.department_id,
-                d.name AS department_name, a.joining_date::text, a.offered_at, a.employee_id
+                q.ta_rm_id, q.status::text AS requisition_status, q.role_title, q.department_id,
+                d.name AS department_name, a.offered_ctc::text, a.joining_date::text,
+                a.offer_terms, a.offer_status, a.offered_at, a.employee_id, a.next_action
            FROM ta.applications a
            JOIN ta.candidates c ON c.id = a.candidate_id
            JOIN ta.positions p ON p.id = a.position_id
@@ -118,124 +124,57 @@ export const createHireRepository = (db: DbClient) => ({
       )
     )[0],
 
-  /**
-   * Hire decisions still missing one of my roles. `deptIds` = departments I
-   * head and `employeeId` as a line's TA RM (both per line); `orgRoles` =
-   * the company-wide roles I hold (hr_head / admin).
-   */
-  pendingDecisionIds: async (
-    deptIds: string[],
-    employeeId: string,
-    orgRoles: HireRole[],
-  ): Promise<string[]> =>
-    (
-      await db.query<{ id: string }>(
-        `SELECT a.id FROM ta.applications a
-           JOIN ta.positions p ON p.id = a.position_id
-           JOIN ta.requisitions q ON q.id = p.requisition_id
-          WHERE a.stage = 'decision'
-            AND (
-              (q.department_id = ANY($1::uuid[]) AND NOT EXISTS (
-                 SELECT 1 FROM ta.approvals x WHERE x.subject_kind = 'hire'
-                    AND x.subject_id = a.id AND x.role = 'dept_head'))
-              OR (q.ta_rm_id = $3 AND NOT EXISTS (
-                 SELECT 1 FROM ta.approvals x WHERE x.subject_kind = 'hire'
-                    AND x.subject_id = a.id AND x.role = 'ta_rm'))
-              OR EXISTS (
-                 SELECT 1 FROM unnest($2::approver_role[]) AS want(role)
-                  WHERE NOT EXISTS (SELECT 1 FROM ta.approvals x WHERE x.subject_kind = 'hire'
-                         AND x.subject_id = a.id AND x.role = want.role)))
-          ORDER BY a.decision_started_at`,
-        [deptIds, orgRoles, employeeId],
-      )
-    ).map((r) => r.id),
+  // ── Documents (workflow deck steps 13–14) ───────────────────────────────
 
-  /** Interviewed → decision: the four are asked. */
-  sendForDecision: (id: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
+  documentsOf: (id: string) =>
+    db.query<{ id: string; name: string; status: CandidateDocStatus; updated_at: Date }>(
+      `SELECT id, name, status, updated_at FROM ta.application_documents
+        WHERE application_id = $1 ORDER BY created_at, name`,
+      [id],
+    ),
+
+  addDocument: (id: string, name: string, actor: ActorContext): Promise<boolean> =>
     db.transaction(async (tx) => {
-      const moved = await tx.query(
-        `UPDATE ta.applications SET stage = 'decision', decision_started_at = now(), updated_at = now()
-          WHERE id = $1 AND stage = 'interviewed' RETURNING id`,
-        [id],
+      const rows = await tx.query(
+        `INSERT INTO ta.application_documents (application_id, name, updated_by)
+         VALUES ($1, $2, $3) ON CONFLICT (application_id, name) DO NOTHING RETURNING id`,
+        [id, name, actor.actorEmployeeId],
       );
-      if (!moved[0]) return false;
-      await audit(tx, actor, 'application.decision', id);
-      await ring(tx, bells);
+      if (!rows[0]) return false;
+      await audit(tx, actor, 'application.document_requested', id, { name });
       return true;
     }),
 
-  /**
-   * One person's decision for every hire role they hold. A reject ends the
-   * application (not selected); the fourth approve selects the candidate.
-   */
-  decideHire: (
+  setDocument: (
     id: string,
-    roles: HireRole[],
-    decision: 'approve' | 'reject',
-    reason: string | null,
+    docId: string,
+    status: CandidateDocStatus,
     actor: ActorContext,
-    bellsFor: (outcome: 'rejected' | 'selected' | 'pending') => Bell[],
-  ): Promise<'stale' | 'decided' | 'rejected' | 'selected' | 'pending'> =>
+  ): Promise<boolean> =>
     db.transaction(async (tx) => {
-      const cur = (
-        await tx.query<{ stage: string }>(
-          `SELECT stage::text FROM ta.applications WHERE id = $1 FOR UPDATE`,
-          [id],
-        )
-      )[0];
-      if (!cur || cur.stage !== 'decision') return 'stale';
-      const done = await tx.query<{ role: HireRole }>(
-        `SELECT role FROM ta.approvals WHERE subject_kind = 'hire' AND subject_id = $1`,
-        [id],
+      const rows = await tx.query<{ name: string }>(
+        `UPDATE ta.application_documents
+            SET status = $3::candidate_doc_status, updated_by = $4, updated_at = now()
+          WHERE id = $2 AND application_id = $1 RETURNING name`,
+        [id, docId, status, actor.actorEmployeeId],
       );
-      const open = roles.filter((r) => !done.some((d) => d.role === r));
-      if (open.length === 0) return 'decided';
-      for (const role of open) {
-        await tx.query(
-          `INSERT INTO ta.approvals (subject_kind, subject_id, version, role, decided_by, decision, reason)
-           VALUES ('hire', $1, 1, $2::approver_role, $3, $4::approval_decision, $5)`,
-          [id, role, actor.actorEmployeeId, decision, reason],
-        );
-      }
-      let outcome: 'rejected' | 'selected' | 'pending' = 'pending';
-      if (decision === 'reject') {
-        await tx.query(
-          `UPDATE ta.applications SET stage = 'rejected', outcome_reason = $2, updated_at = now()
-            WHERE id = $1`,
-          [id, `Not selected: ${reason}`],
-        );
-        outcome = 'rejected';
-      } else {
-        const n = (
-          await tx.query<{ n: number }>(
-            `SELECT count(DISTINCT role)::int AS n FROM ta.approvals
-              WHERE subject_kind = 'hire' AND subject_id = $1 AND decision = 'approve'
-                AND role = ANY($2::approver_role[])`,
-            [id, [...HIRE_ROLES]],
-          )
-        )[0]!.n;
-        if (n === HIRE_ROLES.length) {
-          await tx.query(
-            `UPDATE ta.applications SET stage = 'selected', selected_at = now(), updated_at = now()
-              WHERE id = $1`,
-            [id],
-          );
-          outcome = 'selected';
-        }
-      }
-      await audit(tx, actor, `application.hire_${decision}`, id, {
-        roles: open,
-        outcome,
-      });
-      await ring(tx, bellsFor(outcome));
-      return outcome;
+      if (!rows[0]) return false;
+      await audit(tx, actor, 'application.document', id, { name: rows[0].name, status });
+      return true;
     }),
 
-  saveOfferLetter: (
-    id: string,
-    file: { fileName: string; contentType: string; data: Buffer },
-    actor: ActorContext,
-  ): Promise<void> =>
+  setFolder: (id: string, link: string | null, actor: ActorContext): Promise<void> =>
+    db.transaction(async (tx) => {
+      await tx.query(
+        `UPDATE ta.applications SET folder_link = $2, updated_at = now() WHERE id = $1`,
+        [id, link],
+      );
+      await audit(tx, actor, 'application.folder', id);
+    }),
+
+  // ── Offer: draft → HR Head approves + signs → shared ────────────────────
+
+  saveOfferLetter: (id: string, file: LetterFile, actor: ActorContext): Promise<void> =>
     db.transaction(async (tx) => {
       await tx.query(
         `INSERT INTO ta.offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by)
@@ -244,14 +183,7 @@ export const createHireRepository = (db: DbClient) => ({
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
-        [
-          id,
-          file.fileName,
-          file.contentType,
-          file.data.length,
-          file.data,
-          actor.actorEmployeeId,
-        ],
+        [id, file.fileName, file.contentType, file.data.length, file.data, actor.actorEmployeeId],
       );
       await audit(tx, actor, 'application.offer_letter', id, { bytes: file.data.length });
     }),
@@ -265,63 +197,151 @@ export const createHireRepository = (db: DbClient) => ({
     )[0],
 
   hasOfferLetter: async (id: string): Promise<boolean> =>
-    (await db.query(`SELECT 1 FROM ta.offer_letters WHERE application_id = $1`, [id]))
+    (await db.query(`SELECT 1 FROM ta.offer_letters WHERE application_id = $1`, [id])).length > 0,
+
+  saveSignedLetter: (id: string, file: LetterFile, actor: ActorContext): Promise<void> =>
+    db.transaction(async (tx) => {
+      await tx.query(
+        `INSERT INTO ta.signed_offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (application_id) DO UPDATE SET
+           file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
+           size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
+           uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
+        [id, file.fileName, file.contentType, file.data.length, file.data, actor.actorEmployeeId],
+      );
+      await audit(tx, actor, 'application.signed_offer_letter', id, { bytes: file.data.length });
+    }),
+
+  signedLetter: async (id: string) =>
+    (
+      await db.query<{ file_name: string; content_type: string; data: Buffer }>(
+        `SELECT file_name, content_type, data FROM ta.signed_offer_letters WHERE application_id = $1`,
+        [id],
+      )
+    )[0],
+
+  hasSignedLetter: async (id: string): Promise<boolean> =>
+    (await db.query(`SELECT 1 FROM ta.signed_offer_letters WHERE application_id = $1`, [id]))
       .length > 0,
 
-  /** Selected → offered; the position moves to `offer`. */
-  makeOffer: (
+  /**
+   * Save the negotiated terms. While interviewed (draft / returned) or waiting
+   * for the HR Head they are simply updated; APPROVED terms that change go
+   * back to the HR Head — approval cleared, the signed letter discarded.
+   * Returns 'saved' | 'reopened' | false (wrong stage).
+   */
+  saveOfferDraft: (
     id: string,
-    input: {
-      ctc: number;
-      joiningDate: string;
-      positionId: string;
-      progress: number;
-      overBudget: boolean;
-    },
+    input: { ctc: number; joiningDate: string; terms: string | null },
     actor: ActorContext,
-    bells: Bell[],
-  ): Promise<boolean> =>
+    bellsIfReopened: Bell[],
+  ): Promise<'saved' | 'reopened' | false> =>
+    db.transaction(async (tx) => {
+      const cur = (
+        await tx.query<{ stage: string; offer_status: string | null }>(
+          `SELECT stage::text, offer_status::text FROM ta.applications WHERE id = $1 FOR UPDATE`,
+          [id],
+        )
+      )[0];
+      if (!cur || !['interviewed', 'decision', 'selected'].includes(cur.stage)) return false;
+      const reopen = cur.stage === 'selected';
+      await tx.query(
+        `UPDATE ta.applications SET offered_ctc = $2, joining_date = $3::date, offer_terms = $4,
+            offer_status = CASE WHEN $5 THEN 'pending'::offer_status
+                                WHEN offer_status IS NULL THEN 'draft'::offer_status
+                                ELSE offer_status END,
+            stage = CASE WHEN $5 THEN 'decision'::application_stage ELSE stage END,
+            offer_approved_by = CASE WHEN $5 THEN NULL ELSE offer_approved_by END,
+            offer_approved_at = CASE WHEN $5 THEN NULL ELSE offer_approved_at END,
+            updated_at = now()
+          WHERE id = $1`,
+        [id, input.ctc, input.joiningDate, input.terms, reopen],
+      );
+      if (reopen) {
+        await tx.query(`DELETE FROM ta.signed_offer_letters WHERE application_id = $1`, [id]);
+      }
+      await audit(tx, actor, reopen ? 'application.offer_reopened' : 'application.offer_draft', id, {
+        joiningDate: input.joiningDate,
+      });
+      if (reopen) await ring(tx, bellsIfReopened);
+      return reopen ? 'reopened' : 'saved';
+    }),
+
+  /** Interviewed → decision: the drafted offer goes to the HR Head. */
+  submitOffer: (id: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
     db.transaction(async (tx) => {
       const moved = await tx.query(
-        `UPDATE ta.applications SET stage = 'offered', offered_ctc = $2, joining_date = $3::date,
-            offered_at = now(), updated_at = now()
-          WHERE id = $1 AND stage = 'selected' RETURNING id`,
-        [id, input.ctc, input.joiningDate],
+        `UPDATE ta.applications SET stage = 'decision', offer_status = 'pending',
+            offer_return_reason = NULL, decision_started_at = now(), updated_at = now()
+          WHERE id = $1 AND stage = 'interviewed' AND offered_ctc IS NOT NULL
+            AND joining_date IS NOT NULL RETURNING id`,
+        [id],
       );
       if (!moved[0]) return false;
-      await movePosition(
-        tx,
-        input.positionId,
-        ['open', 'interviewing'],
-        'offer',
-        input.progress,
-      );
-      await audit(tx, actor, 'application.offered', id, {
-        joiningDate: input.joiningDate,
-        overBudget: input.overBudget,
-      });
+      await audit(tx, actor, 'application.offer_submitted', id);
       await ring(tx, bells);
       return true;
     }),
 
-  /** BGV with the previous employer — runs alongside the decision and the offer. */
-  setBgv: (
+  /** Applications whose offer waits for the HR Head. */
+  pendingOfferIds: async (): Promise<string[]> =>
+    (
+      await db.query<{ id: string }>(
+        `SELECT id FROM ta.applications
+          WHERE stage = 'decision' AND offer_status = 'pending'
+          ORDER BY decision_started_at`,
+      )
+    ).map((r) => r.id),
+
+  /** The HR Head approves (the signed letter is in place): decision → selected. */
+  approveOffer: (id: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const moved = await tx.query(
+        `UPDATE ta.applications SET stage = 'selected', offer_status = 'approved',
+            offer_approved_by = $2, offer_approved_at = now(), selected_at = now(),
+            updated_at = now()
+          WHERE id = $1 AND stage = 'decision' AND offer_status = 'pending' RETURNING id`,
+        [id, actor.actorEmployeeId],
+      );
+      if (!moved[0]) return false;
+      await audit(tx, actor, 'application.offer_approved', id);
+      await ring(tx, bells);
+      return true;
+    }),
+
+  /** The HR Head sends it back to TA with what to change: decision → interviewed. */
+  returnOffer: (id: string, reason: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const moved = await tx.query(
+        `UPDATE ta.applications SET stage = 'interviewed', offer_status = 'returned',
+            offer_return_reason = $2, updated_at = now()
+          WHERE id = $1 AND stage = 'decision' AND offer_status = 'pending' RETURNING id`,
+        [id, reason],
+      );
+      if (!moved[0]) return false;
+      await audit(tx, actor, 'application.offer_returned', id, { reason });
+      await ring(tx, bells);
+      return true;
+    }),
+
+  /** Selected (approved + signed) → offered: TA shares it; the position moves to `offer`. */
+  shareOffer: (
     id: string,
-    status: string,
-    notes: string | null,
+    positionId: string,
+    progress: number,
     actor: ActorContext,
     bells: Bell[],
   ): Promise<boolean> =>
     db.transaction(async (tx) => {
       const moved = await tx.query(
-        `UPDATE ta.applications SET bgv_status = $2::bgv_status, bgv_notes = $3,
-            bgv_updated_at = now(), updated_at = now()
-          WHERE id = $1 AND stage IN ('interviewed', 'decision', 'selected', 'offered')
-          RETURNING id`,
-        [id, status, notes],
+        `UPDATE ta.applications SET stage = 'offered', offered_at = now(), updated_at = now()
+          WHERE id = $1 AND stage = 'selected' AND offer_status = 'approved' RETURNING id`,
+        [id],
       );
       if (!moved[0]) return false;
-      await audit(tx, actor, 'application.bgv', id, { status });
+      await movePosition(tx, positionId, ['open', 'interviewing'], 'offer', progress);
+      await audit(tx, actor, 'application.offered', id);
       await ring(tx, bells);
       return true;
     }),
@@ -369,17 +389,37 @@ export const createHireRepository = (db: DbClient) => ({
       [id, employeeId],
     );
     if (!moved[0]) return false;
-    await movePosition(
-      tx,
-      positionId,
-      ['offer', 'interviewing', 'open'],
-      'filled',
-      progress,
-    );
+    await movePosition(tx, positionId, ['offer', 'interviewing', 'open'], 'filled', progress);
     await audit(tx, actor, 'application.hired', id, { employeeId });
     await ring(tx, bells);
     return true;
   },
+
+  /** What HRBP needs at handover: documents received / still pending. */
+  documentCounts: async (id: string) =>
+    (
+      await db.query<{ received: number; pending: number }>(
+        `SELECT count(*) FILTER (WHERE status = 'received')::int AS received,
+                count(*) FILTER (WHERE status = 'requested')::int AS pending
+           FROM ta.application_documents WHERE application_id = $1`,
+        [id],
+      )
+    )[0]!,
+
+  /** HRBP confirms the actual joining (accepted and joined are counted apart). */
+  confirmJoined: (id: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const moved = await tx.query(
+        `UPDATE ta.applications SET stage = 'joined', joined_confirmed_by = $2, joined_at = now(),
+            updated_at = now()
+          WHERE id = $1 AND stage = 'hired' RETURNING id`,
+        [id, actor.actorEmployeeId],
+      );
+      if (!moved[0]) return false;
+      await audit(tx, actor, 'application.joined', id);
+      await ring(tx, bells);
+      return true;
+    }),
 
   /**
    * Hired → no_show (backed out before joining): the never-started employee

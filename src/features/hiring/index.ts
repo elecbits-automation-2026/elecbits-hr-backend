@@ -3,6 +3,7 @@ export { hiringRoutes } from './hiring.routes.js';
 export { registerHiringDocs } from './hiring.docs.js';
 export { registerCandidatesDocs } from './candidates.docs.js';
 export { registerHireDocs } from './hire.docs.js';
+export { registerReportsDocs } from './reports.docs.js';
 export type { HiringMeDto, HiringPlanDto, RequisitionDto } from './hiring.schema.js';
 
 import type { DbClient } from '../../db/client.js';

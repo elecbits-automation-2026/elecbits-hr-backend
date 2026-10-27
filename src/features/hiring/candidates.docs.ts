@@ -8,7 +8,14 @@ import {
   candidateSchema,
   createCandidateSchema,
   endApplicationSchema,
+  activitySchema,
+  endInterviewSlotSchema,
+  hiringBoardSchema,
+  logActivitySchema,
+  nextActionSchema,
+  updateCandidateSchema,
   myInterviewSchema,
+  scheduleInterviewSchema,
   submitScoreSchema,
   swapInterviewerSchema,
 } from './candidates.schema.js';
@@ -120,8 +127,11 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
   });
 
   for (const [action, summary] of [
-    ['shortlist', "The line's TA RM validates the shortlist"],
-    ['start-interviews', 'Start interviews (every round needs an interviewer)'],
+    [
+      'start-interviews',
+      'Open round 1 — the recruiter’s screening (every round needs an interviewer; rounds then run in order)',
+    ],
+    ['informed', 'Record that a rejected / withdrawn candidate was told the outcome'],
   ] as const) {
     registry.registerPath({
       method: 'post',
@@ -183,7 +193,94 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
       200: jsonResponse('Scored', applicationSchema),
       403: errorResponse('Not this round’s interviewer'),
       409: errorResponse('Not in interviews, or already scored'),
-      422: errorResponse('Criteria do not match the scorecard'),
+      422: errorResponse('Attributes do not match the round\'s sheet'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/v1/hiring/candidates/{id}',
+    tags,
+    summary: "Fill or correct a candidate's profile (TA)",
+    security,
+    request: { params: idParam, body: jsonBody(updateCandidateSchema) },
+    responses: {
+      200: jsonResponse('Updated', candidateSchema),
+      409: errorResponse('Anonymised'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'put',
+    path: '/api/v1/hiring/applications/{id}/next-action',
+    tags,
+    summary: 'Set what happens next on an application, its owner and due date',
+    security,
+    request: { params: idParam, body: jsonBody(nextActionSchema) },
+    responses: {
+      200: jsonResponse('Set', applicationSchema),
+      403: errorResponse("Not the position's recruiter or the line's TA RM"),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/hiring/applications/{id}/activities',
+    tags,
+    summary: 'Contacts logged with the candidate on this application',
+    security,
+    request: { params: idParam },
+    responses: { 200: jsonResponse('Activities', z.array(activitySchema)) },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/hiring/applications/{id}/activities',
+    tags,
+    summary: 'Log a call / email / WhatsApp / meeting with the candidate',
+    security,
+    request: { params: idParam, body: jsonBody(logActivitySchema) },
+    responses: {
+      201: jsonResponse('Logged', applicationSchema),
+      403: errorResponse("Not the position's recruiter or the line's TA RM"),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/hiring/board',
+    tags,
+    summary: 'The Hiring board: approved lines and every candidate on their positions (TA)',
+    security,
+    responses: { 200: jsonResponse('Board', hiringBoardSchema) },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/hiring/applications/{id}/rounds/{round}/schedule',
+    tags,
+    summary: "Schedule (or move) a round with its interviewer — the position's recruiter or TA RM",
+    security,
+    request: { params: roundParam, body: jsonBody(scheduleInterviewSchema) },
+    responses: {
+      200: jsonResponse('Scheduled', applicationSchema),
+      403: errorResponse("Not the position's recruiter or the line's TA RM"),
+      409: errorResponse('Not in interviews, or the round is scored'),
+      422: errorResponse('No interviewer named, or a time in the past'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/hiring/applications/{id}/rounds/{round}/schedule/end',
+    tags,
+    summary: 'Call off a scheduled round: cancelled, or the candidate did not show',
+    security,
+    request: { params: roundParam, body: jsonBody(endInterviewSlotSchema) },
+    responses: {
+      200: jsonResponse('Called off', applicationSchema),
+      403: errorResponse("Not the position's recruiter or the line's TA RM"),
+      409: errorResponse('Nothing scheduled for this round'),
     },
   });
 };

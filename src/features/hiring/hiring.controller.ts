@@ -7,11 +7,15 @@ import {
   type DecideRequisitionInput,
   type AssignPositionInput,
   type AssignTaRmInput,
+  type AddSourceInput,
   type JdContent,
   type ScorecardContent,
   type UpdateRequisitionInput,
 } from './hiring.schema.js';
 import { createHiringService } from './hiring.service.js';
+import { createCandidatesRepository } from './candidates.repository.js';
+import type { HiringBoardDto } from './candidates.schema.js';
+import { createCandidatesService } from './candidates.service.js';
 import { createSettingsRepository } from '../settings/index.js';
 
 const service = (req: Request) =>
@@ -27,7 +31,7 @@ const actor = (req: Request) => ({
 
 const QUARTER = /^\d{4}-Q[1-4]$/;
 
-/** The route says which document: /requisitions/:id/jd or /requisitions/:id/scorecard. */
+/** The route says which document: /positions/:id/jd or /positions/:id/scorecard. */
 const docKind = (req: Request): 'jd' | 'scorecard' =>
   req.path.includes('/scorecard') ? 'scorecard' : 'jd';
 
@@ -45,6 +49,17 @@ export const hiringController = {
       });
     }
     res.json(await service(req).plan(req.auth!.employeeId, departmentId, quarter));
+  },
+
+  /** The Hiring board: approved lines + every candidate on their positions (TA). */
+  board: async (req: Request, res: Response): Promise<void> => {
+    const lines = await service(req).list('approved');
+    const applications = await createCandidatesService({
+      repo: createCandidatesRepository(req.db),
+      hiring: createHiringRepository(req.db),
+    }).pipelines(lines.flatMap((l) => l.positions.map((p) => p.id)));
+    const body: HiringBoardDto = { lines, applications };
+    res.json(body);
   },
 
   list: async (req: Request, res: Response): Promise<void> => {
@@ -127,6 +142,15 @@ export const hiringController = {
 
   taRms: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).taRms(actor(req)));
+  },
+
+  addSource: async (req: Request, res: Response): Promise<void> => {
+    const input: AddSourceInput = req.body;
+    res.status(201).json(await service(req).addSource(req.params.id!, input, actor(req)));
+  },
+
+  recruiters: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).recruiters(actor(req)));
   },
 
   assignTaRm: async (req: Request, res: Response): Promise<void> => {

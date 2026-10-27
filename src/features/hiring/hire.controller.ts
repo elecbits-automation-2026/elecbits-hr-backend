@@ -10,12 +10,7 @@ import { createSettingsRepository } from '../settings/index.js';
 import { createCandidatesRepository } from './candidates.repository.js';
 import { createCandidatesService } from './candidates.service.js';
 import { createHireRepository } from './hire.repository.js';
-import type {
-  BgvInput,
-  DecideHireInput,
-  MakeOfferInput,
-  MarkHiredInput,
-} from './hire.schema.js';
+import type { CandidateDocStatus, MarkHiredInput, OfferDraftInput } from './hire.schema.js';
 import { createHireService, type HireTransaction } from './hire.service.js';
 import { createHiringRepository } from './hiring.repository.js';
 import { POSITION_PROGRESS } from './hiring.service.js';
@@ -68,81 +63,108 @@ const actor = (req: Request) => ({
   actorEmployeeId: req.auth!.employeeId,
 });
 
-/** HTTP layer for the final decision, offer, BGV and hire (TA Step E). */
+/** A raw file body (like leave certificates), named by ?filename=. */
+const fileOf = (req: Request, fallback: string) => {
+  if (!Buffer.isBuffer(req.body)) {
+    throw createError(422, 'Send the file as the raw request body', { code: 'NOT_A_FILE' });
+  }
+  return {
+    fileName: String(req.query.filename ?? fallback).slice(0, 200),
+    contentType: req.headers['content-type'] ?? '',
+    data: req.body,
+  };
+};
+
+const sendFile = (res: Response, file: { fileName: string; contentType: string; data: Buffer }) => {
+  res.setHeader('Content-Type', file.contentType);
+  res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replaceAll('"', '')}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.send(file.data);
+};
+
+/** HTTP layer for documents, the HR Head-approved offer, the hire and joining. */
 export const hireController = {
-  sendForDecision: async (req: Request, res: Response): Promise<void> => {
-    res.json(await service(req).sendForDecision(req.params.id!, actor(req)));
+  documents: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).documents(req.params.id!));
   },
 
-  pendingDecisions: async (req: Request, res: Response): Promise<void> => {
-    res.json(await service(req).pendingDecisions(req.auth!.employeeId));
+  addDocument: async (req: Request, res: Response): Promise<void> => {
+    res.status(201).json(await service(req).addDocument(req.params.id!, req.body.name, actor(req)));
   },
 
-  decide: async (req: Request, res: Response): Promise<void> => {
-    const input: DecideHireInput = req.body;
-    const a = await service(req).decide(req.params.id!, input, actor(req));
-    req.log.info({ applicationId: a.id, decision: input.decision }, 'hire decided');
-    res.json(a);
+  setDocument: async (req: Request, res: Response): Promise<void> => {
+    const status: CandidateDocStatus = req.body.status;
+    res.json(
+      await service(req).setDocument(req.params.id!, req.params.docId!, status, actor(req)),
+    );
+  },
+
+  setFolder: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).setFolder(req.params.id!, req.body.link, actor(req)));
   },
 
   uploadOfferLetter: async (req: Request, res: Response): Promise<void> => {
-    if (!Buffer.isBuffer(req.body)) {
-      throw createError(422, 'Send the file as the raw request body', {
-        code: 'NOT_A_FILE',
-      });
-    }
-    const fileName = String(req.query.filename ?? 'offer-letter').slice(0, 200);
     res.json(
-      await service(req).uploadOfferLetter(
-        req.params.id!,
-        { fileName, contentType: req.headers['content-type'] ?? '', data: req.body },
-        actor(req),
-      ),
+      await service(req).uploadOfferLetter(req.params.id!, fileOf(req, 'offer-letter'), actor(req)),
     );
   },
 
   offerLetter: async (req: Request, res: Response): Promise<void> => {
-    const file = await service(req).offerLetter(req.params.id!);
-    res.setHeader('Content-Type', file.contentType);
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${file.fileName.replaceAll('"', '')}"`,
-    );
-    res.setHeader('Cache-Control', 'private, no-store');
-    res.send(file.data);
+    sendFile(res, await service(req).offerLetter(req.params.id!));
   },
 
-  makeOffer: async (req: Request, res: Response): Promise<void> => {
-    const input: MakeOfferInput = req.body;
-    const a = await service(req).makeOffer(req.params.id!, input, actor(req));
-    req.log.info({ applicationId: a.id }, 'offer made');
+  uploadSignedLetter: async (req: Request, res: Response): Promise<void> => {
+    res.json(
+      await service(req).uploadSignedLetter(
+        req.params.id!,
+        fileOf(req, 'signed-offer-letter'),
+        actor(req),
+      ),
+    );
+  },
+
+  signedLetter: async (req: Request, res: Response): Promise<void> => {
+    sendFile(res, await service(req).signedLetter(req.params.id!));
+  },
+
+  saveOfferDraft: async (req: Request, res: Response): Promise<void> => {
+    const input: OfferDraftInput = req.body;
+    res.json(await service(req).saveOfferDraft(req.params.id!, input, actor(req)));
+  },
+
+  submitOffer: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).submitOffer(req.params.id!, actor(req)));
+  },
+
+  pendingOffers: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).pendingOffers(req.auth!.employeeId));
+  },
+
+  approveOffer: async (req: Request, res: Response): Promise<void> => {
+    const a = await service(req).approveOffer(req.params.id!, actor(req));
+    req.log.info({ applicationId: a.id }, 'offer approved');
     res.json(a);
   },
 
-  setBgv: async (req: Request, res: Response): Promise<void> => {
-    const input: BgvInput = req.body;
-    res.json(await service(req).setBgv(req.params.id!, input, actor(req)));
+  returnOffer: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).returnOffer(req.params.id!, req.body.reason, actor(req)));
+  },
+
+  shareOffer: async (req: Request, res: Response): Promise<void> => {
+    const a = await service(req).shareOffer(req.params.id!, actor(req));
+    req.log.info({ applicationId: a.id }, 'offer shared');
+    res.json(a);
   },
 
   declined: async (req: Request, res: Response): Promise<void> => {
     res.json(
-      await service(req).endOffer(
-        req.params.id!,
-        'offer_declined',
-        req.body.reason,
-        actor(req),
-      ),
+      await service(req).endOffer(req.params.id!, 'offer_declined', req.body.reason, actor(req)),
     );
   },
 
   withdrawOffer: async (req: Request, res: Response): Promise<void> => {
     res.json(
-      await service(req).endOffer(
-        req.params.id!,
-        'offer_withdrawn',
-        req.body.reason,
-        actor(req),
-      ),
+      await service(req).endOffer(req.params.id!, 'offer_withdrawn', req.body.reason, actor(req)),
     );
   },
 
@@ -156,8 +178,11 @@ export const hireController = {
     res.json(out);
   },
 
+  confirmJoined: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).confirmJoined(req.params.id!, actor(req)));
+  },
+
   noShow: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).noShow(req.params.id!, req.body.reason, actor(req)));
   },
-
 };

@@ -1,6 +1,7 @@
 import type { DbClient } from '../../db/client.js';
 import { auditLog } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
+import { BASELINE_BATCHES } from '../../shared/constants/constants.js';
 import type { ApproverRole, DocRole, InterviewRound } from './hiring.schema.js';
 
 export type PositionStatus =
@@ -15,14 +16,26 @@ export interface PositionRow {
   recruiter_id: string | null;
   recruiter_name: string | null;
   opened_at: Date | null;
+  priority: 'high' | 'normal' | 'low';
+  expected_close_on: string | null;
   goal_id: string | null;
   goal_weight: number | null;
   goal_progress: number | null;
 }
 
+export interface SourceRow {
+  id: string;
+  position_id: string;
+  channel: string;
+  activated_on: string;
+  spoc_name: string;
+  notes: string | null;
+}
+
 export interface DocumentRow {
   id: string;
   requisition_id: string;
+  position_id: string;
   kind: DocumentKind;
   version: number;
   status: 'draft' | 'in_review' | 'returned' | 'approved';
@@ -35,7 +48,7 @@ export interface DocumentRow {
 }
 
 const SELECT_DOC = `
-  SELECT d.id, d.requisition_id, d.kind, d.version, d.status, d.content, d.written_by,
+  SELECT d.id, d.requisition_id, d.position_id, d.kind, d.version, d.status, d.content, d.written_by,
          w.name AS written_by_name, d.return_reason, d.submitted_at, d.approved_at
     FROM ta.documents d JOIN org.employees w ON w.id = d.written_by`;
 
@@ -51,7 +64,7 @@ export interface Bell {
 }
 
 export type RequisitionStatus =
-  'draft' | 'queued' | 'submitted' | 'returned' | 'approved' | 'cancelled';
+  'draft' | 'queued' | 'submitted' | 'returned' | 'approved' | 'cancelled' | 'rejected';
 
 /** A requisition joined with the names the screens show. */
 export interface RequisitionRow {
@@ -63,8 +76,14 @@ export interface RequisitionRow {
   role_title: string;
   quantity: number;
   notes: string | null;
-  budget_min: string | null;
-  budget_max: string | null;
+  request_code: string | null;
+  reason: string | null;
+  target_joining_on: string | null;
+  location: string | null;
+  reporting_manager_id: string | null;
+  reporting_manager_name: string | null;
+  priority: 'high' | 'normal' | 'low';
+  employment_type: string | null;
   version: number;
   status: RequisitionStatus;
   urgent: boolean;
@@ -99,7 +118,9 @@ export interface ApprovalRow {
 
 const SELECT_REQ = `
   SELECT r.id, r.plan_id, r.department_id, d.name AS department_name, p.quarter,
-         r.role_title, r.quantity, r.notes, r.budget_min::text, r.budget_max::text,
+         r.role_title, r.quantity, r.notes, r.request_code, r.reason,
+         r.target_joining_on::text, r.location, r.reporting_manager_id,
+         m.name AS reporting_manager_name, r.priority, r.employment_type,
          r.version, r.status, r.urgent,
          r.created_by, c.name AS created_by_name, r.submitted_by, r.submitted_at,
          r.return_reason, r.approved_at, r.ta_rm_id, t.name AS ta_rm_name,
@@ -108,6 +129,7 @@ const SELECT_REQ = `
     JOIN org.departments d ON d.id = r.department_id
     JOIN org.employees c ON c.id = r.created_by
     LEFT JOIN org.employees t ON t.id = r.ta_rm_id
+    LEFT JOIN org.employees m ON m.id = r.reporting_manager_id
     LEFT JOIN ta.hiring_plans p ON p.id = r.plan_id`;
 
 const audit = (
@@ -164,10 +186,11 @@ export const createHiringRepository = (db: DbClient) => ({
    * The HR approver is the head of the department set as HR in
    * `hiring.hrDepartment` (the VP seat carries no approval power).
    */
+  /** The HR department's head (offer sign-off) and the Admin account (gives lines to a TA RM). */
   approverHolders: async (
     hrDepartmentId: string | null,
-  ): Promise<Partial<Record<ApproverRole, string>>> => {
-    const rows = await db.query<{ role: ApproverRole; employee_id: string }>(
+  ): Promise<{ hr_head?: string; admin?: string }> => {
+    const rows = await db.query<{ role: 'hr_head' | 'admin'; employee_id: string }>(
       `SELECT 'hr_head' AS role, employee_id FROM org.seats
         WHERE seat = 'dept_head' AND department_id = $1 AND ended_at IS NULL
        UNION ALL
@@ -176,6 +199,18 @@ export const createHiringRepository = (db: DbClient) => ({
     );
     return Object.fromEntries(rows.map((r) => [r.role, r.employee_id]));
   },
+
+  /** Active holders of the HRBP batch — they approve hiring requests (2026-10-27). */
+  hrbpHolders: async (): Promise<string[]> =>
+    (
+      await db.query<{ id: string }>(
+        `SELECT DISTINCT e.id FROM org.employees e
+           JOIN access.employee_batches eb ON eb.employee_id = e.id
+           JOIN access.batches b ON b.id = eb.batch_id AND b.name = $1
+          WHERE e.status = 'active'`,
+        [BASELINE_BATCHES.hrbp],
+      )
+    ).map((r) => r.id),
 
   nameOf: async (employeeId: string): Promise<string> =>
     (
@@ -268,8 +303,12 @@ export const createHiringRepository = (db: DbClient) => ({
       roleTitle: string;
       quantity: number;
       notes: string | null;
-      budgetMin: number;
-      budgetMax: number;
+      reason: string;
+      targetJoiningOn: string;
+      location: string;
+      reportingManagerId: string;
+      priority: 'high' | 'normal' | 'low';
+      employmentType: string;
       rounds: Array<{ round: InterviewRound; interviewerId: string | null }>;
     },
     actor: ActorContext,
@@ -286,17 +325,26 @@ export const createHiringRepository = (db: DbClient) => ({
       const row = (
         await tx.query<{ id: string }>(
           `INSERT INTO ta.requisitions (plan_id, department_id, role_title, quantity, notes,
-                                        budget_min, budget_max, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+                                        reason, target_joining_on, location, reporting_manager_id,
+                                        priority, employment_type, created_by, request_code)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10::hiring_priority, $11, $12,
+                   'HR-' || replace($13, '-', '') || '-' ||
+                   lpad(nextval('ta.requisition_code_seq')::text, 4, '0'))
+           RETURNING id`,
           [
             plan.id,
             input.departmentId,
             input.roleTitle,
             input.quantity,
             input.notes,
-            input.budgetMin,
-            input.budgetMax,
+            input.reason,
+            input.targetJoiningOn,
+            input.location,
+            input.reportingManagerId,
+            input.priority,
+            input.employmentType,
             actor.actorEmployeeId,
+            input.quarter,
           ],
         )
       )[0]!;
@@ -305,8 +353,8 @@ export const createHiringRepository = (db: DbClient) => ({
         quarter: input.quarter,
         roleTitle: input.roleTitle,
         quantity: input.quantity,
-        budgetMin: input.budgetMin,
-        budgetMax: input.budgetMax,
+        priority: input.priority,
+        targetJoiningOn: input.targetJoiningOn,
       });
       return row.id;
     }),
@@ -322,8 +370,12 @@ export const createHiringRepository = (db: DbClient) => ({
       roleTitle?: string;
       quantity?: number;
       notes?: string | null;
-      budgetMin?: number;
-      budgetMax?: number;
+      reason?: string;
+      targetJoiningOn?: string;
+      location?: string;
+      reportingManagerId?: string;
+      priority?: 'high' | 'normal' | 'low';
+      employmentType?: string;
     },
     rounds: Array<{ round: InterviewRound; interviewerId: string | null }> | undefined,
     actor: ActorContext,
@@ -334,8 +386,12 @@ export const createHiringRepository = (db: DbClient) => ({
             role_title = coalesce($2, role_title),
             quantity = coalesce($3, quantity),
             notes = CASE WHEN $4::boolean THEN $5 ELSE notes END,
-            budget_min = coalesce($6, budget_min),
-            budget_max = coalesce($7, budget_max),
+            reason = coalesce($6, reason),
+            target_joining_on = coalesce($7::date, target_joining_on),
+            location = coalesce($8, location),
+            reporting_manager_id = coalesce($9, reporting_manager_id),
+            priority = coalesce($10::hiring_priority, priority),
+            employment_type = coalesce($11, employment_type),
             version = CASE WHEN status = 'returned' THEN version + 1 ELSE version END,
             status = 'draft',
             updated_at = now()
@@ -347,8 +403,12 @@ export const createHiringRepository = (db: DbClient) => ({
           patch.quantity ?? null,
           patch.notes !== undefined,
           patch.notes ?? null,
-          patch.budgetMin ?? null,
-          patch.budgetMax ?? null,
+          patch.reason ?? null,
+          patch.targetJoiningOn ?? null,
+          patch.location ?? null,
+          patch.reportingManagerId ?? null,
+          patch.priority ?? null,
+          patch.employmentType ?? null,
         ],
       );
       if (!moved[0]) return false;
@@ -445,11 +505,11 @@ export const createHiringRepository = (db: DbClient) => ({
     roles: ApproverRole[],
     /** The roles that may decide this line (Admin alone for the HR head's own lines). */
     needed: ApproverRole[],
-    decision: 'approve' | 'reject',
+    decision: 'approve' | 'reject' | 'decline',
     reason: string | null,
     actor: ActorContext,
-    bellsFor: (outcome: 'returned' | 'approved' | 'pending') => Bell[],
-  ): Promise<'stale' | 'decided' | 'returned' | 'approved' | 'pending'> =>
+    bellsFor: (outcome: 'returned' | 'approved' | 'declined' | 'pending') => Bell[],
+  ): Promise<'stale' | 'decided' | 'returned' | 'approved' | 'declined' | 'pending'> =>
     db.transaction(async (tx) => {
       const cur = (
         await tx.query<{ status: RequisitionStatus; version: number }>(
@@ -469,11 +529,25 @@ export const createHiringRepository = (db: DbClient) => ({
         await tx.query(
           `INSERT INTO ta.approvals (subject_kind, subject_id, version, role, decided_by, decision, reason)
            VALUES ('requisition', $1, $2, $3::approver_role, $4, $5::approval_decision, $6)`,
-          [id, version, role, actor.actorEmployeeId, decision, reason],
+          [
+            id,
+            version,
+            role,
+            actor.actorEmployeeId,
+            decision === 'approve' ? 'approve' : 'reject',
+            reason,
+          ],
         );
       }
-      let outcome: 'returned' | 'approved' | 'pending' = 'pending';
-      if (decision === 'reject') {
+      let outcome: 'returned' | 'approved' | 'declined' | 'pending' = 'pending';
+      if (decision === 'decline') {
+        await tx.query(
+          `UPDATE ta.requisitions SET status = 'rejected', return_reason = $2, updated_at = now()
+            WHERE id = $1`,
+          [id, reason],
+        );
+        outcome = 'declined';
+      } else if (decision === 'reject') {
         await tx.query(
           `UPDATE ta.requisitions SET status = 'returned', return_reason = $2, updated_at = now()
             WHERE id = $1`,
@@ -496,8 +570,8 @@ export const createHiringRepository = (db: DbClient) => ({
           );
           // One position per seat ("2 × …" → #1, #2); they wait for the JD + scorecard.
           await tx.query(
-            `INSERT INTO ta.positions (requisition_id, number)
-             SELECT r.id, n FROM ta.requisitions r, generate_series(1, r.quantity) AS n
+            `INSERT INTO ta.positions (requisition_id, number, priority)
+             SELECT r.id, n, r.priority FROM ta.requisitions r, generate_series(1, r.quantity) AS n
               WHERE r.id = $1
              ON CONFLICT (requisition_id, number) DO NOTHING`,
             [id],
@@ -508,7 +582,11 @@ export const createHiringRepository = (db: DbClient) => ({
       await audit(
         tx,
         actor,
-        decision === 'approve' ? 'requisition.approval' : 'requisition.rejection',
+        decision === 'approve'
+          ? 'requisition.approval'
+          : decision === 'decline'
+            ? 'requisition.declined'
+            : 'requisition.rejection',
         id,
         { version, roles: open, reason, outcome },
       );
@@ -521,7 +599,7 @@ export const createHiringRepository = (db: DbClient) => ({
   positionsOf: (requisitionIds: string[]) =>
     db.query<PositionRow>(
       `SELECT p.id, p.requisition_id, p.number, p.status, p.recruiter_id,
-              e.name AS recruiter_name, p.opened_at,
+              e.name AS recruiter_name, p.opened_at, p.priority, p.expected_close_on::text,
               g.id AS goal_id, g.weight::float8 AS goal_weight, g.progress AS goal_progress
          FROM ta.positions p
          LEFT JOIN org.employees e ON e.id = p.recruiter_id
@@ -532,6 +610,36 @@ export const createHiringRepository = (db: DbClient) => ({
         ORDER BY p.number`,
       [requisitionIds],
     ),
+
+  /** The channels activated for these positions (workflow deck step 6). */
+  sourcesOf: (positionIds: string[]) =>
+    db.query<SourceRow>(
+      `SELECT s.id, s.position_id, s.channel::text, s.activated_on::text, e.name AS spoc_name, s.notes
+         FROM ta.source_activations s JOIN org.employees e ON e.id = s.spoc_id
+        WHERE s.position_id = ANY($1::uuid[])
+        ORDER BY s.activated_on, s.created_at`,
+      [positionIds],
+    ),
+
+  addSource: (
+    input: { positionId: string; channel: string; activatedOn: string; notes: string | null },
+    actor: ActorContext,
+  ): Promise<void> =>
+    db.transaction(async (tx) => {
+      const row = (
+        await tx.query<{ id: string }>(
+          `INSERT INTO ta.source_activations (position_id, channel, activated_on, spoc_id, notes)
+           VALUES ($1, $2::candidate_source, $3::date, $4, $5) RETURNING id`,
+          [input.positionId, input.channel, input.activatedOn, actor.actorEmployeeId, input.notes],
+        )
+      )[0]!;
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: 'position.source_activated',
+        subject: `source_activations:${row.id}`,
+        detail: JSON.stringify({ positionId: input.positionId, channel: input.channel }),
+      });
+    }),
 
   findPosition: async (id: string) =>
     (
@@ -552,11 +660,11 @@ export const createHiringRepository = (db: DbClient) => ({
       requisitionIds,
     ]),
 
-  findDocument: async (requisitionId: string, kind: DocumentKind) =>
+  findDocument: async (positionId: string, kind: DocumentKind) =>
     (
       await db.query<DocumentRow>(
-        `${SELECT_DOC} WHERE d.requisition_id = $1 AND d.kind = $2`,
-        [requisitionId, kind],
+        `${SELECT_DOC} WHERE d.position_id = $1 AND d.kind = $2`,
+        [positionId, kind],
       )
     )[0],
 
@@ -573,16 +681,21 @@ export const createHiringRepository = (db: DbClient) => ({
       [documentIds],
     ),
 
-  /** Documents in review that still miss my decision (as dept head of their line, or Admin). */
-  reviewsWaiting: (employeeId: string, isAdmin: boolean) =>
+  /**
+   * Documents in review that still miss my decision: as the line's TA RM (when
+   * someone else is the position's recruiter) or as the line's dept head.
+   */
+  reviewsWaiting: (employeeId: string) =>
     db.query<DocumentRow>(
       `${SELECT_DOC}
          JOIN ta.requisitions r ON r.id = d.requisition_id
+         JOIN ta.positions p ON p.id = d.position_id
         WHERE d.status = 'in_review'
           AND (
-            ($2 AND NOT EXISTS (SELECT 1 FROM ta.approvals a
+            (r.ta_rm_id = $1 AND p.recruiter_id IS DISTINCT FROM $1
+              AND NOT EXISTS (SELECT 1 FROM ta.approvals a
                  WHERE a.subject_kind = d.kind::text::approval_subject AND a.subject_id = d.id
-                   AND a.version = d.version AND a.role = 'admin'))
+                   AND a.version = d.version AND a.role = 'ta_rm'))
             OR (EXISTS (SELECT 1 FROM org.seats s
                  WHERE s.seat = 'dept_head' AND s.department_id = r.department_id
                    AND s.ended_at IS NULL AND s.employee_id = $1)
@@ -590,25 +703,25 @@ export const createHiringRepository = (db: DbClient) => ({
                  WHERE a.subject_kind = d.kind::text::approval_subject AND a.subject_id = d.id
                    AND a.version = d.version AND a.role = 'dept_head')))
         ORDER BY d.submitted_at`,
-      [employeeId, isAdmin],
+      [employeeId],
     ),
 
   /**
-   * Write the line's JD or scorecard: create it (draft v1), or edit a draft /
+   * Write a position's JD or scorecard: create it (draft v1), or edit a draft /
    * returned one — editing a RETURNED document starts a new version, so its
    * earlier approvals stop counting. False = it is in review or approved.
    */
   saveDocument: (
-    requisitionId: string,
+    position: { id: string; requisition_id: string },
     kind: DocumentKind,
     content: unknown,
     actor: ActorContext,
   ): Promise<boolean> =>
     db.transaction(async (tx) => {
       const rows = await tx.query<{ id: string; version: number }>(
-        `INSERT INTO ta.documents (requisition_id, kind, content, written_by)
-         VALUES ($1, $2::ta_document_kind, $3::jsonb, $4)
-         ON CONFLICT (requisition_id, kind) DO UPDATE SET
+        `INSERT INTO ta.documents (requisition_id, position_id, kind, content, written_by)
+         VALUES ($1, $5, $2::ta_document_kind, $3::jsonb, $4)
+         ON CONFLICT (position_id, kind) DO UPDATE SET
            content = EXCLUDED.content,
            written_by = EXCLUDED.written_by,
            version = CASE WHEN ta.documents.status = 'returned'
@@ -617,14 +730,19 @@ export const createHiringRepository = (db: DbClient) => ({
            updated_at = now()
          WHERE ta.documents.status IN ('draft', 'returned')
          RETURNING id, version`,
-        [requisitionId, kind, JSON.stringify(content), actor.actorEmployeeId],
+        [position.requisition_id, kind, JSON.stringify(content), actor.actorEmployeeId, position.id],
       );
       if (!rows[0]) return false;
       await tx.orm.insert(auditLog).values({
         actorUserId: actor.actorUserId,
         action: `ta_document.saved`,
         subject: `ta_documents:${rows[0].id}`,
-        detail: JSON.stringify({ requisitionId, kind, version: rows[0].version }),
+        detail: JSON.stringify({
+          requisitionId: position.requisition_id,
+          positionId: position.id,
+          kind,
+          version: rows[0].version,
+        }),
       });
       return true;
     }),
@@ -652,15 +770,16 @@ export const createHiringRepository = (db: DbClient) => ({
     }),
 
   /**
-   * One reviewer's decision on the version they saw (dept head and/or Admin).
-   * A reject returns the document; the second approve approves it — and when
-   * the line's OTHER document is approved too, its positions open and their
-   * hiring goals move to the open-stage progress.
+   * One reviewer's decision on the version they saw (TA RM and/or dept head).
+   * A reject returns the document; once every `needed` role approved it is
+   * approved — and when the position's OTHER document is approved too, the
+   * position opens and its hiring goal moves to the open-stage progress.
    */
   decideDocument: (
     id: string,
     version: number,
     roles: DocRole[],
+    needed: DocRole[],
     decision: 'approve' | 'reject',
     reason: string | null,
     actor: ActorContext,
@@ -673,9 +792,9 @@ export const createHiringRepository = (db: DbClient) => ({
           status: string;
           version: number;
           kind: DocumentKind;
-          requisition_id: string;
+          position_id: string;
         }>(
-          `SELECT status, version, kind, requisition_id FROM ta.documents WHERE id = $1 FOR UPDATE`,
+          `SELECT status, version, kind, position_id FROM ta.documents WHERE id = $1 FOR UPDATE`,
           [id],
         )
       )[0];
@@ -707,11 +826,11 @@ export const createHiringRepository = (db: DbClient) => ({
           await tx.query<{ n: number }>(
             `SELECT count(DISTINCT role)::int AS n FROM ta.approvals
               WHERE subject_kind = $1::approval_subject AND subject_id = $2 AND version = $3
-                AND decision = 'approve'`,
-            [cur.kind, id, version],
+                AND decision = 'approve' AND role = ANY($4::approver_role[])`,
+            [cur.kind, id, version, needed],
           )
         )[0]!.n;
-        if (n === 2) {
+        if (n === needed.length) {
           await tx.query(
             `UPDATE ta.documents SET status = 'approved', approved_at = now(), updated_at = now()
               WHERE id = $1`,
@@ -721,15 +840,15 @@ export const createHiringRepository = (db: DbClient) => ({
           const both = (
             await tx.query<{ n: number }>(
               `SELECT count(*)::int AS n FROM ta.documents
-                WHERE requisition_id = $1 AND status = 'approved'`,
-              [cur.requisition_id],
+                WHERE position_id = $1 AND status = 'approved'`,
+              [cur.position_id],
             )
           )[0]!.n;
           if (both === 2) {
             const opened = await tx.query<{ id: string }>(
               `UPDATE ta.positions SET status = 'open', opened_at = now(), updated_at = now()
-                WHERE requisition_id = $1 AND status = 'awaiting_docs' RETURNING id`,
-              [cur.requisition_id],
+                WHERE id = $1 AND status = 'awaiting_docs' RETURNING id`,
+              [cur.position_id],
             );
             await tx.query(
               `UPDATE org.goals g SET progress = $2, updated_at = now()
@@ -812,15 +931,33 @@ export const createHiringRepository = (db: DbClient) => ({
       return 'ok';
     }),
 
-  /** The recruiter's effective RM and status — only the line's TA RM's own reports qualify. */
+  /**
+   * The recruiter's effective RM, status and TA batch — only the line's TA
+   * RM's own reports who hold the TA batch qualify.
+   */
   recruiterOf: async (employeeId: string) =>
     (
-      await db.query<{ status: string; effective_rm: string | null }>(
-        `SELECT status, coalesce(leave_approver, reports_to) AS effective_rm
-           FROM org.employees WHERE id = $1`,
+      await db.query<{ status: string; effective_rm: string | null; in_ta: boolean }>(
+        `SELECT e.status, coalesce(e.leave_approver, e.reports_to) AS effective_rm,
+                EXISTS (SELECT 1 FROM access.employee_batches eb
+                          JOIN access.batches b ON b.id = eb.batch_id AND b.name = 'TA'
+                         WHERE eb.employee_id = e.id) AS in_ta
+           FROM org.employees e WHERE e.id = $1`,
         [employeeId],
       )
     )[0],
+
+  /** Who a TA RM can give a position to: active reports who hold the TA batch. */
+  recruiterOptions: (taRmId: string) =>
+    db.query<{ id: string; name: string; employee_code: string }>(
+      `SELECT e.id, e.name, e.employee_code
+         FROM org.employees e
+         JOIN access.employee_batches eb ON eb.employee_id = e.id
+         JOIN access.batches b ON b.id = eb.batch_id AND b.name = 'TA'
+        WHERE e.status = 'active' AND coalesce(e.leave_approver, e.reports_to) = $1
+        ORDER BY e.name`,
+      [taRmId],
+    ),
 
   /** This quarter's review cycle (created lazily, like the goals feature does). */
   ensureCycle: async (name: string, startDate: string, endDate: string) => {
@@ -851,15 +988,19 @@ export const createHiringRepository = (db: DbClient) => ({
       dueOn: string;
       title: string;
       progress: number;
+      expectedCloseOn: string | null;
+      priority: 'high' | 'normal' | 'low' | null;
     },
     actor: ActorContext,
     bells: Bell[],
   ): Promise<boolean> =>
     db.transaction(async (tx) => {
       const moved = await tx.query(
-        `UPDATE ta.positions SET recruiter_id = $2, updated_at = now()
+        `UPDATE ta.positions SET recruiter_id = $2,
+                expected_close_on = coalesce($3::date, expected_close_on),
+                priority = coalesce($4::hiring_priority, priority), updated_at = now()
           WHERE id = $1 AND status IN ('awaiting_docs', 'open', 'interviewing') RETURNING id`,
-        [input.positionId, input.recruiterId],
+        [input.positionId, input.recruiterId, input.expectedCloseOn, input.priority],
       );
       if (!moved[0]) return false;
       const existing = await tx.query<{ id: string }>(
