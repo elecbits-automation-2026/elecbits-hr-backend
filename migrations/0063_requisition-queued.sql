@@ -1,0 +1,1 @@
+ALTER TYPE "public"."requisition_status" ADD VALUE 'queued' BEFORE 'submitted';

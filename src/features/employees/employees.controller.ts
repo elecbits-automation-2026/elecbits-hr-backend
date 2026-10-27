@@ -3,6 +3,7 @@ import { assertReaches, keepReachable } from '../../middleware/authorize.js';
 import createError from 'http-errors';
 import { hasOrgScope, isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
+import { createOnboardingRepository, createOnboardingService } from '../onboarding/index.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createEmployeesRepository } from './employees.repository.js';
 import type {
@@ -15,12 +16,19 @@ import type {
 } from './employees.schema.js';
 import { createEmployeesService } from './employees.service.js';
 
-/** Composition root: request-scoped repository + org settings (new-hire defaults). */
+/**
+ * Composition root: request-scoped repository + org settings (new-hire
+ * defaults) + onboarding, which every intake door starts.
+ */
 const service = (req: Request) =>
   createEmployeesService({
     repo: createEmployeesRepository(req.db),
     settings: createSettingsRepository(req.db),
     authz: createAuthzRepository(req.db),
+    onboarding: createOnboardingService({
+      repo: createOnboardingRepository(req.db),
+      authz: createAuthzRepository(req.db),
+    }),
   });
 
 /** Does the caller hold pr.payroll.bank_details (org) for this action? */

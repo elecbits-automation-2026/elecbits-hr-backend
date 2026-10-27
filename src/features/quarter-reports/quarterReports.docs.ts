@@ -44,8 +44,9 @@ export const registerQuarterReportsDocs = (registry: OpenAPIRegistry): void => {
     path: '/api/v1/quarter-reports/cycles/{name}',
     tags: ['Quarter reports'],
     summary:
-      "A quarter's reports the caller may see (their people as manager at close + their hrbp.people reach) with a per-team overview",
+      "A quarter's reports the caller may see (their people as manager at close + their hrbp.people reach) with a per-team overview; ?as=rm limits it to their own people",
     security: bearer,
+    request: { query: z.object({ as: z.enum(['rm']).optional() }) },
     responses: { 200: jsonResponse('Quarter view', quarterViewSchema) },
   });
 

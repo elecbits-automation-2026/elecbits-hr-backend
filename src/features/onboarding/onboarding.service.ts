@@ -158,6 +158,29 @@ export const createOnboardingService = (deps: {
     );
   };
 
+  /**
+   * HR just created / invited / imported this person, or set their joining
+   * date: start the journey NOW so OPS and payroll hear on day one, not when
+   * the joiner first opens their page (test-pass fix, 2026-10-22). Same
+   * recency rule as `mine` — an older record stays a conscious HR start.
+   * Idempotent; returns whether a journey was started.
+   */
+  const ensureForNewHire = async (
+    employeeId: string,
+    actor: ActorContext,
+  ): Promise<boolean> => {
+    const employee = await repo.findEmployee(employeeId);
+    if (!employee || employee.status === 'inactive' || employee.dateOfJoining === null) {
+      return false;
+    }
+    if (daysBetween(employee.dateOfJoining, localDate()) > ONBOARDING_AUTO_CREATE_WINDOW_DAYS) {
+      return false;
+    }
+    if (await repo.findJourneyByEmployee(employeeId)) return false;
+    await startJourney(employee, undefined, actor);
+    return true;
+  };
+
   /** The caller's journey; auto-created for recent joiners, null otherwise. */
   const mine = async (actor: ActorContext): Promise<JourneyDto | null> => {
     const employee = await repo.findEmployee(actor.actorEmployeeId);
@@ -328,7 +351,7 @@ export const createOnboardingService = (deps: {
     );
   };
 
-  return { mine, forEmployee, start, toggleTask, queue, teamTasks };
+  return { mine, forEmployee, start, ensureForNewHire, toggleTask, queue, teamTasks };
 };
 
 export type OnboardingService = ReturnType<typeof createOnboardingService>;

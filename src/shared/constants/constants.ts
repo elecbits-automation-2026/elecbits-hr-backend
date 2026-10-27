@@ -88,10 +88,11 @@ export const MENSTRUAL_MONTHLY_ACCRUAL = 1;
 export const roundToHalfDay = (x: number): number => Math.round(x * 2) / 2;
 
 /**
- * A fixed annual quota (sick / vacation_family / compassionate) for the year
- * someone JOINED is prorated by the share of the calendar year left from their
- * joining date (inclusive), rounded to the half day. Joined in an earlier
- * year: full quota; joined in a later year: nothing.
+ * A fixed annual quota (sick / vacation_family) for the year someone JOINED is
+ * prorated by the share of the calendar year left from their joining date
+ * (inclusive), rounded to the half day. Joined in an earlier year: full quota;
+ * joined in a later year: nothing. Compassionate is never prorated (user
+ * decision 2026-10-22): bereavement isn't earned, so a new joiner gets all 3.
  */
 const proratedQuota = (quota: number, year: number, joinedOn: string): number => {
   const joinedYear = Number(joinedOn.slice(0, 4));
@@ -119,9 +120,11 @@ export const accruedAllocation = (
   const monthly =
     type === 'earned' ? EL_MONTHLY_ACCRUAL : type === 'menstrual' ? MENSTRUAL_MONTHLY_ACCRUAL : null;
   if (monthly === null) {
-    return opts.joinedOn
-      ? proratedQuota(LEAVE_YEARLY_QUOTAS[type], year, opts.joinedOn)
-      : LEAVE_YEARLY_QUOTAS[type];
+    if (!opts.joinedOn) return LEAVE_YEARLY_QUOTAS[type];
+    if (type === 'compassionate') {
+      return Number(opts.joinedOn.slice(0, 4)) > year ? 0 : LEAVE_YEARLY_QUOTAS[type];
+    }
+    return proratedQuota(LEAVE_YEARLY_QUOTAS[type], year, opts.joinedOn);
   }
   const lastMonth = year < now.getFullYear() ? 12 : year > now.getFullYear() ? 0 : now.getMonth() + 1;
   const joinedYear = opts.joinedOn ? Number(opts.joinedOn.slice(0, 4)) : null;

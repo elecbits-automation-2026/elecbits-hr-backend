@@ -29,9 +29,10 @@ const OUT = resolve(
 
 const SCHEMA_NOTES: Record<string, string> = {
   public: 'Sign-in identities and refresh tokens',
-  org: 'People, departments, salary, leaves, attendance, payroll, performance, exits, probation, PIP',
+  org: 'People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP',
   access: 'Owner, modules, batches, grants, requests, audit log',
   ops: 'Assets, custody, requests, gate passes, stock, reminder dedupe',
+  ta: 'Hiring: quarterly plans, requisitions, interview rounds, approvals',
 };
 
 const sqlText = (value: unknown): string => {

@@ -73,10 +73,25 @@ const distanceMeters = (
 };
 
 interface Zone {
+  name: string;
   lat: number;
   lng: number;
   radiusM: number;
 }
+
+/** "1.3 km" / "420 m" — how far a refused punch was. */
+const formatDistance = (m: number): string =>
+  m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+
+/** The closest zone to a punch and how far away it is (null without zones). */
+const nearestZone = (
+  coords: { lat: number; lng: number },
+  zones: Zone[],
+): { zone: Zone; distanceM: number } | null =>
+  zones.reduce<{ zone: Zone; distanceM: number } | null>((best, zone) => {
+    const distanceM = distanceMeters(coords.lat, coords.lng, zone.lat, zone.lng);
+    return !best || distanceM < best.distanceM ? { zone, distanceM } : best;
+  }, null);
 
 /**
  * GEO policy (user decision): a punch inside ANY configured zone (offices,
@@ -107,7 +122,7 @@ const isInsideAnyZone = (
 const envZone = (): Zone[] => {
   const { officeLat, officeLng, officeRadiusMeters } = env.attendance;
   return officeLat !== null && officeLng !== null
-    ? [{ lat: officeLat, lng: officeLng, radiusM: officeRadiusMeters }]
+    ? [{ name: 'Office', lat: officeLat, lng: officeLng, radiusM: officeRadiusMeters }]
     : [];
 };
 
@@ -439,18 +454,40 @@ export const createAttendanceService = (deps: {
     const stored = await repo.listZones();
     const zones: Zone[] = stored.length
       ? stored.map((z) => ({
+          name: z.name,
           lat: Number(z.lat),
           lng: Number(z.lng),
           radiusM: z.radiusM,
         }))
       : envZone();
     if (isInsideAnyZone(coords, ip, zones)) return 'office';
+    if (!coords) {
+      throw createError(
+        403,
+        'Location unavailable — enable it, or submit a remote-work request for today',
+        { code: 'OUT_OF_OFFICE_RANGE' },
+      );
+    }
+    // Say how far off the punch was, so a wrong zone point or a poor laptop
+    // fix is obvious from the message itself (test-pass fix, 2026-10-22).
+    const near = nearestZone(coords, zones);
     throw createError(
       403,
-      coords
-        ? 'You are outside every office zone — submit a remote-work request for today'
-        : 'Location unavailable — enable it, or submit a remote-work request for today',
-      { code: 'OUT_OF_OFFICE_RANGE' },
+      near
+        ? `You are ${formatDistance(near.distanceM)} from ${near.zone.name} (allowed ${near.zone.radiusM} m) — move closer, or submit a remote-work request for today`
+        : 'You are outside every office zone — submit a remote-work request for today',
+      {
+        code: 'OUT_OF_OFFICE_RANGE',
+        ...(near
+          ? {
+              nearest: {
+                name: near.zone.name,
+                distanceM: Math.round(near.distanceM),
+                radiusM: near.zone.radiusM,
+              },
+            }
+          : {}),
+      },
     );
   };
 

@@ -18,6 +18,7 @@ import {
   payrollRunSchema,
   payslipCorrectionSchema,
   payslipSchema,
+  compensationPersonSchema,
   salaryAnnexureSchema,
   tdsEstimateSchema,
   updatePayslipSchema,
@@ -171,6 +172,19 @@ export const registerPayrollDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       204: { description: 'Deleted' },
       409: errorResponse('Run is not a draft'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/payroll/people',
+    tags: ['Payroll'],
+    summary:
+      'Compensation people list: invited / active / exiting, Owner excluded (pr.payroll.compensation read)',
+    security: bearer,
+    responses: {
+      200: jsonResponse('People', z.array(compensationPersonSchema)),
+      403: errorResponse('No compensation grant'),
     },
   });
 

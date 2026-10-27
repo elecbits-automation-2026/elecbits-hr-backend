@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import createError from 'http-errors';
 import { isUuid } from '../../shared/helpers/helpers.js';
-import { createAuthzRepository } from '../access/authz.repository.js';
+import { createAuthzRepository, type PeopleScope } from '../access/authz.repository.js';
 import { createAttendanceRepository } from '../attendance/attendance.repository.js';
 import { createAttendanceService } from '../attendance/attendance.service.js';
 import { createSettingsRepository } from '../settings/index.js';
@@ -50,13 +50,11 @@ export const quarterReportsController = {
   },
 
   view: async (req: Request, res: Response): Promise<void> => {
-    res.json(
-      await service(req).view(
-        req.params.name!,
-        req.auth!.employeeId,
-        await hrScope(req, 'read'),
-      ),
-    );
+    // `?as=rm` is the personal My performance board: only the caller's own
+    // people. The HR reach stays on HR → Quarter reports (test-pass fix).
+    const scope: PeopleScope =
+      req.query.as === 'rm' ? { all: false, ids: new Set() } : await hrScope(req, 'read');
+    res.json(await service(req).view(req.params.name!, req.auth!.employeeId, scope));
   },
 
   mine: async (req: Request, res: Response): Promise<void> => {

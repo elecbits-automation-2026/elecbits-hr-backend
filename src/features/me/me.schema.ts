@@ -71,6 +71,12 @@ export const meSchema = z
      * they set their own goals (access/selfGovernance.ts is the rule).
      */
     selfGoverned: z.boolean(),
+    /** Seats held right now — drives the hiring nav items (UX only). */
+    seats: z.array(z.enum(['dept_head', 'vp_hr_head'])),
+    /** The HR department's head, or a TA RM with a hire to decide — shows Hiring approvals (UX only). */
+    hiringApprover: z.boolean(),
+    /** Conducts a round on a live application — shows My interviews (UX only). */
+    hasInterviews: z.boolean(),
   })
   .openapi('Me');
 

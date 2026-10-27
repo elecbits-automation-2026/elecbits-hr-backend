@@ -1,15 +1,30 @@
-import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+} from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
+  concerns,
   employees,
   openDoorBookings,
+  openDoorRequests,
   openDoorSlots,
+  orgOwner,
 } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 
 export type SlotRow = typeof openDoorSlots.$inferSelect;
 export type BookingRow = typeof openDoorBookings.$inferSelect;
+export type RequestRow = typeof openDoorRequests.$inferSelect;
 
 /** Who performed the mutation — for the audit row (§10). */
 export interface ActorContext {
@@ -182,6 +197,182 @@ export const createOpenDoorRepository = (db: DbClient) => ({
       });
       await insertNotifications(tx, bell.to, bell.event);
       return rows[0]!;
+    }),
+
+  // ── Session requests ──────────────────────────────────────────────────────
+
+  /**
+   * Active people at L5–L6 or in `ids` — the hosts a request may go to. The
+   * Owner-linked administration account is not a person, so never a host.
+   */
+  hostCandidates: (ids: string[]) =>
+    db.orm
+      .select({
+        id: employees.id,
+        name: employees.name,
+        designation: employees.designation,
+      })
+      .from(employees)
+      .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
+      .where(
+        and(
+          eq(employees.status, 'active'),
+          isNull(orgOwner.employeeId),
+          ids.length
+            ? or(inArray(employees.level, ['L5', 'L6']), inArray(employees.id, ids))
+            : inArray(employees.level, ['L5', 'L6']),
+        ),
+      )
+      .orderBy(asc(employees.name)),
+
+  /** Case codes for concern-linked requests (the code only — never the body). */
+  concernCodes: async (ids: string[]): Promise<Map<string, string>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await db.orm
+      .select({ id: concerns.id, code: concerns.code })
+      .from(concerns)
+      .where(inArray(concerns.id, ids));
+    return new Map(rows.map((r) => [r.id, r.code]));
+  },
+
+  findRequest: async (id: string): Promise<RequestRow | undefined> =>
+    (
+      await db.orm
+        .select()
+        .from(openDoorRequests)
+        .where(eq(openDoorRequests.id, id))
+        .limit(1)
+    )[0],
+
+  /** Requests the person made, newest first. */
+  requestsOf: (employeeId: string): Promise<RequestRow[]> =>
+    db.orm
+      .select()
+      .from(openDoorRequests)
+      .where(eq(openDoorRequests.employeeId, employeeId))
+      .orderBy(desc(openDoorRequests.createdAt)),
+
+  /** Requests addressed to a host, plus every concern request (handlers are resolved by the service). */
+  requestsToAnswer: (hostId: string): Promise<RequestRow[]> =>
+    db.orm
+      .select()
+      .from(openDoorRequests)
+      .where(
+        or(eq(openDoorRequests.hostId, hostId), isNotNull(openDoorRequests.concernId)),
+      )
+      .orderBy(desc(openDoorRequests.createdAt)),
+
+  /** Still waiting for an answer — the reminder job. */
+  openRequests: (): Promise<RequestRow[]> =>
+    db.orm
+      .select()
+      .from(openDoorRequests)
+      .where(eq(openDoorRequests.status, 'requested'))
+      .orderBy(asc(openDoorRequests.createdAt)),
+
+  insertRequest: async (
+    values: typeof openDoorRequests.$inferInsert,
+    actor: ActorContext,
+    bell: { to: string[]; event: NotificationEvent },
+  ): Promise<RequestRow> =>
+    db.transaction(async (tx) => {
+      const rows = await tx.orm.insert(openDoorRequests).values(values).returning();
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: 'open_door.requested',
+        subject: `open_door_requests:${rows[0]!.id}`,
+        detail: JSON.stringify({ concern: values.concernId ?? null }),
+      });
+      await insertNotifications(tx, bell.to, bell.event);
+      return rows[0]!;
+    }),
+
+  /**
+   * The host's offer, all or nothing: a 1-seat slot owned by the host, the
+   * requester booked into it, the request marked offered. Null when the
+   * request was answered or withdrawn meanwhile.
+   */
+  offer: async (
+    request: RequestRow,
+    slot: {
+      ownerId: string;
+      date: string;
+      startTime: string;
+      endTime: string;
+      note: string | null;
+    },
+    actor: ActorContext,
+    bell: { to: string[]; event: NotificationEvent },
+  ): Promise<RequestRow | null> =>
+    db.transaction(async (tx) => {
+      const claimed = await tx.orm
+        .update(openDoorRequests)
+        .set({
+          status: 'offered',
+          decidedBy: actor.actorEmployeeId,
+          decidedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(openDoorRequests.id, request.id),
+            eq(openDoorRequests.status, 'requested'),
+          ),
+        )
+        .returning();
+      if (!claimed[0]) return null;
+      const slots = await tx.orm
+        .insert(openDoorSlots)
+        .values({ ...slot, capacity: 1 })
+        .returning();
+      await tx.orm.insert(openDoorBookings).values({
+        slotId: slots[0]!.id,
+        employeeId: request.employeeId,
+        topic: request.topic,
+        status: 'booked',
+      });
+      const rows = await tx.orm
+        .update(openDoorRequests)
+        .set({ slotId: slots[0]!.id })
+        .where(eq(openDoorRequests.id, request.id))
+        .returning();
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: 'open_door.request_offered',
+        subject: `open_door_requests:${request.id}`,
+        detail: JSON.stringify({ slotId: slots[0]!.id }),
+      });
+      await insertNotifications(tx, bell.to, bell.event);
+      return rows[0]!;
+    }),
+
+  /** requested → declined / cancelled; null when it already moved on. */
+  closeRequest: async (
+    id: string,
+    to: 'declined' | 'cancelled',
+    reason: string | null,
+    actor: ActorContext,
+    bell: { to: string[]; event: NotificationEvent },
+  ): Promise<RequestRow | null> =>
+    db.transaction(async (tx) => {
+      const rows = await tx.orm
+        .update(openDoorRequests)
+        .set({
+          status: to,
+          declineReason: reason,
+          decidedBy: actor.actorEmployeeId,
+          decidedAt: new Date(),
+        })
+        .where(and(eq(openDoorRequests.id, id), eq(openDoorRequests.status, 'requested')))
+        .returning();
+      if (!rows[0]) return null;
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: `open_door.request_${to}`,
+        subject: `open_door_requests:${id}`,
+        detail: null,
+      });
+      await insertNotifications(tx, bell.to, bell.event);
+      return rows[0];
     }),
 
   setBookingStatus: async (

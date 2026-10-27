@@ -6,6 +6,7 @@ import {
   createExitsService,
 } from '../features/exits/index.js';
 import { createOpsCustodyReader } from '../features/ops/index.js';
+import { openDoorServiceFor } from '../features/open-door/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/index.js';
@@ -14,6 +15,7 @@ import {
   createConcernsRepository,
   createConcernsService,
 } from '../features/concerns/index.js';
+import { hiringJobsFor } from '../features/hiring/index.js';
 import { createJobsRepository, createJobsService } from '../features/jobs/index.js';
 import { createSettingsRepository } from '../features/settings/index.js';
 
@@ -37,6 +39,8 @@ const service = () =>
     }),
     probation: probationServiceFor(db),
     pip: pipServiceFor(db),
+    hiring: hiringJobsFor(db),
+    openDoor: openDoorServiceFor(db),
     concerns: createConcernsService({
       repo: createConcernsRepository(db),
       authz: createAuthzRepository(db),

@@ -191,6 +191,15 @@ export const openDoorBookingStatusEnum = pgEnum('open_door_booking_status', [
   'cancelled',
   'no_show',
 ]);
+// A session asked for when no published slot suits (test-pass fix
+// 2026-10-22): the host offers a time (→ offered, a booked 1-seat slot) or
+// declines; the requester may withdraw while it waits.
+export const openDoorRequestStatusEnum = pgEnum('open_door_request_status', [
+  'requested',
+  'offered',
+  'declined',
+  'cancelled',
+]);
 
 // OPS asset manager (user decisions 2026-10-15). An asset always sits in a
 // punch zone; `assigned` means a person also holds it. Scrapped / gifted /
@@ -313,3 +322,107 @@ export const pipCheckinRatingEnum = pgEnum('pip_checkin_rating', [
   'at_risk',
   'off_track',
 ]);
+
+// Seats (TA groundwork): positions HR assigns to a person — a relationship,
+// never a grant. `dept_head` is per department; `vp_hr_head` is the company-wide VP seat (key kept from before).
+// `ta_head` is retired (Admin gives each hiring line to a TA RM instead).
+export const seatEnum = pgEnum('seat', ['dept_head', 'vp_hr_head', 'ta_head']);
+
+// TA hiring (Step B). A requisition is one line of a department's quarterly
+// hiring plan: draft → submitted → approved | returned (edit = new version)
+// → submitted …; cancelled by the head at any point before approval.
+export const requisitionStatusEnum = pgEnum('requisition_status', [
+  'draft',
+  // Submitted by the head, waiting for the quarter's deadline — then all of a
+  // quarter's queued lines go to the approvers together.
+  'queued',
+  'submitted',
+  'returned',
+  'approved',
+  'cancelled',
+]);
+// The TA doc's five interview rounds; the head picks which apply.
+export const interviewRoundEnum = pgEnum('interview_round', [
+  'hr',
+  'technical',
+  'practical',
+  'managerial',
+  'hr_final',
+]);
+// Who approves: a hiring line — the HR department's head and the Admin (Owner)
+// account; a JD or scorecard — the line's department head and Admin; a hire —
+// those plus the line's TA RM. `ta_head` is the retired seat, kept for history.
+export const approverRoleEnum = pgEnum('approver_role', [
+  'ta_head',
+  'hr_head',
+  'admin',
+  'dept_head',
+  'ta_rm',
+]);
+// What an approval is about — later TA steps add their documents and decisions.
+export const approvalSubjectEnum = pgEnum('approval_subject', [
+  'requisition',
+  'jd',
+  'scorecard',
+  'hire',
+]);
+export const approvalDecisionEnum = pgEnum('approval_decision', ['approve', 'reject']);
+
+// TA Step C. A position is one seat of an approved line: it waits for its JD
+// and scorecard, then opens for sourcing → interviewing → offer → filled.
+export const positionStatusEnum = pgEnum('position_status', [
+  'awaiting_docs',
+  'open',
+  'interviewing',
+  'offer',
+  'filled',
+  'cancelled',
+]);
+export const taDocumentKindEnum = pgEnum('ta_document_kind', ['jd', 'scorecard']);
+// draft → in_review → approved | returned (edit = new version) → in_review …
+export const taDocumentStatusEnum = pgEnum('ta_document_status', [
+  'draft',
+  'in_review',
+  'returned',
+  'approved',
+]);
+
+// TA Step D. Where a candidate came from (jobs are posted by hand; the HRMS
+// only records the source).
+export const candidateSourceEnum = pgEnum('candidate_source', [
+  'naukri',
+  'linkedin',
+  'internshala',
+  'careers_page',
+  'agency',
+  'campus',
+  'social',
+  'referral',
+  'internal',
+  'other',
+]);
+// A candidate for ONE position: sourced → shortlisted (TA head) → interviewing
+// → interviewed (every round scored) → decision (the four approve; Step E) →
+// selected → offered → hired. Ends: rejected, withdrawn, offer_declined,
+// offer_withdrawn (e.g. failed BGV), no_show (backed out before joining).
+export const applicationStageEnum = pgEnum('application_stage', [
+  'sourced',
+  'shortlisted',
+  'interviewing',
+  'interviewed',
+  'decision',
+  'selected',
+  'offered',
+  'hired',
+  'offer_declined',
+  'offer_withdrawn',
+  'no_show',
+  'rejected',
+  'withdrawn',
+]);
+export const interviewRecommendationEnum = pgEnum('interview_recommendation', [
+  'hire',
+  'no_hire',
+]);
+// Background verification with the previous employer (TA Step E), in parallel with the offer.
+export const bgvStatusEnum = pgEnum('bgv_status', ['not_started', 'in_progress', 'clear', 'failed']);

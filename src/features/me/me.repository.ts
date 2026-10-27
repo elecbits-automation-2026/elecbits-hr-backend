@@ -134,6 +134,57 @@ export const createMeRepository = (db: DbClient) => ({
     return rows.length > 0;
   },
 
+  /** Seats this person holds right now (dept head, VP). */
+  openSeats: async (employeeId: string): Promise<Array<'dept_head' | 'vp_hr_head'>> =>
+    (
+      await db.query<{ seat: 'dept_head' | 'vp_hr_head' }>(
+        `SELECT DISTINCT seat FROM org.seats
+          WHERE employee_id = $1 AND ended_at IS NULL AND seat <> 'ta_head'`,
+        [employeeId],
+      )
+    ).map((r) => r.seat),
+
+  /**
+   * Decides hiring from their own login: the head of the department set as
+   * HR (`hiring.hrDepartment`; its default is unset), or the TA RM of a line
+   * with a hire decision waiting. The Admin account uses the Admin console.
+   */
+  isHiringApprover: async (employeeId: string): Promise<boolean> =>
+    (
+      await db.query(
+        `SELECT 1 FROM org.seats s
+          WHERE s.employee_id = $1 AND s.ended_at IS NULL AND s.seat = 'dept_head'
+            AND s.department_id::text = (
+                  SELECT value->>'departmentId' FROM org.org_settings
+                   WHERE key = 'hiring.hrDepartment')
+         UNION ALL
+         SELECT 1 FROM ta.applications a
+           JOIN ta.positions p ON p.id = a.position_id
+           JOIN ta.requisitions r ON r.id = p.requisition_id
+          WHERE r.ta_rm_id = $1 AND a.stage = 'decision'
+          LIMIT 1`,
+        [employeeId],
+      )
+    ).length > 0,
+
+  /**
+   * Conducts a round on a live application (the named interviewer, or the
+   * recruiter for HR rounds left blank) — shows My interviews.
+   */
+  hasInterviews: async (employeeId: string): Promise<boolean> =>
+    (
+      await db.query(
+        `SELECT 1 FROM ta.applications a
+           JOIN ta.positions p ON p.id = a.position_id
+           JOIN ta.requisition_rounds rr ON rr.requisition_id = p.requisition_id
+          WHERE a.stage IN ('interviewing', 'interviewed')
+            AND coalesce(rr.interviewer_id,
+                  CASE WHEN rr.round IN ('hr', 'hr_final') THEN p.recruiter_id END) = $1
+          LIMIT 1`,
+        [employeeId],
+      )
+    ).length > 0,
+
   /** Own salary/bank row — me scope; PR reads it via the employees feature. */
   findSalary: async (employeeId: string) => {
     const rows = await db.orm

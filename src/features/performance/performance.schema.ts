@@ -23,6 +23,8 @@ export const goalSchema = z
     weight: z.number(),
     progress: z.number().int(),
     dueOn: z.string(),
+    /** Set = a hiring goal: progress follows the position; not editable here. */
+    positionId: z.string().uuid().nullable(),
     createdByName: z.string().nullable(),
     createdAt: z.string().datetime(),
   })

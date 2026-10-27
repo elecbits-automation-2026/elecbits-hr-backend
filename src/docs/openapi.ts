@@ -3,6 +3,12 @@ import { registerAuthDocs } from '../features/auth/index.js';
 import { registerMeDocs } from '../features/me/index.js';
 import { registerEmployeesDocs } from '../features/employees/index.js';
 import { registerDepartmentsDocs } from '../features/departments/index.js';
+import { registerSeatsDocs } from '../features/seats/index.js';
+import {
+  registerCandidatesDocs,
+  registerHireDocs,
+  registerHiringDocs,
+} from '../features/hiring/index.js';
 import {
   registerAuditDocs,
   registerBatchesDocs,
@@ -64,6 +70,10 @@ export const buildOpenApiDocument = () => {
   registerMeDocs(registry);
   registerEmployeesDocs(registry);
   registerDepartmentsDocs(registry);
+  registerSeatsDocs(registry);
+  registerHiringDocs(registry);
+  registerCandidatesDocs(registry);
+  registerHireDocs(registry);
   registerBatchesDocs(registry);
   registerGrantRequestsDocs(registry);
   registerAuditDocs(registry);

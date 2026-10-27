@@ -283,6 +283,31 @@ const definitions = {
     schema: z.object({ contact: z.string().trim().max(300) }),
     default: { contact: '' },
   },
+  'hiring.hrDepartment': {
+    area: 'people',
+    live: true,
+    label: 'HR department (hiring approvals)',
+    description:
+      'The head of this department gives the HR approval on hiring lines, alongside Admin (department heads are assigned on the Seats page). Blank = no HR approver, so submitted lines wait.',
+    schema: z.object({ departmentId: z.string().uuid().nullable() }),
+    default: { departmentId: null as string | null },
+  },
+  'hiring.planWindow': {
+    area: 'people',
+    live: true,
+    label: 'Quarterly hiring-plan window',
+    description:
+      'Department heads are reminded this many days before a quarter starts to add their hiring needs for it, with a deadline the second number of days before the start. Lines a head submits wait until the deadline; the day after, all of them go to the HR head and Admin together. Lines added after the deadline go into the plan for the quarter after (urgent needs use Urgent hire).',
+    schema: z
+      .object({
+        remindDaysBefore: z.number().int().min(1).max(90),
+        deadlineDaysBefore: z.number().int().min(0).max(89),
+      })
+      .refine((v) => v.deadlineDaysBefore < v.remindDaysBefore, {
+        message: 'The deadline must come after the reminder',
+      }),
+    default: { remindDaysBefore: 30, deadlineDaysBefore: 10 },
+  },
   'concerns.mrcMembers': {
     area: 'access',
     live: true,

@@ -13,8 +13,10 @@ import {
 import type { AuthzRepository } from '../access/authz.repository.js';
 import type { ConcernsService } from '../concerns/index.js';
 import type { ExitsService } from '../exits/index.js';
+import type { OpenDoorService } from '../open-door/index.js';
 import type { ProbationService } from '../probation/index.js';
 import type { PipService } from '../pip/index.js';
+import type { HiringJobsService } from '../hiring/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { JobRunRow, JobsRepository, ReminderToSend } from './jobs.repository.js';
 import type { JobDto, JobRunDto } from './jobs.schema.js';
@@ -54,11 +56,14 @@ export const createJobsService = (deps: {
   authz: AuthzRepository;
   settings: SettingsReader;
   concerns: ConcernsService;
+  openDoor: Pick<OpenDoorService, 'unanswered'>;
   exits: ExitsService;
   probation: ProbationService;
   pip: PipService;
+  hiring: HiringJobsService;
 }) => {
-  const { repo, authz, settings, concerns, exits, probation, pip } = deps;
+  const { repo, authz, settings, concerns, openDoor, exits, probation, pip, hiring } =
+    deps;
 
   const approvalReminders = async (now: Date): Promise<Record<string, number>> => {
     const today = localDate(now);
@@ -278,12 +283,55 @@ export const createJobsService = (deps: {
           subjectId: concern.id,
           recipientId: h,
           title: `Overdue: ${concern.code} was due ${due}`,
-          link: '/concerns',
+          link: '/grievances?tab=concerns',
         });
       }
     }
     await repo.sendReminders(out);
     return { overdue: overdue.length, reminded: out.length };
+  };
+
+  /**
+   * open-door-requests (test-pass fix 2026-10-22): a session request nobody
+   * has answered rings its host (or the case's handlers) after
+   * APPROVAL_REMINDERS.afterWorkingDays, then every repeatEveryWorkingDays,
+   * until it is offered, declined or withdrawn. The bell names no topic.
+   */
+  const openDoorRequests = async (now: Date): Promise<Record<string, number>> => {
+    const today = localDate(now);
+    const rules = APPROVAL_REMINDERS;
+    const [workWeek, last, waiting] = await Promise.all([
+      settings.effective('attendance.workWeek'),
+      repo.lastReminders(),
+      openDoor.unanswered(),
+    ]);
+    const holidays = await repo.holidaysBetween(addDays(today, -400), today);
+    const out: ReminderToSend[] = [];
+    for (const { request, answerers } of waiting) {
+      const since = localDate(request.createdAt);
+      if (workingDaysBetween(since, today, workWeek, holidays) < rules.afterWorkingDays) {
+        continue;
+      }
+      for (const a of answerers) {
+        const lastSent = last.get(`open_door_request:${request.id}:${a}`);
+        if (
+          lastSent &&
+          workingDaysBetween(localDate(lastSent), today, workWeek, holidays) <
+            rules.repeatEveryWorkingDays
+        ) {
+          continue;
+        }
+        out.push({
+          kind: 'open_door_request',
+          subjectId: request.id,
+          recipientId: a,
+          title: `An open-door session request has waited since ${since} — offer a time or decline`,
+          link: '/grievances?tab=requests',
+        });
+      }
+    }
+    await repo.sendReminders(out);
+    return { waiting: waiting.length, reminded: out.length };
   };
 
   /**
@@ -403,9 +451,15 @@ export const createJobsService = (deps: {
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: concernDeadlines,
     },
+    'open-door-requests': {
+      description:
+        'Rings hosts (or case handlers) whose open-door session requests are still unanswered.',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: openDoorRequests,
+    },
     'exit-day': {
       description:
-        'On a leaver\'s last working day asks for the exit interview and tells OPS; afterwards relieves them (login off, open requests cancelled, team without an RM — HR told).',
+        "On a leaver's last working day asks for the exit interview and tells OPS; afterwards relieves them (login off, open requests cancelled, team without an RM, seats they held ended — HR told).",
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => exits.daily(now),
     },
@@ -426,6 +480,24 @@ export const createJobsService = (deps: {
         'Asks holders of overdue lab loans and gate-pass items whether they are back; escalates to OPS and the RM.',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: returnReminders,
+    },
+    'hiring-plan-window': {
+      description:
+        'Before each quarter, reminds department heads (once) to add their hiring needs by the deadline; after it, sends every submitted line to the HR head and Admin together and moves leftover drafts to the next quarter (setting hiring.planWindow).',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.planWindow(now),
+    },
+    'talent-pool-retention': {
+      description:
+        'Anonymises candidates 6 months after they were last considered, when nothing is in play and they were never hired: name, contact, CV, notes and offer letters go; the counts stay.',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.retention(now),
+    },
+    'hiring-goals': {
+      description:
+        "Carries a recruiter's hiring goal into the current quarter for every position still being worked (same weight, progress from the position's stage).",
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.carryOver(now),
     },
   };
 

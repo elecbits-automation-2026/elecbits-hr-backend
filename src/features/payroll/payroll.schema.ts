@@ -150,6 +150,20 @@ export const updatePayslipSchema = z
   .openapi('UpdatePayslip');
 
 /**
+ * Who payroll can put on payroll: every invited / active / exiting person
+ * (not the Owner-linked account). Invited joiners are included on purpose —
+ * salary is set up before day one. No pay fields; the salary door is separate.
+ */
+export const compensationPersonSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    employeeCode: z.string(),
+    status: z.enum(['invited', 'active', 'exiting']),
+  })
+  .openapi('CompensationPerson');
+
+/**
  * One row of the TDS calculator (ERP sheet, "TDS" tab): new-regime slabs with
  * 4% cess on FY-prorated CTC less the standard deduction, employer PF and
  * CNPS. Exposes annual CTC, so the endpoint sits behind
@@ -299,6 +313,7 @@ export type MyPayslipDto = z.infer<typeof myPayslipSchema>;
 export type CreateRunInput = z.infer<typeof createRunSchema>;
 export type UpdatePayslipInput = z.infer<typeof updatePayslipSchema>;
 export type TdsEstimateDto = z.infer<typeof tdsEstimateSchema>;
+export type CompensationPersonDto = z.infer<typeof compensationPersonSchema>;
 export type UpdateTdsInput = z.infer<typeof updateTdsSchema>;
 export type AnnexureQuery = z.infer<typeof annexureQuerySchema>;
 export type SalaryAnnexureDto = z.infer<typeof salaryAnnexureSchema>;

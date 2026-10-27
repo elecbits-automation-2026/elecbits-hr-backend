@@ -2,11 +2,12 @@
  * Barrel for the Drizzle schema — the single import surface for `DbClient` and
  * drizzle-kit (drizzle.config.ts points here). Tables live in three Postgres
  * schemas mirroring the design doc §11.1: `org`, `access`, `ops`, plus the
- * sign-in `users` table in `public`.
+ * sign-in `users` table in `public` — and `ta` for hiring (TA design).
  */
 export * from './enums.js';
 export * from './identity.js';
 export * from './departments.js';
+export * from './seats.js';
 export * from './employees.js';
 export * from './compensation.js';
 export * from './access.js';
@@ -28,3 +29,4 @@ export * from './career.js';
 export * from './performance.js';
 export * from './settings.js';
 export * from './notifications.js';
+export * from './ta.js';

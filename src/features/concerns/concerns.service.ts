@@ -48,7 +48,7 @@ const QUEUE_LABEL: Record<QueueName, string> = {
   mrc: 'Management Review Committee (level 3)',
   vigil: 'Whistleblower reports',
 };
-const LINK = '/concerns';
+const LINK = '/grievances?tab=concerns';
 
 const notFound = () =>
   createError(404, 'Concern not found', { code: 'CONCERN_NOT_FOUND' });
@@ -795,6 +795,48 @@ export const createConcernsService = (deps: {
     return toDto(c, 'raiser', null);
   };
 
+  // ── Meeting requests (open-door feature asks; test-pass fix 2026-10-22) ──
+
+  const isClosed = (c: ConcernRow) =>
+    ['closed', 'resolved', 'declined'].includes(c.status);
+
+  /**
+   * The raiser of a NAMED, live case asks to talk it through: who may answer
+   * (the current handlers). Anonymous cases never get a meeting — it would
+   * name the raiser — so they read as not found, like every raiser door.
+   */
+  const meetingTarget = async (id: string, actorId: string) => {
+    const c = await asRaiser(id, actorId);
+    if (isClosed(c)) {
+      throw createError(409, 'This case is closed', { code: 'CONCERN_CLOSED' });
+    }
+    return { id: c.id, code: c.code, handlers: await handlersOf(c) };
+  };
+
+  /** Current handlers of a case (empty once it is closed or gone). */
+  const handlersFor = async (id: string): Promise<string[]> => {
+    const c = await repo.findById(id);
+    return c && !isClosed(c) ? handlersOf(c) : [];
+  };
+
+  /** A system line on the case thread, visible to the raiser. */
+  const noteMeeting = async (id: string, body: string, actor: ActorContext) => {
+    const c = await repo.findById(id);
+    if (!c) return;
+    await repo.addNote(
+      c,
+      {
+        authorId: actor.actorEmployeeId,
+        kind: 'system',
+        level: c.level,
+        body,
+        visibleToRaiser: true,
+      },
+      actor,
+      [],
+    );
+  };
+
   /** Overdue active cases with their handlers — the concern-deadlines job. */
   const overdue = async () => {
     const t = today();
@@ -825,6 +867,9 @@ export const createConcernsService = (deps: {
     followUp,
     followUpNote,
     overdue,
+    meetingTarget,
+    handlersFor,
+    noteMeeting,
   };
 };
 

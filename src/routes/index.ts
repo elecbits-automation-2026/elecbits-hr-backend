@@ -3,6 +3,8 @@ import { authRoutes } from '../features/auth/index.js';
 import { meRoutes } from '../features/me/index.js';
 import { employeesRoutes } from '../features/employees/index.js';
 import { departmentsRoutes } from '../features/departments/index.js';
+import { seatsRoutes } from '../features/seats/index.js';
+import { hiringRoutes } from '../features/hiring/index.js';
 import {
   auditRoutes,
   batchesRoutes,
@@ -60,6 +62,10 @@ apiV1.use('/me', meRoutes);
 // Org structure (HRBP portal, §2).
 apiV1.use('/employees', employeesRoutes);
 apiV1.use('/departments', departmentsRoutes);
+apiV1.use('/seats', seatsRoutes);
+
+// TA hiring: quarterly plans, requisitions and their approvals.
+apiV1.use('/hiring', hiringRoutes);
 
 // Access model (Owner / admin surface, §3–§6).
 apiV1.use('/batches', batchesRoutes);

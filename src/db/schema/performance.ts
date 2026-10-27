@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   date,
@@ -13,6 +14,7 @@ import {
 import { orgSchema } from './departments.js';
 import { employees } from './employees.js';
 import { goalCategoryEnum } from './enums.js';
+import { positions } from './ta.js';
 
 /**
  * Performance layer (adopted from the hr-tool review). A review cycle is one
@@ -55,13 +57,24 @@ export const goals = orgSchema.table(
     weight: numeric('weight', { precision: 5, scale: 1 }).notNull(),
     progress: integer('progress').notNull().default(0),
     dueOn: date('due_on').notNull(),
+    /**
+     * Set = a recruiter's hiring goal (TA design): the position's stage drives
+     * `progress`, and the goal is changed only through hiring.
+     */
+    positionId: uuid('position_id').references(() => positions.id),
     createdBy: uuid('created_by')
       .notNull()
       .references(() => employees.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('goals_employee_cycle_idx').on(t.employeeId, t.cycleId)],
+  (t) => [
+    index('goals_employee_cycle_idx').on(t.employeeId, t.cycleId),
+    // One hiring goal per position per quarter (an unfilled one carries over).
+    uniqueIndex('goals_position_cycle_uq')
+      .on(t.positionId, t.cycleId)
+      .where(sql`${t.positionId} IS NOT NULL`),
+  ],
 );
 
 /**
