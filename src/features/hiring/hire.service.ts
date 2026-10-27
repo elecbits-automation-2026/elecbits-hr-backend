@@ -4,21 +4,21 @@ import { localDateOf } from '../../shared/helpers/helpers.js';
 import type { CreateEmployeeInput, EmployeesService } from '../employees/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { CandidatesService } from './candidates.service.js';
-import type { HireRepository, HireRole } from './hire.repository.js';
+import type { HireRepository } from './hire.repository.js';
 import type {
-  BgvInput,
-  DecideHireInput,
-  MakeOfferInput,
+  CandidateDocStatus,
+  CandidateDocumentDto,
   MarkHiredInput,
+  OfferDraftInput,
 } from './hire.schema.js';
 import type { ActorContext, Bell, HiringRepository } from './hiring.repository.js';
 import { POSITION_PROGRESS } from './hiring.service.js';
 
 const LINK_TA = '/hr/hiring';
 const LINK_APPROVALS = '/hiring/approvals';
-const LINK_ADMIN_APPROVALS = '/admin/hiring-approvals';
-const OFFER_MAX_BYTES = 10 * 1024 * 1024;
-const OFFER_TYPES = new Set([
+const LINK_ONBOARDING = '/hr/onboarding';
+const LETTER_MAX_BYTES = 10 * 1024 * 1024;
+const LETTER_TYPES = new Set([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -41,19 +41,18 @@ export type HireTransaction = <T>(
 ) => Promise<T>;
 
 /**
- * The final decision, offer, BGV and hire (TA Step E). Urgent hiring is done
- * offline for now (learner, 2026-10-26): HR adds the person through the
- * normal add-employee flow.
+ * From "all rounds passed" to joining (TA workflow deck, 2026-10-27):
  *
- * After every round is scored TA sends the candidate for the FINAL decision:
- * the line's department head, the line's TA RM, the HR head and the Admin account
- * — any order; a reject ends it, the fourth approve selects. The offer letter
- * is made outside and uploaded; an URGENT line's offer waits for the line's
- * approval. BGV runs alongside; a failed one leads TA to withdraw the offer.
- * When the candidate accepts, Mark hired creates the employee record through
- * the normal intake (company email, RM, new-hire defaults, onboarding) in the
- * same transaction. Backing out before joining deactivates that record and
- * reopens the position.
+ * TA asks for the candidate's documents (a checklist + the candidate folder
+ * link), negotiates and drafts the offer (CTC, joining date, terms, the draft
+ * letter) and sends it to the HR HEAD — the head of the hiring HR department
+ * — who approves it and uploads the SIGNED letter (or returns it with what to
+ * change). TA then shares the signed offer. Changing approved terms sends
+ * them back for approval. When the candidate accepts, Mark hired creates the
+ * employee record through the normal intake (onboarding included) and HRBP
+ * gets the handover; HRBP later confirms the actual joining. Backing out
+ * before joining deactivates the record and reopens the position. BGV is a
+ * form in onboarding, never a gate here.
  */
 export const createHireService = (deps: {
   repo: HireRepository;
@@ -64,10 +63,9 @@ export const createHireService = (deps: {
 }) => {
   const { repo, hiring, settings, applications, transaction } = deps;
 
-  const holders = async () =>
-    hiring.approverHolders(
-      (await settings.effective('hiring.hrDepartment')).departmentId,
-    );
+  const hrHead = async () =>
+    (await hiring.approverHolders((await settings.effective('hiring.hrDepartment')).departmentId))
+      .hr_head;
 
   const find = async (id: string) => {
     const a = await repo.findApplication(id);
@@ -78,135 +76,97 @@ export const createHireService = (deps: {
 
   const wrongStage = (what: string) => createError(409, what, { code: 'WRONG_STAGE' });
 
-  /** The four decision-makers of this line, and the bells that reach them. */
-  const deciders = async (line: { department_id: string; ta_rm_id: string | null }) => {
-    const h = await holders();
-    const head = await hiring.departmentHead(line.department_id);
-    return { head, ta: line.ta_rm_id, hr: h.hr_head, admin: h.admin };
-  };
-
-  const bellToDeciders = async (
-    line: { department_id: string; ta_rm_id: string | null },
-    type: string,
-    title: string,
-  ): Promise<Bell[]> => {
-    const d = await deciders(line);
-    const people = [d.head, d.ta, d.hr].filter((x): x is string => !!x);
-    return [
-      { to: people, event: { type, title, link: LINK_APPROVALS } },
-      {
-        to: d.admin ? [d.admin] : [],
-        event: { type, title, link: LINK_ADMIN_APPROVALS },
-      },
-    ];
-  };
-
-  const rolesFor = async (
-    employeeId: string,
-    line: { department_id: string; ta_rm_id: string | null },
-  ): Promise<HireRole[]> => {
-    const d = await deciders(line);
-    const roles: HireRole[] = [];
-    if (d.head === employeeId) roles.push('dept_head');
-    if (d.ta === employeeId) roles.push('ta_rm');
-    if (d.hr === employeeId) roles.push('hr_head');
-    if (d.admin === employeeId) roles.push('admin');
-    return roles;
-  };
-
-  // ── Final decision ─────────────────────────────────────────────────────
-
-  const sendForDecision = async (id: string, actor: ActorContext) => {
-    const a = await find(id);
-    const bells = await bellToDeciders(
-      a,
-      'hiring.decision',
-      `Hire decision: ${a.candidate_name} for ${a.role_title} (${a.department_name})`,
-    );
-    if (!(await repo.sendForDecision(id, actor, bells))) {
-      throw wrongStage('Only a candidate with every round scored goes for the decision');
-    }
-    return applications.one(id);
-  };
-
-  /** Decisions waiting for me — each with the candidate's scores (only while pending). */
-  const pendingDecisions = async (employeeId: string) => {
-    const h = await holders();
-    const deptIds = (await hiring.headOf(employeeId)).map((d) => d.department_id);
-    const orgRoles: HireRole[] = [];
-    if (h.hr_head === employeeId) orgRoles.push('hr_head');
-    if (h.admin === employeeId) orgRoles.push('admin');
-    const ids = await repo.pendingDecisionIds(deptIds, employeeId, orgRoles);
-    return Promise.all(ids.map((x) => applications.one(x)));
-  };
-
-  const decide = async (id: string, input: DecideHireInput, actor: ActorContext) => {
-    const a = await find(id);
-    const roles = await rolesFor(actor.actorEmployeeId, a);
-    if (roles.length === 0) {
-      throw createError(403, 'You are not one of the four who decide this hire', {
-        code: 'NOT_A_DECIDER',
+  /** The position's recruiter or the line's TA RM works the offer. */
+  const assertTa = (
+    a: { recruiter_id: string | null; ta_rm_id: string | null },
+    actor: ActorContext,
+  ) => {
+    if (actor.actorEmployeeId !== a.recruiter_id && actor.actorEmployeeId !== a.ta_rm_id) {
+      throw createError(403, "Only this position's recruiter or the line's TA RM can do this", {
+        code: 'NOT_POSITION_OWNER',
       });
     }
-    const reason = input.reason || null;
-    const ta = [a.recruiter_id, a.ta_rm_id].filter(
-      (x): x is string => !!x,
-    );
-    const res = await repo.decideHire(
-      id,
-      roles,
-      input.decision,
-      reason,
-      actor,
-      (o): Bell[] =>
-        o === 'pending'
-          ? []
-          : [
-              {
-                to: [...new Set(ta)],
-                event: {
-                  type: o === 'selected' ? 'hiring.selected' : 'hiring.not_selected',
-                  title:
-                    o === 'selected'
-                      ? `Selected: ${a.candidate_name} for ${a.role_title} — upload the offer`
-                      : `Not selected: ${a.candidate_name} for ${a.role_title} — ${reason}`,
-                  link: LINK_TA,
-                },
-              },
-            ],
-    );
-    if (res === 'stale') throw wrongStage('This decision is no longer open');
-    if (res === 'decided') {
-      throw createError(409, 'You have already decided on this hire', {
-        code: 'ALREADY_DECIDED',
+  };
+
+  const assertHrHead = async (actor: ActorContext) => {
+    const head = await hrHead();
+    if (!head || head !== actor.actorEmployeeId) {
+      throw createError(403, 'Only the HR Head approves and signs offers', {
+        code: 'NOT_HR_HEAD',
       });
     }
+  };
+
+  const ta = (a: { recruiter_id: string | null; ta_rm_id: string | null }) =>
+    [...new Set([a.recruiter_id, a.ta_rm_id].filter((x): x is string => !!x))];
+
+  const checkLetter = (file: { contentType: string; data: Buffer }) => {
+    if (file.data.length === 0 || file.data.length > LETTER_MAX_BYTES) {
+      throw createError(422, 'The offer letter must be a file under 10 MB', { code: 'FILE_SIZE' });
+    }
+    const type = file.contentType.split(';')[0]!.trim().toLowerCase();
+    if (!LETTER_TYPES.has(type)) {
+      throw createError(422, 'Upload the offer letter as a PDF or Word file', {
+        code: 'FILE_TYPE',
+      });
+    }
+    return type;
+  };
+
+  // ── Documents ──────────────────────────────────────────────────────────
+
+  const documents = async (id: string): Promise<CandidateDocumentDto[]> => {
+    await find(id);
+    return (await repo.documentsOf(id)).map((d) => ({
+      id: d.id,
+      name: d.name,
+      status: d.status,
+      updatedAt: new Date(d.updated_at).toISOString(),
+    }));
+  };
+
+  const addDocument = async (id: string, name: string, actor: ActorContext) => {
+    assertTa(await find(id), actor);
+    if (!(await repo.addDocument(id, name, actor))) {
+      throw createError(409, 'That document is already on the list', { code: 'DUPLICATE' });
+    }
+    return documents(id);
+  };
+
+  const setDocument = async (
+    id: string,
+    docId: string,
+    status: CandidateDocStatus,
+    actor: ActorContext,
+  ) => {
+    assertTa(await find(id), actor);
+    if (!(await repo.setDocument(id, docId, status, actor))) {
+      throw createError(404, 'Document not found', { code: 'NOT_FOUND' });
+    }
+    return documents(id);
+  };
+
+  const setFolder = async (id: string, link: string | null, actor: ActorContext) => {
+    assertTa(await find(id), actor);
+    await repo.setFolder(id, link, actor);
     return applications.one(id);
   };
 
   // ── Offer ──────────────────────────────────────────────────────────────
 
+  /** TA's draft letter (the HR Head signs and uploads the final one). */
   const uploadOfferLetter = async (
     id: string,
     file: { fileName: string; contentType: string; data: Buffer },
     actor: ActorContext,
   ) => {
     const a = await find(id);
-    if (a.stage !== 'selected' && a.stage !== 'offered') {
-      throw wrongStage('The offer letter is uploaded once the candidate is selected');
+    assertTa(a, actor);
+    if (!['interviewed', 'decision', 'selected'].includes(a.stage)) {
+      throw wrongStage('The offer letter is drafted once every round has passed');
     }
-    if (file.data.length === 0 || file.data.length > OFFER_MAX_BYTES) {
-      throw createError(422, 'The offer letter must be a file under 10 MB', {
-        code: 'FILE_SIZE',
-      });
-    }
-    const type = file.contentType.split(';')[0]!.trim().toLowerCase();
-    if (!OFFER_TYPES.has(type)) {
-      throw createError(422, 'Upload the offer letter as a PDF or Word file', {
-        code: 'FILE_TYPE',
-      });
-    }
-    await repo.saveOfferLetter(id, { ...file, contentType: type }, actor);
+    const contentType = checkLetter(file);
+    await repo.saveOfferLetter(id, { ...file, contentType }, actor);
     return applications.one(id);
   };
 
@@ -216,78 +176,145 @@ export const createHireService = (deps: {
     return { fileName: f.file_name, contentType: f.content_type, data: f.data };
   };
 
-  const makeOffer = async (id: string, input: MakeOfferInput, actor: ActorContext) => {
+  const signedLetter = async (id: string) => {
+    const f = await repo.signedLetter(id);
+    if (!f) throw createError(404, 'No signed offer letter yet', { code: 'NOT_FOUND' });
+    return { fileName: f.file_name, contentType: f.content_type, data: f.data };
+  };
+
+  /** Save the negotiated terms; changing APPROVED terms sends them back to the HR Head. */
+  const saveOfferDraft = async (id: string, input: OfferDraftInput, actor: ActorContext) => {
     const a = await find(id);
-    if (a.stage !== 'selected')
-      throw wrongStage('Only a selected candidate gets an offer');
-    if (a.requisition_status !== 'approved') {
-      // Safety net: positions only exist on approved lines.
-      throw createError(409, 'The line is not approved yet — the offer waits for it', {
-        code: 'LINE_NOT_APPROVED',
-      });
-    }
-    if (!(await repo.hasOfferLetter(id))) {
-      throw createError(422, 'Upload the offer letter first', {
-        code: 'NO_OFFER_LETTER',
-      });
-    }
+    assertTa(a, actor);
     if (input.joiningDate < localDateOf(new Date())) {
-      throw createError(422, 'The joining date cannot be in the past', {
-        code: 'PAST_DATE',
-      });
+      throw createError(422, 'The joining date cannot be in the past', { code: 'PAST_DATE' });
     }
-    const head = await hiring.departmentHead(a.department_id);
-    const ok = await repo.makeOffer(
+    const head = await hrHead();
+    const res = await repo.saveOfferDraft(
       id,
-      {
-        ctc: input.ctc,
-        joiningDate: input.joiningDate,
-        positionId: a.position_id,
-        progress: POSITION_PROGRESS.offer,
-        // Warn, don't block (learner, 2026-10-26): the screen shows it; the audit keeps it.
-        overBudget: a.budget_max !== null && input.ctc > Number(a.budget_max),
-      },
+      { ctc: input.ctc, joiningDate: input.joiningDate, terms: input.terms || null },
       actor,
       [
         {
           to: head ? [head] : [],
           event: {
-            type: 'hiring.offered',
-            title: `Offer sent: ${a.candidate_name} for ${a.role_title}, joining ${input.joiningDate}`,
-            link: LINK_TA,
+            type: 'hiring.offer_approval',
+            title: `Offer terms changed — approve again: ${a.candidate_name} for ${a.role_title}`,
+            link: LINK_APPROVALS,
           },
         },
       ],
     );
-    if (!ok) throw wrongStage('Only a selected candidate gets an offer');
+    if (!res) throw wrongStage('The offer is drafted once every round has passed');
     return applications.one(id);
   };
 
-  // ── BGV ────────────────────────────────────────────────────────────────
-
-  const setBgv = async (id: string, input: BgvInput, actor: ActorContext) => {
+  /** Send the drafted offer (terms + draft letter) to the HR Head. */
+  const submitOffer = async (id: string, actor: ActorContext) => {
     const a = await find(id);
-    const ta = a.ta_rm_id;
-    const bells: Bell[] =
-      input.status === 'failed'
-        ? [
-            {
-              to: [...new Set([a.recruiter_id, ta].filter((x): x is string => !!x))],
-              event: {
-                type: 'hiring.bgv_failed',
-                title: `BGV failed: ${a.candidate_name} for ${a.role_title} — decide on the offer`,
-                link: LINK_TA,
-              },
-            },
-          ]
-        : [];
-    if (!(await repo.setBgv(id, input.status, input.notes || null, actor, bells))) {
-      throw wrongStage('BGV is recorded between the last round and the hire');
+    assertTa(a, actor);
+    if (!(await repo.hasOfferLetter(id))) {
+      throw createError(422, 'Upload the draft offer letter first', { code: 'NO_OFFER_LETTER' });
     }
+    const head = await hrHead();
+    if (!head) {
+      throw createError(409, 'Set the hiring HR department and its head first', {
+        code: 'NO_HR_HEAD',
+      });
+    }
+    const ok = await repo.submitOffer(id, actor, [
+      {
+        to: [head],
+        event: {
+          type: 'hiring.offer_approval',
+          title: `Offer to approve and sign: ${a.candidate_name} for ${a.role_title} (${a.department_name})`,
+          link: LINK_APPROVALS,
+        },
+      },
+    ]);
+    if (!ok) throw wrongStage('Draft the CTC and joining date after every round has passed');
     return applications.one(id);
   };
 
-  // ── Offer ends / hire ──────────────────────────────────────────────────
+  /** Offers waiting for me — the HR Head only. */
+  const pendingOffers = async (employeeId: string) => {
+    if ((await hrHead()) !== employeeId) return [];
+    return Promise.all((await repo.pendingOfferIds()).map((x) => applications.one(x)));
+  };
+
+  /** The HR Head uploads the signed letter (while the offer waits for them). */
+  const uploadSignedLetter = async (
+    id: string,
+    file: { fileName: string; contentType: string; data: Buffer },
+    actor: ActorContext,
+  ) => {
+    await assertHrHead(actor);
+    const a = await find(id);
+    if (a.stage !== 'decision') throw wrongStage('Only an offer waiting for approval is signed');
+    const contentType = checkLetter(file);
+    await repo.saveSignedLetter(id, { ...file, contentType }, actor);
+    return applications.one(id);
+  };
+
+  const approveOffer = async (id: string, actor: ActorContext) => {
+    await assertHrHead(actor);
+    const a = await find(id);
+    if (!(await repo.hasSignedLetter(id))) {
+      throw createError(422, 'Upload the signed offer letter first', { code: 'NOT_SIGNED' });
+    }
+    const ok = await repo.approveOffer(id, actor, [
+      {
+        to: ta(a),
+        event: {
+          type: 'hiring.offer_approved',
+          title: `Offer approved and signed: ${a.candidate_name} for ${a.role_title} — share it`,
+          link: LINK_TA,
+        },
+      },
+    ]);
+    if (!ok) throw wrongStage('Only an offer waiting for approval can be approved');
+    return applications.one(id);
+  };
+
+  const returnOffer = async (id: string, reason: string, actor: ActorContext) => {
+    await assertHrHead(actor);
+    const a = await find(id);
+    const ok = await repo.returnOffer(id, reason, actor, [
+      {
+        to: ta(a),
+        event: {
+          type: 'hiring.offer_returned',
+          title: `Offer returned: ${a.candidate_name} for ${a.role_title} — ${reason}`,
+          link: LINK_TA,
+        },
+      },
+    ]);
+    if (!ok) throw wrongStage('Only an offer waiting for approval can be returned');
+    return applications.one(id);
+  };
+
+  /** Share the approved, signed offer with the candidate. */
+  const shareOffer = async (id: string, actor: ActorContext) => {
+    const a = await find(id);
+    assertTa(a, actor);
+    if (a.requisition_status !== 'approved') {
+      // Safety net: positions only exist on approved lines.
+      throw createError(409, 'The line is not approved', { code: 'LINE_NOT_APPROVED' });
+    }
+    const head = await hiring.departmentHead(a.department_id);
+    const ok = await repo.shareOffer(id, a.position_id, POSITION_PROGRESS.offer, actor, [
+      {
+        to: head ? [head] : [],
+        event: {
+          type: 'hiring.offered',
+          title: `Offer shared: ${a.candidate_name} for ${a.role_title}, joining ${a.joining_date}`,
+          link: LINK_TA,
+        },
+      },
+    ]);
+    if (!ok) throw wrongStage('Only an offer the HR Head approved and signed can be shared');
+    return applications.one(id);
+  };
 
   const endOffer = async (
     id: string,
@@ -296,37 +323,39 @@ export const createHireService = (deps: {
     actor: ActorContext,
   ) => {
     const a = await find(id);
-    const bells =
+    assertTa(a, actor);
+    const head = await hrHead();
+    const bells: Bell[] =
       to === 'offer_withdrawn'
-        ? await bellToDeciders(
-            a,
-            'hiring.offer_withdrawn',
-            `Offer withdrawn: ${a.candidate_name} for ${a.role_title} — ${reason}`,
-          )
+        ? [
+            {
+              to: [...new Set([...ta(a), ...(head ? [head] : [])])],
+              event: {
+                type: 'hiring.offer_withdrawn',
+                title: `Offer withdrawn: ${a.candidate_name} for ${a.role_title} — ${reason}`,
+                link: LINK_TA,
+              },
+            },
+          ]
         : [];
     if (
-      !(await repo.endOffer(
-        id,
-        to,
-        reason,
-        a.position_id,
-        POSITION_PROGRESS,
-        actor,
-        bells,
-      ))
+      !(await repo.endOffer(id, to, reason, a.position_id, POSITION_PROGRESS, actor, bells))
     ) {
       throw wrongStage('Only an open offer can be declined or withdrawn');
     }
     return applications.one(id);
   };
 
+  // ── Hire, handover, joining ────────────────────────────────────────────
+
   /**
    * The candidate accepted: create their employee record through the normal
-   * intake and mark the application hired — one transaction. Returns the
-   * joiner's single-use sign-in link token.
+   * intake and mark the application hired — one transaction. HRBP gets the
+   * handover. Returns the joiner's single-use sign-in link token.
    */
   const markHired = async (id: string, input: MarkHiredInput, actor: ActorContext) => {
     const a = await find(id);
+    assertTa(a, actor);
     if (a.stage !== 'offered')
       throw wrongStage('Mark hired once the candidate accepts the offer');
     if (!input.email.endsWith(`@${COMPANY_DOMAIN}`)) {
@@ -354,7 +383,8 @@ export const createHireService = (deps: {
     const { actorUserId } = actor;
     if (!actorUserId) throw createError(401, 'Authentication required');
     const head = await hiring.departmentHead(a.department_id);
-    const ta = a.ta_rm_id;
+    const hrbp = await hiring.hrbpHolders();
+    const docs = await repo.documentCounts(id);
     const result = await transaction(async (scope) => {
       const created = await scope.employees.create(employee, {
         actorUserId,
@@ -362,11 +392,23 @@ export const createHireService = (deps: {
       });
       const ok = await scope.markHired(id, created.employee.id, a.position_id, actor, [
         {
-          to: [...new Set([head, a.recruiter_id, ta].filter((x): x is string => !!x))],
+          to: [...new Set([head, ...ta(a)].filter((x): x is string => !!x))],
           event: {
             type: 'hiring.hired',
             title: `Hired: ${a.candidate_name} as ${a.role_title}, joining ${a.joining_date ?? 'TBD'}`,
             link: LINK_TA,
+          },
+        },
+        {
+          // The TA → HRBP handover (workflow deck step 16).
+          to: hrbp.filter((x) => x !== actor.actorEmployeeId),
+          event: {
+            type: 'hiring.handover',
+            title:
+              `Handover: ${a.candidate_name} (${a.candidate_code ?? '—'}) joins ${a.department_name} as ` +
+              `${a.role_title} on ${a.joining_date ?? 'TBD'} · documents ${docs.received} received, ` +
+              `${docs.pending} pending${a.next_action ? ` · open: ${a.next_action}` : ''}`,
+            link: LINK_ONBOARDING,
           },
         },
       ]);
@@ -380,9 +422,35 @@ export const createHireService = (deps: {
     };
   };
 
+  /** HRBP confirms the person actually joined (on or after the joining date). */
+  const confirmJoined = async (id: string, actor: ActorContext) => {
+    if (!(await hiring.hrbpHolders()).includes(actor.actorEmployeeId)) {
+      throw createError(403, 'HRBP confirms the joining', { code: 'NOT_HRBP' });
+    }
+    const a = await find(id);
+    if (a.joining_date && a.joining_date > localDateOf(new Date())) {
+      throw createError(409, `They join on ${a.joining_date} — confirm on or after that day`, {
+        code: 'NOT_YET',
+      });
+    }
+    const ok = await repo.confirmJoined(id, actor, [
+      {
+        to: ta(a),
+        event: {
+          type: 'hiring.joined',
+          title: `Joined: ${a.candidate_name} as ${a.role_title}`,
+          link: LINK_TA,
+        },
+      },
+    ]);
+    if (!ok) throw wrongStage('Only a hired candidate can be confirmed as joined');
+    return applications.one(id);
+  };
+
   /** Backed out before joining: deactivate the record, reopen the position. */
   const noShow = async (id: string, reason: string, actor: ActorContext) => {
     const a = await find(id);
+    assertTa(a, actor);
     if (a.stage !== 'hired' || !a.employee_id)
       throw wrongStage('Only a hired candidate can not join');
     if (!(await repo.employeeBeforeJoining(a.employee_id, localDateOf(new Date())))) {
@@ -390,11 +458,18 @@ export const createHireService = (deps: {
         code: 'ALREADY_JOINED',
       });
     }
-    const bells = await bellToDeciders(
-      a,
-      'hiring.no_show',
-      `Did not join: ${a.candidate_name} for ${a.role_title} — the position is open again`,
-    );
+    const head = await hiring.departmentHead(a.department_id);
+    const hrbp = await hiring.hrbpHolders();
+    const bells: Bell[] = [
+      {
+        to: [...new Set([...ta(a), ...(head ? [head] : []), ...hrbp])],
+        event: {
+          type: 'hiring.no_show',
+          title: `Did not join: ${a.candidate_name} for ${a.role_title} — the position is open again`,
+          link: LINK_TA,
+        },
+      },
+    ];
     if (
       !(await repo.noShow(
         id,
@@ -412,15 +487,23 @@ export const createHireService = (deps: {
   };
 
   return {
-    sendForDecision,
-    pendingDecisions,
-    decide,
+    documents,
+    addDocument,
+    setDocument,
+    setFolder,
     uploadOfferLetter,
     offerLetter,
-    makeOffer,
-    setBgv,
+    signedLetter,
+    saveOfferDraft,
+    submitOffer,
+    pendingOffers,
+    uploadSignedLetter,
+    approveOffer,
+    returnOffer,
+    shareOffer,
     endOffer,
     markHired,
+    confirmJoined,
     noShow,
   };
 };

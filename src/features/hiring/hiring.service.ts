@@ -14,6 +14,7 @@ import type {
   RequisitionRow,
   RequisitionStatus,
   RoundRow,
+  SourceRow,
 } from './hiring.repository.js';
 import {
   APPROVER_ROLES,
@@ -31,8 +32,10 @@ import {
   type RequisitionDto,
   type ScorecardContent,
   type TaDocumentDto,
+  type RecruiterOptionDto,
   type TaRmOptionDto,
   type UpdateRequisitionInput,
+  type AddSourceInput,
 } from './hiring.schema.js';
 
 const LINK_PLAN = '/hiring/plan';
@@ -88,7 +91,21 @@ export const POSITION_PROGRESS: Record<PositionStatus, number> = {
 
 const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 
-const toDocument = (d: DocumentRow, approvals: ApprovalRow[]): TaDocumentDto => {
+/**
+ * Who reviews a position's JD / scorecard: the line's TA RM + the dept head —
+ * the dept head alone when the TA RM is the recruiter (no self-approval).
+ */
+export const docReviewers = (
+  recruiterId: string | null,
+  taRmId: string | null,
+): DocRole[] =>
+  recruiterId && recruiterId === taRmId ? ['dept_head'] : [...DOC_ROLES];
+
+const toDocument = (
+  d: DocumentRow,
+  approvals: ApprovalRow[],
+  needed: DocRole[],
+): TaDocumentDto => {
   const current = approvals.filter(
     (a) => a.subject_id === d.id && a.version === d.version,
   );
@@ -109,26 +126,13 @@ const toDocument = (d: DocumentRow, approvals: ApprovalRow[]): TaDocumentDto => 
     })),
     waitingOn:
       d.status === 'in_review'
-        ? DOC_ROLES.filter((role) => !current.some((a) => a.role === role))
+        ? needed.filter((role) => !current.some((a) => (a.role as string) === role))
         : [],
     submittedAt: iso(d.submitted_at),
     approvedAt: iso(d.approved_at),
   };
 };
 
-/**
- * Who may approve this line: the HR head or Admin — ONE approval from either
- * is enough, in any order, and the other is told (learner, 2026-10-26). A
- * line the HR head raised themselves (the HR department's own needs) is
- * Admin's alone (no self-approval, and nothing stuck).
- */
-export const neededRoles = (
-  r: Pick<RequisitionRow, 'created_by' | 'submitted_by'>,
-  hrHead: string | undefined,
-): ApproverRole[] =>
-  hrHead && (r.created_by === hrHead || r.submitted_by === hrHead)
-    ? ['admin']
-    : [...APPROVER_ROLES];
 
 const toDto = (
   r: RequisitionRow,
@@ -137,7 +141,7 @@ const toDto = (
   positions: PositionRow[],
   docs: DocumentRow[],
   docApprovals: ApprovalRow[],
-  hrHead: string | undefined,
+  sources: SourceRow[],
 ): RequisitionDto => {
   // Only today's approver roles count (the retired TA head's rows stay as history).
   const current = approvals.filter(
@@ -146,9 +150,9 @@ const toDto = (
       a.version === r.version &&
       (APPROVER_ROLES as readonly string[]).includes(a.role),
   );
-  const doc = (kind: DocumentKind) => {
-    const d = docs.find((x) => x.requisition_id === r.id && x.kind === kind);
-    return d ? toDocument(d, docApprovals) : null;
+  const doc = (p: PositionRow, kind: DocumentKind) => {
+    const d = docs.find((x) => x.position_id === p.id && x.kind === kind);
+    return d ? toDocument(d, docApprovals, docReviewers(p.recruiter_id, r.ta_rm_id)) : null;
   };
   return {
     id: r.id,
@@ -158,8 +162,15 @@ const toDto = (
     roleTitle: r.role_title,
     quantity: r.quantity,
     notes: r.notes,
-    budgetMin: r.budget_min === null ? null : Number(r.budget_min),
-    budgetMax: r.budget_max === null ? null : Number(r.budget_max),
+    requestCode: r.request_code,
+    reason: r.reason,
+    targetJoiningOn: r.target_joining_on,
+    location: r.location,
+    reportingManager: r.reporting_manager_id
+      ? { id: r.reporting_manager_id, name: r.reporting_manager_name ?? '' }
+      : null,
+    priority: r.priority,
+    employmentType: r.employment_type,
     version: r.version,
     status: r.status,
     urgent: r.urgent,
@@ -179,7 +190,7 @@ const toDto = (
     })),
     waitingOn:
       r.status === 'submitted'
-        ? neededRoles(r, hrHead).filter((role) => !current.some((a) => a.role === role))
+        ? APPROVER_ROLES.filter((role) => !current.some((a) => a.role === role))
         : [],
     returnReason: r.return_reason,
     createdByName: r.created_by_name,
@@ -194,6 +205,17 @@ const toDto = (
         id: p.id,
         number: p.number,
         status: p.status,
+        priority: p.priority,
+        expectedCloseOn: p.expected_close_on,
+        sources: sources
+          .filter((s) => s.position_id === p.id)
+          .map((s) => ({
+            id: s.id,
+            channel: s.channel,
+            activatedOn: s.activated_on,
+            spocName: s.spoc_name,
+            notes: s.notes,
+          })),
         recruiterId: p.recruiter_id,
         recruiterName: p.recruiter_name,
         goal: p.goal_id
@@ -204,8 +226,8 @@ const toDto = (
             }
           : null,
         openedAt: iso(p.opened_at),
+        documents: { jd: doc(p, 'jd'), scorecard: doc(p, 'scorecard') },
       })),
-    documents: { jd: doc('jd'), scorecard: doc('scorecard') },
   };
 };
 
@@ -222,9 +244,11 @@ const toDto = (
  *
  * Step C: an approved line for N creates N positions. Admin gives the line to
  * a TA RM (a TA-batch holder with reports), who gives each position to one of
- * their own reports through a hiring goal whose progress follows the position. TA writes ONE JD and ONE scorecard per line; the line's
- * department head and Admin review each separately (same version rules).
- * When both are approved the positions open.
+ * their own reports (or keeps it themselves) through a hiring goal whose
+ * progress follows the position. Each position's RECRUITER writes its own JD
+ * and scorecard; the line's TA RM + department head review each separately
+ * (the dept head alone when the TA RM is the recruiter). When both are
+ * approved that position opens.
  *
  * Rights come from SEATS (relationships), not grants — except TA's own work
  * (the `ta.hiring` grant: the HR-wide list, writing JDs and scorecards).
@@ -244,24 +268,33 @@ export const createHiringService = (deps: {
   const hydrate = async (rows: RequisitionRow[]): Promise<RequisitionDto[]> => {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
-    const [rounds, approvals, positions, docs, holders] = await Promise.all([
+    const [rounds, approvals, positions, docs] = await Promise.all([
       repo.roundsOf(ids),
       repo.approvalsOf(ids),
       repo.positionsOf(ids),
       repo.documentsOf(ids),
-      holdersNow(),
     ]);
     const docApprovals = docs.length
       ? await repo.documentApprovalsOf(docs.map((d) => d.id))
       : [];
+    const sources = positions.length ? await repo.sourcesOf(positions.map((p) => p.id)) : [];
     return rows.map((r) =>
-      toDto(r, rounds, approvals, positions, docs, docApprovals, holders.hr_head),
+      toDto(r, rounds, approvals, positions, docs, docApprovals, sources),
     );
   };
 
-  const rolesOf = async (employeeId: string): Promise<ApproverRole[]> => {
-    const holders = await holdersNow();
-    return APPROVER_ROLES.filter((role) => holders[role] === employeeId);
+  /** Any HRBP-batch holder approves hiring requests (TA workflow deck, 2026-10-27). */
+  const rolesOf = async (employeeId: string): Promise<ApproverRole[]> =>
+    (await repo.hrbpHolders()).includes(employeeId) ? ['hrbp'] : [];
+
+  /** The reporting manager must be an active employee (not the Admin account). */
+  const assertManager = async (id: string | undefined) => {
+    if (!id) return;
+    if (!(await repo.eligiblePeople([id])).has(id)) {
+      throw createError(422, 'The reporting manager must be an active employee', {
+        code: 'MANAGER_NOT_ELIGIBLE',
+      });
+    }
   };
 
   const notHead = () =>
@@ -339,6 +372,7 @@ export const createHiringService = (deps: {
       );
     }
     await assertInterviewers(input.rounds);
+    await assertManager(input.reportingManagerId);
     const id = await repo.create(
       {
         departmentId: input.departmentId,
@@ -346,8 +380,12 @@ export const createHiringService = (deps: {
         roleTitle: input.roleTitle,
         quantity: input.quantity,
         notes: input.notes || null,
-        budgetMin: input.budgetMin,
-        budgetMax: input.budgetMax,
+        reason: input.reason,
+        targetJoiningOn: input.targetJoiningOn,
+        location: input.location,
+        reportingManagerId: input.reportingManagerId,
+        priority: input.priority,
+        employmentType: input.employmentType,
         rounds: input.rounds,
       },
       actor,
@@ -360,15 +398,9 @@ export const createHiringService = (deps: {
     input: UpdateRequisitionInput,
     actor: ActorContext,
   ) => {
-    const r = await asHead(actor.actorEmployeeId, id);
+    await asHead(actor.actorEmployeeId, id);
     if (input.rounds) await assertInterviewers(input.rounds);
-    const min = input.budgetMin ?? (r.budget_min === null ? null : Number(r.budget_min));
-    const max = input.budgetMax ?? (r.budget_max === null ? null : Number(r.budget_max));
-    if ((min === null) !== (max === null) || (min !== null && max !== null && max < min)) {
-      throw createError(422, 'Give the budget as a minimum and a maximum (max ≥ min)', {
-        code: 'BUDGET_RANGE',
-      });
-    }
+    await assertManager(input.reportingManagerId);
     const notes = input.notes === undefined ? undefined : input.notes || null;
     if (!(await repo.update(id, { ...input, notes }, input.rounds, actor))) {
       throw createError(409, 'Only a draft or returned line can be edited', {
@@ -395,18 +427,11 @@ export const createHiringService = (deps: {
       }
       return one(id);
     }
-    const holders = await holdersNow();
-    const title = `Hiring request to approve: ${r.quantity} × ${r.role_title} (${r.department_name})`;
-    const people = [holders.hr_head].filter((x): x is string => !!x);
+    const title = `Hiring request to approve: ${r.request_code ?? ''} ${r.quantity} × ${r.role_title} (${r.department_name})`;
+    const people = (await repo.hrbpHolders()).filter((x) => x !== actor.actorEmployeeId);
     const bells: Bell[] = [
       { to: people, event: { type: 'hiring.submitted', title, link: LINK_APPROVALS } },
     ];
-    if (holders.admin) {
-      bells.push({
-        to: [holders.admin],
-        event: { type: 'hiring.submitted', title, link: LINK_ADMIN_APPROVALS },
-      });
-    }
     if ((await repo.submit(id, actor, bells)) === null) {
       throw createError(409, 'Only a draft or returned line can be submitted', {
         code: 'NOT_SUBMITTABLE',
@@ -439,7 +464,7 @@ export const createHiringService = (deps: {
   const approvals = async (employeeId: string): Promise<RequisitionDto[]> => {
     const roles = await rolesOf(employeeId);
     if (roles.length === 0) return [];
-    // Never my own lines (the HR head's own lines are Admin's alone).
+    // Never my own lines.
     return hydrate(
       (await repo.waitingOn(roles)).filter(
         (r) => r.created_by !== employeeId && r.submitted_by !== employeeId,
@@ -482,27 +507,43 @@ export const createHiringService = (deps: {
     const reason = input.reason || null;
     const head = await repo.departmentHead(r.department_id);
     const toHead = [head, r.submitted_by].filter((x): x is string => !!x);
-    const holders = await holdersNow();
-    const admin = holders.admin;
-    const line = `${r.quantity} × ${r.role_title}`;
-    const needed = neededRoles(r, holders.hr_head);
-    // The other approver(s) hear what was decided.
-    const by = actor.actorEmployeeId === admin ? 'Admin' : await repo.nameOf(actor.actorEmployeeId);
-    const otherHr =
-      needed.includes('hr_head') && holders.hr_head && holders.hr_head !== actor.actorEmployeeId
-        ? [holders.hr_head]
-        : [];
+    const admin = (await holdersNow()).admin;
+    const line = `${r.request_code ?? ''} ${r.quantity} × ${r.role_title}`.trim();
+    // The other HRBPs hear what was decided.
+    const by = await repo.nameOf(actor.actorEmployeeId);
+    const otherHr = (await repo.hrbpHolders()).filter(
+      (x) => x !== actor.actorEmployeeId && x !== r.created_by && x !== r.submitted_by,
+    );
     const otherAdmin = admin && admin !== actor.actorEmployeeId ? [admin] : [];
     const res = await repo.decide(
       id,
       input.version,
-      roles.filter((role) => needed.includes(role)),
-      needed,
+      roles,
+      [...APPROVER_ROLES],
       input.decision,
       reason,
       actor,
       (o): Bell[] =>
-        o === 'returned'
+        o === 'declined'
+          ? [
+              {
+                to: toHead,
+                event: {
+                  type: 'hiring.declined',
+                  title: `Hiring request rejected: ${line} — ${reason}`,
+                  link: LINK_PLAN,
+                },
+              },
+              {
+                to: otherHr,
+                event: {
+                  type: 'hiring.declined',
+                  title: `Rejected by ${by}: ${line} (${r.department_name}) — ${reason}`,
+                  link: LINK_TA,
+                },
+              },
+            ]
+          : o === 'returned'
           ? [
               {
                 to: toHead,
@@ -513,7 +554,7 @@ export const createHiringService = (deps: {
                 },
               },
               {
-                to: [...otherHr, ...otherAdmin],
+                to: otherHr,
                 event: {
                   type: 'hiring.returned',
                   title: `Returned by ${by}: ${line} (${r.department_name}) — ${reason}`,
@@ -543,7 +584,7 @@ export const createHiringService = (deps: {
                   to: otherAdmin,
                   event: {
                     type: 'hiring.approved',
-                    title: `Approved by ${by}: ${line} (${r.department_name}) — give it to a TA RM`,
+                    title: `Approved by ${by} (HRBP): ${line} (${r.department_name}) — give it to a TA RM`,
                     link: LINK_ADMIN_APPROVALS,
                   },
                 },
@@ -559,14 +600,26 @@ export const createHiringService = (deps: {
 
   // ── Step C: JD + scorecard ─────────────────────────────────────────────
 
-  /** Save the JD or scorecard of an approved line (TA, via the ta.hiring grant). */
+  /** The position and its line, if the caller is the position's recruiter. */
+  const asRecruiter = async (positionId: string, actor: ActorContext) => {
+    const p = await repo.findPosition(positionId);
+    if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
+    if (!p.recruiter_id || p.recruiter_id !== actor.actorEmployeeId) {
+      throw createError(403, "Only this position's recruiter writes its JD and scorecard", {
+        code: 'NOT_POSITION_RECRUITER',
+      });
+    }
+    return { p, r: await findOr404(p.requisition_id) };
+  };
+
+  /** Save a position's JD or scorecard (its recruiter). */
   const saveDocument = async (
-    requisitionId: string,
+    positionId: string,
     kind: DocumentKind,
     content: JdContent | ScorecardContent,
     actor: ActorContext,
   ) => {
-    const r = await findOr404(requisitionId);
+    const { p, r } = await asRecruiter(positionId, actor);
     // An urgent line's interviews start at once, so TA writes its scorecard straight away.
     if (r.status !== 'approved' && !(r.urgent && r.status === 'submitted')) {
       throw createError(
@@ -580,16 +633,21 @@ export const createHiringService = (deps: {
     if (kind === 'scorecard') {
       // Only rounds this line actually uses can be scored.
       const used = new Set((await repo.roundsOf([r.id])).map((x) => x.round));
-      const stray = (content as ScorecardContent).criteria.find(
-        (c) => !used.has(c.round),
-      );
+      const given = (content as ScorecardContent).rounds.map((x) => x.round);
+      const stray = given.find((x) => !used.has(x));
       if (stray) {
-        throw createError(422, `This line has no ${stray.round} round`, {
+        throw createError(422, `This line has no ${stray} round`, {
           code: 'ROUND_NOT_IN_LINE',
         });
       }
+      const missing = [...used].filter((x) => !given.includes(x));
+      if (missing.length) {
+        throw createError(422, `Add a sheet for every round of the line: ${missing.join(', ')}`, {
+          code: 'ROUND_MISSING',
+        });
+      }
     }
-    if (!(await repo.saveDocument(r.id, kind, content, actor))) {
+    if (!(await repo.saveDocument(p, kind, content, actor))) {
       throw createError(409, 'It is in review or approved — it can no longer be edited', {
         code: 'NOT_EDITABLE',
       });
@@ -598,27 +656,28 @@ export const createHiringService = (deps: {
   };
 
   const submitDocument = async (
-    requisitionId: string,
+    positionId: string,
     kind: DocumentKind,
     actor: ActorContext,
   ) => {
-    const r = await findOr404(requisitionId);
-    const d = await repo.findDocument(r.id, kind);
+    const { p, r } = await asRecruiter(positionId, actor);
+    const d = await repo.findDocument(p.id, kind);
     if (!d) throw createError(404, 'Write it first', { code: 'DOCUMENT_NOT_FOUND' });
     const label = kind === 'jd' ? 'JD' : 'Scorecard';
-    const title = `${label} to review: ${r.quantity} × ${r.role_title} (${r.department_name})`;
+    const title = `${label} to review: ${r.role_title} #${p.number} (${r.department_name})`;
     const head = await repo.departmentHead(r.department_id);
-    const admin = (await holdersNow()).admin;
     const bells: Bell[] = [
       {
         to: head ? [head] : [],
         event: { type: 'hiring.doc_review', title, link: LINK_PLAN },
       },
-      {
-        to: admin ? [admin] : [],
-        event: { type: 'hiring.doc_review', title, link: LINK_ADMIN_APPROVALS },
-      },
     ];
+    if (docReviewers(p.recruiter_id, r.ta_rm_id).includes('ta_rm') && r.ta_rm_id) {
+      bells.push({
+        to: [r.ta_rm_id],
+        event: { type: 'hiring.doc_review', title, link: LINK_APPROVALS },
+      });
+    }
     if (!(await repo.submitDocument(d.id, actor, bells))) {
       throw createError(409, 'Only a draft or returned document can be submitted', {
         code: 'NOT_SUBMITTABLE',
@@ -627,36 +686,42 @@ export const createHiringService = (deps: {
     return one(r.id);
   };
 
-  /** Which review roles the caller holds on this line's documents. */
+  /** Which review roles the caller holds on this position's documents. */
   const docRolesOf = async (
     employeeId: string,
     r: RequisitionRow,
+    recruiterId: string | null,
   ): Promise<DocRole[]> => {
+    const needed = docReviewers(recruiterId, r.ta_rm_id);
     const roles: DocRole[] = [];
     if ((await repo.departmentHead(r.department_id)) === employeeId)
       roles.push('dept_head');
-    if ((await holdersNow()).admin === employeeId) roles.push('admin');
+    if (needed.includes('ta_rm') && r.ta_rm_id === employeeId) roles.push('ta_rm');
     return roles;
   };
 
   const reviews = async (employeeId: string): Promise<DocumentReviewDto[]> => {
-    const isAdmin = (await holdersNow()).admin === employeeId;
-    const docs = await repo.reviewsWaiting(employeeId, isAdmin);
+    const docs = await repo.reviewsWaiting(employeeId);
     if (docs.length === 0) return [];
     const lines = await Promise.all(
       [...new Set(docs.map((d) => d.requisition_id))].map((id) =>
         repo.findRequisition(id),
       ),
     );
+    const positions = await repo.positionsOf(lines.map((l) => l!.id));
     const approvalsRows = await repo.documentApprovalsOf(docs.map((d) => d.id));
     return docs.map((d) => {
       const r = lines.find((l) => l?.id === d.requisition_id)!;
+      const p = positions.find((x) => x.id === d.position_id)!;
       return {
         requisitionId: r.id,
         departmentName: r.department_name,
         roleTitle: r.role_title,
         quantity: r.quantity,
-        document: toDocument(d, approvalsRows),
+        positionId: p.id,
+        positionNumber: p.number,
+        recruiterName: p.recruiter_name,
+        document: toDocument(d, approvalsRows, docReviewers(p.recruiter_id, r.ta_rm_id)),
       };
     });
   };
@@ -669,9 +734,10 @@ export const createHiringService = (deps: {
     const d = await repo.findDocumentById(documentId);
     if (!d) throw createError(404, 'Document not found', { code: 'DOCUMENT_NOT_FOUND' });
     const r = (await repo.findRequisition(d.requisition_id))!;
-    const roles = await docRolesOf(actor.actorEmployeeId, r);
+    const p = (await repo.findPosition(d.position_id))!;
+    const roles = await docRolesOf(actor.actorEmployeeId, r, p.recruiter_id);
     if (roles.length === 0) {
-      throw createError(403, "Only the line's department head or Admin reviews this", {
+      throw createError(403, "Only the line's TA RM or department head reviews this", {
         code: 'NOT_A_REVIEWER',
       });
     }
@@ -680,18 +746,21 @@ export const createHiringService = (deps: {
         code: 'SELF_APPROVAL',
       });
     }
+    if (input.decision === 'decline') {
+      throw createError(422, 'A JD or scorecard is approved or returned, not declined', {
+        code: 'INVALID_DECISION',
+      });
+    }
+    const decision = input.decision;
     const reason = input.reason || null;
     const label = d.kind === 'jd' ? 'JD' : 'Scorecard';
-    const line = `${r.quantity} × ${r.role_title} (${r.department_name})`;
-    const positions = await repo.positionsOf([r.id]);
-    const recruiters = positions
-      .map((p) => p.recruiter_id)
-      .filter((x): x is string => !!x);
+    const line = `${r.role_title} #${p.number} (${r.department_name})`;
     const res = await repo.decideDocument(
       d.id,
       input.version,
       roles,
-      input.decision,
+      docReviewers(p.recruiter_id, r.ta_rm_id),
+      decision,
       reason,
       actor,
       POSITION_PROGRESS.open,
@@ -713,7 +782,7 @@ export const createHiringService = (deps: {
                   to: [
                     ...new Set([
                       d.written_by,
-                      ...recruiters,
+                      ...(p.recruiter_id ? [p.recruiter_id] : []),
                       ...(r.ta_rm_id ? [r.ta_rm_id] : []),
                     ]),
                   ],
@@ -727,6 +796,28 @@ export const createHiringService = (deps: {
             : [],
     );
     if (res === 'stale' || res === 'decided') throw decisionError(res);
+    return one(r.id);
+  };
+
+  /** Log a sourcing channel the position's recruiter (or the line's TA RM) activated. */
+  const addSource = async (positionId: string, input: AddSourceInput, actor: ActorContext) => {
+    const p = await repo.findPosition(positionId);
+    if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
+    const r = await findOr404(p.requisition_id);
+    if (actor.actorEmployeeId !== p.recruiter_id && actor.actorEmployeeId !== r.ta_rm_id) {
+      throw createError(403, "Only this position's recruiter or the line's TA RM can do this", {
+        code: 'NOT_POSITION_OWNER',
+      });
+    }
+    await repo.addSource(
+      {
+        positionId,
+        channel: input.channel,
+        activatedOn: input.activatedOn,
+        notes: input.notes || null,
+      },
+      actor,
+    );
     return one(r.id);
   };
 
@@ -750,6 +841,14 @@ export const createHiringService = (deps: {
       reports: o.reports,
     }));
   };
+
+  /** The caller's reports in the TA batch — who they can give a position to (empty for most). */
+  const recruiters = async (actor: ActorContext): Promise<RecruiterOptionDto[]> =>
+    (await repo.recruiterOptions(actor.actorEmployeeId)).map((o) => ({
+      id: o.id,
+      name: o.name,
+      employeeCode: o.employee_code,
+    }));
 
   const assignTaRm = async (id: string, input: AssignTaRmInput, actor: ActorContext) => {
     await assertAdmin(actor);
@@ -816,13 +915,24 @@ export const createHiringService = (deps: {
         code: 'RECRUITER_NOT_ACTIVE',
       });
     }
-    if (recruiter.effective_rm !== actor.actorEmployeeId) {
+    // The TA RM may keep a position herself (learner, 2026-10-27).
+    const self = input.recruiterId === actor.actorEmployeeId;
+    if (!self && recruiter.effective_rm !== actor.actorEmployeeId) {
       throw createError(
         422,
         'Positions go to your own team — this person does not report to you',
         {
           code: 'NOT_YOUR_REPORT',
         },
+      );
+    }
+    // The JD, scorecard and candidates live behind the ta.hiring grant, so a
+    // recruiter outside the TA batch would get a goal with no screen to work it.
+    if (!self && !recruiter.in_ta) {
+      throw createError(
+        422,
+        'Recruiters must be in the TA batch — Admin adds them in Access batches',
+        { code: 'NOT_IN_TA_BATCH' },
       );
     }
     if (p.recruiter_id === input.recruiterId) {
@@ -848,6 +958,8 @@ export const createHiringService = (deps: {
         dueOn: cycle.end_date,
         title,
         progress: POSITION_PROGRESS[p.status],
+        expectedCloseOn: input.expectedCloseOn ?? null,
+        priority: input.priority ?? null,
       },
       actor,
       [
@@ -885,6 +997,8 @@ export const createHiringService = (deps: {
     reviews,
     decideDocument,
     taRms,
+    recruiters,
+    addSource,
     assignTaRm,
     assignPosition,
   };

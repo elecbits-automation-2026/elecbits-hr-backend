@@ -73,7 +73,7 @@ export const meSchema = z
     selfGoverned: z.boolean(),
     /** Seats held right now — drives the hiring nav items (UX only). */
     seats: z.array(z.enum(['dept_head', 'vp_hr_head'])),
-    /** The HR department's head, or a TA RM with a hire to decide — shows Hiring approvals (UX only). */
+    /** The HR department's head, or a TA RM with a live line (doc reviews, hire decisions) — shows Hiring approvals (UX only). */
     hiringApprover: z.boolean(),
     /** Conducts a round on a live application — shows My interviews (UX only). */
     hasInterviews: z.boolean(),

@@ -2,7 +2,15 @@ import type { Request, Response } from 'express';
 import createError from 'http-errors';
 import { createAuthzRepository } from '../access/authz.repository.js';
 import { createCandidatesRepository } from './candidates.repository.js';
-import type { CreateCandidateInput, SubmitScoreInput } from './candidates.schema.js';
+import type {
+  CreateCandidateInput,
+  EndInterviewSlotInput,
+  LogActivityInput,
+  NextActionInput,
+  UpdateCandidateInput,
+  ScheduleInterviewInput,
+  SubmitScoreInput,
+} from './candidates.schema.js';
 import { createCandidatesService } from './candidates.service.js';
 import { createHiringRepository } from './hiring.repository.js';
 import { ROUNDS, type InterviewRound } from './hiring.schema.js';
@@ -94,8 +102,8 @@ export const candidatesController = {
     res.status(201).json(a);
   },
 
-  shortlist: async (req: Request, res: Response): Promise<void> => {
-    res.json(await service(req).shortlist(req.params.id!, actor(req)));
+  informed: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).markInformed(req.params.id!, actor(req)));
   },
 
   startInterviews: async (req: Request, res: Response): Promise<void> => {
@@ -134,6 +142,35 @@ export const candidatesController = {
     );
     req.log.info({ applicationId: a.id, round: req.params.round }, 'round scored');
     res.json(a);
+  },
+
+  update: async (req: Request, res: Response): Promise<void> => {
+    const input: UpdateCandidateInput = req.body;
+    res.json(await service(req).updateCandidate(req.params.id!, input, actor(req)));
+  },
+
+  setNextAction: async (req: Request, res: Response): Promise<void> => {
+    const input: NextActionInput = req.body;
+    res.json(await service(req).setNextAction(req.params.id!, input, actor(req)));
+  },
+
+  activities: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).activities(req.params.id!));
+  },
+
+  logActivity: async (req: Request, res: Response): Promise<void> => {
+    const input: LogActivityInput = req.body;
+    res.status(201).json(await service(req).logActivity(req.params.id!, input, actor(req)));
+  },
+
+  schedule: async (req: Request, res: Response): Promise<void> => {
+    const input: ScheduleInterviewInput = req.body;
+    res.json(await service(req).schedule(req.params.id!, roundParam(req), input, actor(req)));
+  },
+
+  endSlot: async (req: Request, res: Response): Promise<void> => {
+    const input: EndInterviewSlotInput = req.body;
+    res.json(await service(req).endSlot(req.params.id!, roundParam(req), input, actor(req)));
   },
 
   myInterviews: async (req: Request, res: Response): Promise<void> => {

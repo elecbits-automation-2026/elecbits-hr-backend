@@ -1,44 +1,62 @@
 import { z } from '../../shared/zod.js';
 import { LEVELS } from '../../shared/constants/constants.js';
 import { EMPLOYMENT_TYPES } from '../employees/index.js';
-import { applicationSchema, BGV_STATUSES } from './candidates.schema.js';
+import { applicationSchema } from './candidates.schema.js';
 
-/** A hire decision waiting for me, with the candidate's scores (visible only while pending). */
-export const hireDecisionSchema = applicationSchema.openapi('HireDecision');
+/** An offer waiting for the HR Head's approval and signature, with the candidate. */
+export const pendingOfferSchema = applicationSchema.openapi('PendingOffer');
 
-export const decideHireSchema = z
+/**
+ * TA's draft of the offer after negotiation (workflow deck step 15): CTC,
+ * joining date and any other terms. Changing approved terms reopens approval.
+ */
+export const offerDraftSchema = z
   .object({
-    decision: z.enum(['approve', 'reject']),
-    reason: z.string().trim().max(2000).optional(),
-  })
-  .strict()
-  .refine((v) => v.decision === 'approve' || (v.reason ?? '').length > 0, {
-    message: 'A rejection needs a reason',
-    path: ['reason'],
-  })
-  .openapi('DecideHire');
-
-export const makeOfferSchema = z
-  .object({
-    /** Annual CTC (₹) agreed in the HR final round. */
+    /** Annual CTC (₹) agreed with the candidate. */
     ctc: z.number().positive().max(100_000_000),
     joiningDate: z.string().date(),
+    terms: z.string().trim().max(4000).optional(),
   })
   .strict()
-  .openapi('MakeOffer');
+  .openapi('OfferDraft');
 
-export const bgvSchema = z
-  .object({
-    status: z.enum(BGV_STATUSES),
-    notes: z.string().trim().max(4000).optional(),
-  })
+/** The HR Head sends the offer back with what to change. */
+export const returnOfferSchema = z
+  .object({ reason: z.string().trim().min(1).max(2000) })
   .strict()
-  .openapi('UpdateBgv');
+  .openapi('ReturnOffer');
 
 export const endOfferSchema = z
   .object({ reason: z.string().trim().min(1).max(2000) })
   .strict()
   .openapi('EndOffer');
+
+export const CANDIDATE_DOC_STATUSES = ['requested', 'received', 'not_applicable'] as const;
+
+export const candidateDocumentSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+    status: z.enum(CANDIDATE_DOC_STATUSES),
+    updatedAt: z.string().datetime(),
+  })
+  .openapi('CandidateDocument');
+
+export const addCandidateDocumentSchema = z
+  .object({ name: z.string().trim().min(1).max(120) })
+  .strict()
+  .openapi('AddCandidateDocument');
+
+export const setCandidateDocumentSchema = z
+  .object({ status: z.enum(CANDIDATE_DOC_STATUSES) })
+  .strict()
+  .openapi('SetCandidateDocument');
+
+/** The candidate's document folder link (Candidate ID + Name). */
+export const folderLinkSchema = z
+  .object({ link: z.string().trim().url().max(1000).nullable() })
+  .strict()
+  .openapi('FolderLink');
 
 /**
  * Mark hired: what the employee record needs that the candidate doesn't
@@ -66,7 +84,7 @@ export const markHiredResultSchema = z
   })
   .openapi('MarkHiredResult');
 
-export type DecideHireInput = z.infer<typeof decideHireSchema>;
-export type MakeOfferInput = z.infer<typeof makeOfferSchema>;
-export type BgvInput = z.infer<typeof bgvSchema>;
+export type OfferDraftInput = z.infer<typeof offerDraftSchema>;
 export type MarkHiredInput = z.infer<typeof markHiredSchema>;
+export type CandidateDocumentDto = z.infer<typeof candidateDocumentSchema>;
+export type CandidateDocStatus = (typeof CANDIDATE_DOC_STATUSES)[number];

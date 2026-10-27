@@ -158,10 +158,15 @@ export const createMeRepository = (db: DbClient) => ({
                   SELECT value->>'departmentId' FROM org.org_settings
                    WHERE key = 'hiring.hrDepartment')
          UNION ALL
-         SELECT 1 FROM ta.applications a
-           JOIN ta.positions p ON p.id = a.position_id
-           JOIN ta.requisitions r ON r.id = p.requisition_id
-          WHERE r.ta_rm_id = $1 AND a.stage = 'decision'
+         -- HRBP-batch holders approve hiring requests (2026-10-27).
+         SELECT 1 FROM access.employee_batches eb
+           JOIN access.batches b ON b.id = eb.batch_id AND b.name = 'HRBP'
+          WHERE eb.employee_id = $1
+         UNION ALL
+         -- A TA RM with a live line: reviews its positions' JDs / scorecards and
+         -- joins its hire decisions there.
+         SELECT 1 FROM ta.requisitions r
+          WHERE r.ta_rm_id = $1 AND r.status = 'approved'
           LIMIT 1`,
         [employeeId],
       )
@@ -177,9 +182,12 @@ export const createMeRepository = (db: DbClient) => ({
         `SELECT 1 FROM ta.applications a
            JOIN ta.positions p ON p.id = a.position_id
            JOIN ta.requisition_rounds rr ON rr.requisition_id = p.requisition_id
-          WHERE a.stage IN ('interviewing', 'interviewed')
-            AND coalesce(rr.interviewer_id,
-                  CASE WHEN rr.round IN ('hr', 'hr_final') THEN p.recruiter_id END) = $1
+          WHERE ((a.stage = 'interviewing' AND rr.round = a.current_round)
+                 OR EXISTS (SELECT 1 FROM ta.interview_scores s
+                             WHERE s.application_id = a.id AND s.round = rr.round))
+            AND (CASE WHEN rr.round = 'hr' THEN p.recruiter_id
+                      ELSE coalesce(rr.interviewer_id,
+                             CASE WHEN rr.round = 'hr_final' THEN p.recruiter_id END) END) = $1
           LIMIT 1`,
         [employeeId],
       )

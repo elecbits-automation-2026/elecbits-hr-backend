@@ -7,6 +7,7 @@ import { registerSeatsDocs } from '../features/seats/index.js';
 import {
   registerCandidatesDocs,
   registerHireDocs,
+  registerReportsDocs,
   registerHiringDocs,
 } from '../features/hiring/index.js';
 import {
@@ -74,6 +75,7 @@ export const buildOpenApiDocument = () => {
   registerHiringDocs(registry);
   registerCandidatesDocs(registry);
   registerHireDocs(registry);
+  registerReportsDocs(registry);
   registerBatchesDocs(registry);
   registerGrantRequestsDocs(registry);
   registerAuditDocs(registry);

@@ -24,12 +24,6 @@ export const ONBOARDING_TEMPLATE: TemplateTask[] = [
     owner: 'hr',
   },
   {
-    key: 'bgv',
-    phase: 'before_start',
-    title: 'Background verification cleared',
-    owner: 'hr',
-  },
-  {
     key: 'docs',
     phase: 'before_start',
     title: 'ID and address documents submitted',
@@ -114,6 +108,14 @@ export const ONBOARDING_TEMPLATE: TemplateTask[] = [
     phase: 'first_30',
     title: 'First-quarter expectations agreed',
     owner: 'manager',
+  },
+  // BGV is a form, usually filled after joining — it never holds up joining or
+  // the rest of onboarding (learner, 2026-10-27).
+  {
+    key: 'bgv',
+    phase: 'first_30',
+    title: 'Background verification (BGV) form filled',
+    owner: 'employee',
   },
   { key: 'checkin', phase: 'first_30', title: '30-day HR check-in held', owner: 'hr' },
 ];
