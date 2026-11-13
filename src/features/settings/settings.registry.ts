@@ -249,7 +249,7 @@ const definitions = {
     live: true,
     label: 'Concern timelines',
     description:
-      'Deadlines for raised concerns, in WORKING days unless marked calendar. Disputes (Dispute Resolution Framework): manager decides at level 1, HR acknowledges and decides at level 2, the Management Review Committee decides at level 3, and the employee may escalate within the escalation window after a decision. Complaints (Equal Opportunity / anti-bullying): acknowledge, then an outcome within calendar days. Whistleblower reports: the policy sets no numbers — these are the targets the vigil team works to.',
+      'Deadlines for raised concerns, in WORKING days unless marked calendar. Disputes (Dispute Resolution Framework): manager decides at level 1, HR acknowledges and decides at level 2, the Management Review Committee decides at level 3, and the employee may escalate within the escalation window after a decision. Complaints (Equal Opportunity / anti-bullying): acknowledge, then an outcome within calendar days.',
     schema: z.object({
       l1Decide: z.number().int().min(1).max(60),
       l2Ack: z.number().int().min(1).max(60),
@@ -258,8 +258,6 @@ const definitions = {
       escalateWithin: z.number().int().min(1).max(60),
       complaintAck: z.number().int().min(1).max(60),
       complaintResolveCalendarDays: z.number().int().min(1).max(365),
-      vigilAck: z.number().int().min(1).max(60),
-      vigilResolveCalendarDays: z.number().int().min(1).max(365),
     }),
     default: {
       l1Decide: 5,
@@ -269,20 +267,20 @@ const definitions = {
       escalateWithin: 10,
       complaintAck: 7,
       complaintResolveCalendarDays: 60,
-      vigilAck: 7,
-      vigilResolveCalendarDays: 60,
     },
   },
-  'concerns.icContact': {
-    area: 'people',
-    live: true,
-    public: true,
-    label: 'Internal Committee (POSH) contact',
-    description:
-      'Shown when someone chooses "sexual harassment" in Raise a concern — nothing about it is stored in this system; it goes to the Internal Committee under the POSH policy. Blank shows "contact HR for the Internal Committee details".',
-    schema: z.object({ contact: z.string().trim().max(300) }),
-    default: { contact: '' },
-  },
+  // POSH is commented out for now (learner, 2026-11-05): sexual harassment is
+  // reported straight to the RM or management, outside the software.
+  // 'concerns.icContact': {
+  //   area: 'people',
+  //   live: true,
+  //   public: true,
+  //   label: 'Internal Committee (POSH) contact',
+  //   description:
+  //     'Shown when someone chooses "sexual harassment" in Raise a concern — nothing about it is stored in this system; it goes to the Internal Committee under the POSH policy. Blank shows "contact HR for the Internal Committee details".',
+  //   schema: z.object({ contact: z.string().trim().max(300) }),
+  //   default: { contact: '' },
+  // },
   'hiring.hrDepartment': {
     area: 'people',
     live: true,

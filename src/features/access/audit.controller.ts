@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
+import createError from 'http-errors';
 import { createAuditRepository } from './audit.repository.js';
-import type { AuditEntryDto } from './audit.schema.js';
+import { auditQuerySchema, type AuditPageDto } from './audit.schema.js';
 
 /**
  * Thin read-only surface; the mapping is small enough that a separate service
@@ -9,15 +10,28 @@ import type { AuditEntryDto } from './audit.schema.js';
  */
 export const auditController = {
   list: async (req: Request, res: Response): Promise<void> => {
-    const rows = await createAuditRepository(req.db).listRecent();
-    const entries: AuditEntryDto[] = rows.map((row) => ({
-      id: row.id,
-      actorUserId: row.actorUserId,
-      action: row.action,
-      subject: row.subject,
-      detail: row.detail,
-      createdAt: row.createdAt.toISOString(),
-    }));
-    res.json(entries);
+    const query = auditQuerySchema.safeParse(req.query);
+    if (!query.success) throw createError(400, 'Invalid audit-log query', { code: 'BAD_QUERY' });
+    const { q, page, pageSize } = query.data;
+    const { rows, total } = await createAuditRepository(req.db).listPage({
+      search: q || undefined,
+      page,
+      pageSize,
+    });
+    const out: AuditPageDto = {
+      entries: rows.map((row) => ({
+        id: row.id,
+        actorUserId: row.actor_user_id,
+        actorName: row.actor_name,
+        action: row.action,
+        subject: row.subject,
+        detail: row.detail,
+        createdAt: new Date(row.created_at).toISOString(),
+      })),
+      total,
+      page,
+      pageSize,
+    };
+    res.json(out);
   },
 };

@@ -15,12 +15,22 @@ export interface TemplateTask {
   policyCode?: string;
 }
 
+/**
+ * Document steps: uploading the file is what completes them, never a bare
+ * tick (test pass 2026-11-03 — a tick proved nothing). PDF / JPG / PNG.
+ * The task's owner uploads: the joiner their documents, HR the signed offer.
+ */
+export const FILE_TASK_KEYS = new Set(['offer', 'docs', 'bank', 'bgv']);
+
+/** Steps the records complete on their own — never ticked by hand. */
+export const AUTO_TASK_KEYS = new Set(['payroll', 'claim']);
+
 export const ONBOARDING_TEMPLATE: TemplateTask[] = [
   // ── Before you start (joining date −7) ──────────────────────────────────
   {
     key: 'offer',
     phase: 'before_start',
-    title: 'Offer letter issued and accepted',
+    title: 'Signed offer letter uploaded — HR',
     owner: 'hr',
   },
   {
@@ -36,10 +46,11 @@ export const ONBOARDING_TEMPLATE: TemplateTask[] = [
     owner: 'employee',
   },
   {
-    // Done by itself once the asset register shows the designation's kit held.
+    // OPS is told when the journey starts, decides what the joiner gets
+    // (laptop, desktop, mobile, ID card…) and ticks it with what was issued.
     key: 'kit',
     phase: 'before_start',
-    title: 'Joiner kit issued (laptop, ID card, …) — OPS',
+    title: 'Assets decided and issued — OPS',
     owner: 'ops',
   },
   {
@@ -58,9 +69,10 @@ export const ONBOARDING_TEMPLATE: TemplateTask[] = [
     owner: 'hr',
   },
   {
+    // Done by itself once the joiner claims their login.
     key: 'claim',
     phase: 'week_one',
-    title: 'HRMS account claimed and profile completed',
+    title: 'HRMS account claimed',
     owner: 'employee',
   },
   {
@@ -69,13 +81,6 @@ export const ONBOARDING_TEMPLATE: TemplateTask[] = [
     title: 'Code of conduct read and acknowledged',
     owner: 'employee',
     policyCode: 'coc',
-  },
-  {
-    key: 'handbook',
-    phase: 'week_one',
-    title: 'Employee handbook read and acknowledged',
-    owner: 'employee',
-    policyCode: 'handbook',
   },
   {
     key: 'workspace',

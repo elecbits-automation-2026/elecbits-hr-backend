@@ -1,7 +1,7 @@
 /**
  * Public surface of the OPS module — the asset manager (user decisions
  * 2026-10-15): the register with its append-only history, OPS setup
- * (categories, kits), the request queue, gate passes, consumable stock and
+ * (categories), the request queue, gate passes, consumable stock and
  * the employee's own view. Several filesets in one folder because they share
  * the ops domain and each other's rows. Locations are the attendance punch
  * zones.

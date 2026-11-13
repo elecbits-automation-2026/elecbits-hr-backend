@@ -47,7 +47,9 @@ const toPass = (p: PassViewRow, t: string): GatePassDto => ({
 
 /**
  * Gate-pass rules (user decisions 2026-10-15):
- *  - only items whose category is flagged may leave (never laptops);
+ *  - only LENT (lab-kind) items whose category is flagged may leave — never
+ *    issued equipment such as laptops (learner, 2026-11-05: "there should
+ *    not be any laptop gate pass in the first place");
  *  - anyone may ask for an item they hold or a zone item nobody holds, and
  *    the requester is answerable for it until it is back (the disclaimer);
  *  - OPS alone decides, never on their own pass; approval lets it leave and
@@ -85,7 +87,7 @@ export const createGatePassesService = (deps: {
     const me = actor.actorEmployeeId;
     const v = (await ops.assetViews({ ids: [input.assetId] }))[0];
     if (!v) throw createError(404, 'Asset not found', { code: 'ASSET_NOT_FOUND' });
-    if (!v.cat_gate) {
+    if (!v.cat_gate || v.cat_kind !== 'lab') {
       throw createError(422, `${v.cat_name} items don't go out on a gate pass`, {
         code: 'GATE_PASS_NOT_REQUIRED',
       });

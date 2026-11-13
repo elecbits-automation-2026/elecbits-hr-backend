@@ -77,6 +77,8 @@ export const meSchema = z
     hiringApprover: z.boolean(),
     /** Conducts a round on a live application — shows My interviews (UX only). */
     hasInterviews: z.boolean(),
+    /** Own onboarding still open (or about to start), or a report's is — shows Onboarding (UX only). */
+    showOnboarding: z.boolean(),
   })
   .openapi('Me');
 

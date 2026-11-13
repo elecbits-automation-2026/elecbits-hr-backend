@@ -121,8 +121,8 @@ days. The never-wired goal at-risk thresholds and health-insurance default were
 removed.
 
 Fixed by decision rather than settings: probation is 2 months with no extension
-(auto-confirm 7 days after the date), a PIP runs 60 days with a check-in every
-14 days and one 30-day extension, LTA is 10% of the month.
+(auto-confirm 7 days after the date), a PIP runs 60 days with one 30-day
+extension, LTA is 10% of the month.
 
 ### 1.6 Frontend: consoles and navigation
 
@@ -216,7 +216,7 @@ compensation-only caller sees bank fields as `bankDetailsHidden: true` and is
 refused (403 `BANK_DETAILS_FORBIDDEN`) when sending them.
 
 Close-out features ride existing keys rather than new ones: probation decisions
-and PIP approval use `hrbp.people` update (in reach); the OPS joiner task uses
+use `hrbp.people` update (in reach), as does HR starting a PIP for someone with no RM; the OPS joiner task uses
 `ops.assets` update (org); the payroll joiner task and payroll-side claim
 receipts use `pr.payroll` (org).
 
@@ -245,7 +245,7 @@ a company-wide module is given a narrower scope.
 - **Self-governed apex**: people whose effective RM is the Owner record
   (`access/selfGovernance.ts`). Their leave, remote work and late work updates
   are approved as raised (balances still charged), they set their own goals,
-  they appear in nobody's team views, reimbursements skip the RM step.
+  they appear in nobody's team views (reimbursements have no RM step for anyone).
 - **Reporting manager is a relationship, not a grant**: the effective RM =
   `leave_approver ?? reports_to`; team views and RM slots resolve it live.
 - **Grant requests**: HR proposes extra access for one person
@@ -291,12 +291,12 @@ by `npm run docs:schema`, so it is always current.
 | `punch_zones`                                 | geofences: lat/lng/radius + zone work hours                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `holidays`                                    | org holiday calendar                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `attendance_regularizations`                  | punch corrections (routes currently disabled; HR mark replaces them)                                                                                                                                                                                                                                                                                                                                                                                        |
-| `wfh_requests`                                | remote work: dual RM + HR slots, mandatory reason                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `wfh_requests`                                | remote work: RM approves (one step; `partially_approved` and the HR slot are legacy), mandatory reason                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `feedback_notes`                              | appreciation/concern notes: author, recipient, body, evidence                                                                                                                                                                                                                                                                                                                                                                                               |
 | `policies`, `policy_acks`, `policy_documents` | library (with retire), version-stamped append-only acks, the PDF in the DB                                                                                                                                                                                                                                                                                                                                                                                  |
-| `onboarding_journeys`, `onboarding_tasks`     | one journey per hire; tasks with owner employee / manager / hr / admin / **ops** (joiner kit) / **payroll** (salary + bank on record) — the last two tick themselves                                                                                                                                                                                                                                                                                        |
+| `onboarding_journeys`, `onboarding_tasks`     | one journey per hire; tasks with owner employee / manager / hr / admin / **ops** (assets decided and issued) / **payroll** (salary + bank on record, ticks itself); `done_note` = what was done (required on a hand tick)                                                                                                                                                                                                                                                                                        |
 | `probation_reviews`                           | one per person at the 2-month date: status pending → recommended → confirmed / ended, the RM's recommendation + note, HR's decision + note, `auto_confirmed`, the termination `exit_id` when ended                                                                                                                                                                                                                                                          |
-| `pips`, `pip_checkins`                        | performance improvement plans: RM, reason, `targets` (jsonb title + measure), support, start / end (60 days, `extended` once +30), status pending_hr → active → passed / not_passed / cancelled, HR decision, acknowledgement, outcome; fortnightly check-ins with rating on_track / at_risk / off_track. One open PIP per person (partial unique index)                                                                                                    |
+| `pips`, `pip_checkins`                        | performance improvement plans: RM, reason, `targets` (jsonb title + measure), support, start / end (60 days, `extended` once +30), status active → passed / not_passed / cancelled (pending_hr, the HR decision, acknowledgement and check-ins are history since 2026-11-05), outcome. One open PIP per person (partial unique index)                                                                                                    |
 | `recognitions`                                | R&R: type from the catalog setting, `award_name` snapshot, citation, value, status, `cycle`, `group_id`/`group_lead` for team awards; partial unique index = one approved award per type per window                                                                                                                                                                                                                                                         |
 | `career_tracks`                               | open roadmap conversation toward the next band (one open per person)                                                                                                                                                                                                                                                                                                                                                                                        |
 | `career_level_changes`                        | promotion history: from → to, by, when, the track it fulfilled                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -307,13 +307,13 @@ by `npm run docs:schema`, so it is always current.
 | `work_updates`                                | one daily note per person: `goal_ids` tags, `late_status` pending/approved/declined, optional AI `score` (null = unscored)                                                                                                                                                                                                                                                                                                                                  |
 | `work_update_miss_flags`                      | one per person per month over the miss allowance                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `payroll_runs`                                | month, draft/finalized/paid                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `payslips`                                    | immutable snapshots after finalize (§5.6): structure split **`basic_percent` / `hra_percent`** (from the salary record), LOP, PF both sides, TDS, PT + **`pt_state`**, deductions, earnings adjustments incl. `recognition_bonus`, **`reimbursement`** (sum of approved claims), **`correction`**, **`loan_emi`**, the F&F lines when `exit_id` is set (EL encashed, gratuity, notice pay / recovery, uncertified sick days, recoveries), net and final pay |
+| `payslips`                                    | immutable snapshots after finalize (§5.6): structure split **`basic_percent` / `hra_percent`** (from the salary record), LOP, PF both sides, TDS, PT + **`pt_state`**, deductions, earnings adjustments incl. `recognition_bonus`, **`reimbursement`** (sum of approved claims on runs before 2026-11-05; 0 since — claims are paid from the reimbursement sheet), **`correction`**, **`loan_emi`**, the F&F lines when `exit_id` is set (EL encashed, gratuity, notice pay / recovery, uncertified sick days, recoveries), net and final pay |
 | `payslip_corrections`                         | post-finalize corrections: signed amount, reason, source slip, pending/applied/cancelled, the run that carried it                                                                                                                                                                                                                                                                                                                                           |
-| `reimbursement_claims`                        | employee claims: spend date, category, amount, receipt note, status pending_rm → pending_payroll → approved → paid (or declined/cancelled), deciders, the run that paid it                                                                                                                                                                                                                                                                                  |
+| `reimbursement_claims` | employee claims: spend date, category, amount, receipt note, status pending_payroll (PR) → pending_admin (Admin) → approved → paid (or declined/cancelled; a PR person's claim starts at pending_admin; `pending_rm` is history), PR / Admin deciders, paid on + payment reference + paid by (from the reimbursement sheet, 2026-11-05), or the payroll run that paid it (older claims) |
 | `claim_receipts`                              | one receipt file per claim (bytea, replaced on re-upload)                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `loans`, `loan_repayments`                    | loan / advance register: principal, `interest_rate_pct` (per loan), months, start month, EMI, status active / closed / recovered_at_exit; repayments per run (emi), at exit (fnf) or outside payroll, split into principal + interest                                                                                                                                                                                                                       |
 | `exits`, `exit_clearances`, `fnf_recoveries`  | resignation or termination (serve / pay in lieu): notice start, proposed and fixed last day, shortfall waive / recover, handover plan, interview, status submitted → accepted → relieved → settled (or withdrawn / cancelled); four clearances hr / manager / ops / payroll; payroll's typed recovery lines                                                                                                                                                 |
-| `leave_certificates`                          | the sick-leave certificate file for a leave (bytea) — 3+ sick days in notice without one are LOP in the F&F                                                                                                                                                                                                                                                                                                                                                 |
+| `leave_certificates`                          | the sick-leave certificate file for a leave (bytea) — required to approve sick leave over 3 days; 3+ sick days in notice without one are LOP in the F&F                                                                                                                                                                                                                                                                                                                                                 |
 | `concerns`                                    | one case: code (`DSP-`/`CMP-`/`WBR-YYYY-NNN`), track dispute/complaint/whistleblower, category, subject, related case, `raised_by` (null when anonymous) + `follow_up_key_hash`, status, dispute `level` + `escalate_by`, ack/resolve due dates, extension + reason, outcome, resolution                                                                                                                                                                    |
 | `concern_notes`                               | the case thread: author (null = anonymous raiser), kind note/reply/decision/system, level, `visible_to_raiser`                                                                                                                                                                                                                                                                                                                                              |
 | `open_door_slots`                             | owner, date, start/end, capacity, note, cancelled_at                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -339,7 +339,7 @@ Rebuilt in 0044–0045 (OPS asset manager, §5.14). Locations are the attendance
 | `asset_requests`                                 | new / upgrade / replacement / repair / return requests to the OPS queue                                                                                                                                     |
 | `gate_passes`                                    | taking a flagged item out: disclaimer accepted, return date, status requested / approved / declined / returned, extensions                                                                                  |
 | `asset_incidents`                                | damage / loss / theft, open → closed (recorded only, no payroll recovery)                                                                                                                                   |
-| `asset_kits`                                     | what a designation should be issued (the joiner kit)                                                                                                                                                        |
+| `asset_kits`                                     | history only — designation joiner kits, removed 2026-11-05                                                                                                                                                        |
 | `stock_items`, `stock_levels`, `stock_movements` | consumables counted per zone; append-only ledger (in / issue / transfer / adjust); never below 0                                                                                                            |
 | `scheduled_job_runs`                             | one row per job per run key — the cross-instance lock (§5.12)                                                                                                                                               |
 | `reminders_sent`                                 | every reminder sent (approvals, returns, probation, PIP) — paces the next one                                                                                                                               |
@@ -421,7 +421,7 @@ refused by scope (§2.3).
 | `POST /attendance/hr-mark`                                               | `hrbp.attendance update` + reach      |                                                                |
 | `GET /attendance/zones` · `POST`/`DELETE`                                | auth / Admin                          |                                                                |
 | `GET /attendance/holidays` · `POST`/`DELETE`                             | auth / `hrbp.attendance update` _org_ |                                                                |
-| `POST /attendance/wfh` + `mine` / `team` / `:id/decision` / `:id/cancel` | auth / service                        | dual RM + HR slots                                             |
+| `POST /attendance/wfh` + `mine` / `team` / `:id/decision` / `:id/cancel` | auth / service                        | RM only (HR when there is no RM)                               |
 | `GET /attendance/wfh/queue`                                              | `hrbp.attendance read` + reach        |                                                                |
 | regularizations                                                          | —                                     | disabled (HR mark replaces them)                               |
 
@@ -446,10 +446,11 @@ All `*org*`.
 | Method & path                                                                           | Gate                                                                                                                        |
 | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `GET /reimbursements/mine` · `POST /reimbursements` · `POST /reimbursements/:id/cancel` | auth (own)                                                                                                                  |
-| `GET /reimbursements/team`                                                              | auth (claims waiting on the caller as RM)                                                                                   |
-| `GET /reimbursements?status=`                                                           | `pr.payroll read` _org_                                                                                                     |
-| `POST /reimbursements/:id/decision`                                                     | service: RM step = effective RM; payroll step = `pr.payroll update` _org_                                                   |
-| `PUT /reimbursements/:id/receipt` · `GET /reimbursements/:id/receipt`                   | service: the claimant uploads (raw body, PDF / JPG / PNG, 10 MB); claimant, effective RM or `pr.payroll read` _org_ open it |
+| `GET /reimbursements?status=&month=` | `pr.payroll read` _org_ (PR and the Admin account) |
+| `GET /reimbursements/bank-file?month=` | `pr.payroll.bank_details read` _org_ — .xlsx: "Bank transfer" (one row per person) + "Claims" |
+| `POST /reimbursements/mark-paid` | `pr.payroll update` _org_ — approved → paid with date + bank reference, all or none |
+| `POST /reimbursements/:id/decision` | service: PR step = `pr.payroll update` _org_ (not the claimant); the Admin account decides at either step and its approval is final |
+| `PUT /reimbursements/:id/receipt` · `GET /reimbursements/:id/receipt` | service: the claimant uploads (raw body, PDF / JPG / PNG, 10 MB); claimant or `pr.payroll read` _org_ (incl. Admin) open it |
 
 ### Performance, quarter reports, career, recognition, feedback
 
@@ -474,13 +475,13 @@ All `*org*`.
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `GET /policies` · `/policies/mine` · `/:id/document` · `POST /:id/ack`            | auth                                                                                              |
 | `GET /policies/tracker` · `POST` · `PATCH` · `PUT /:id/document` · retire/restore | `hrbp.policies` _org_                                                                             |
-| `GET /onboarding/mine` · `POST /onboarding/tasks/:id/toggle`                      | auth / service (the task's owner: employee, RM, HR reach, `ops.assets` _org_, `pr.payroll` _org_) |
+| `GET /onboarding/mine` · `/onboarding/team` · `POST /onboarding/tasks/:id/toggle`                      | auth / service (the task's owner: employee, RM, HR reach, `ops.assets` _org_, `pr.payroll` _org_) |
 | `GET /onboarding/team-tasks/:owner`                                               | service — `ops`: `ops.assets` _org_; `payroll`: `pr.payroll` _org_                                |
 | `GET /onboarding` · `/onboarding/employee/:id` · `POST /onboarding`               | `hrbp.people` + reach                                                                             |
 | `GET /probation` · `/probation/mine` · `GET /probation/:id/letter`                | service — HR reach, the effective RM, the person                                                  |
 | `POST /probation/:id/recommend` · `/probation/:id/decide`                         | service — the effective RM; `hrbp.people update` in reach (end = termination exit)                |
-| `GET /pips?employeeId=` · `/pips/:id` · `POST /pips`                              | service — the person, the effective RM (creates), HR reach                                        |
-| `POST /pips/:id/decide` · `/acknowledge` · `/checkins` · `/outcome` · `/cancel`   | service — HR · the employee · the RM · the RM · RM before approval / HR any time                  |
+| `GET /pips?employeeId=` · `/pips/:id` · `/pips/can-start/:employeeId` · `POST /pips` | service — the person, the effective RM (creates; HR when no RM), HR reach |
+| `POST /pips/:id/outcome` · `/cancel` | service — the RM after the end date · the RM or HR while it runs |
 
 ### Exits
 
@@ -497,9 +498,9 @@ All `*org*`.
 
 | Method & path                                                                                                                                                         | Gate                                                |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `GET /assets/options` · `/assets` · `/assets/incidents` · `/assets/kit-check/:employeeId` · `/assets/:id`                                                             | `ops.assets read` _org_                             |
+| `GET /assets/options` · `/assets` · `/assets/incidents` · `/assets/:id`                                                             | `ops.assets read` _org_                             |
 | `POST /assets` · `/assets/import` · `PATCH /assets/:id` · `POST /assets/:id/issue` · `return` · `transfer` · `move` · `status` · `incidents` · `/incidents/:id/close` | `ops.assets` create / update _org_                  |
-| `GET /asset-setup` · `POST /asset-setup/categories` · `PATCH /categories/:id` · `PUT /kits`                                                                           | `ops.locations` _org_                               |
+| `GET /asset-setup` · `POST /asset-setup/categories` · `PATCH /categories/:id`                                                                           | `ops.locations` _org_                               |
 | `GET /asset-requests/mine` · `POST /asset-requests`                                                                                                                   | auth (any employee)                                 |
 | `GET /asset-requests` · `PATCH /:id` · `POST /:id/fulfil`                                                                                                             | `ops.asset_requests` read / update                  |
 | `POST /gate-passes`                                                                                                                                                   | auth (flagged categories only, disclaimer required) |
@@ -538,11 +539,23 @@ imports a joiner with a joining date — or first sets one later** (2026-10-22),
 so OPS and payroll hear on day one; the joiner's first visit still auto-creates
 it as a fallback. Both doors use `ONBOARDING_AUTO_CREATE_WINDOW_DAYS` (90): an
 older joining date stays a conscious HR start. Three phases, tasks owned by the
-employee, the RM, HR, Admin, **OPS** ("Issue the joiner kit" — done by itself
-when `assets/kit-check` shows every kit line held) and **payroll** ("Salary and
-bank details on record" — done by itself when the salary row has a CTC and
-bank details). OPS and payroll are rung when a journey starts and see their
-open tasks at `GET /onboarding/team-tasks/:owner`.
+employee, the RM, HR, Admin, **OPS** ("Assets decided and issued" — OPS is rung
+when the journey starts, decides what the joiner gets and ticks it with what
+was issued; there are no designation kits since 2026-11-05) and **payroll**
+("Salary and bank details on record" — done by itself when the salary row has a
+CTC and bank details). OPS and payroll see their open tasks at
+`GET /onboarding/team-tasks/:owner`.
+
+Owner ticks + proof (learner, 2026-11-05): each step is acted on **only by its
+owner** — the joiner, their effective RM (HR in reach when they have no RM of
+their own, i.e. none or the Admin account), HR in reach for HR / admin steps,
+an org OPS / payroll grant — and the task DTO carries `canAct` for the viewer.
+A hand tick needs a note (`done_note`, 422 `NOTE_REQUIRED`) shown with who and
+when. Document steps (signed offer by HR; ID, bank, BGV by the joiner) complete
+by upload; the Code of Conduct by acknowledging it (inline on the checklist; no
+handbook step any more); "HRMS account claimed" and payroll by themselves
+(409 `AUTO_TASK` on a hand tick). RMs see their joiners at
+`GET /onboarding/team` (Onboarding → My team).
 
 **Deactivation** only happens through an exit: `PATCH /employees/:id` refuses
 active / exiting → inactive with 409 `USE_EXIT` (an invited record that never
@@ -568,14 +581,19 @@ and the scheduler's reminders (§5.12). Email is out of scope (v2).
 - Application window: earned and vacation_family must be raised
   `leaves.applicationWindowDays` ahead.
 - Dual approval (RM + HR), declines need a reason, an HRBP's own leave skips
-  the HR slot, menstrual is HR-only and hidden from RM surfaces.
+  the HR slot. Menstrual needs the RM and HR (2026-11-05; the RM's queue shows
+  it, other RM surfaces still show a generic leave day; HR is never waived).
+- Sick leave of more than `SICK_CERT_AFTER_DAYS` (3) days needs its
+  certificate before anyone approves it (422 `CERTIFICATE_REQUIRED`); the form
+  uploads it with the request.
 - Balances move by conditional UPDATEs (409 `INSUFFICIENT_BALANCE` rolls back).
 - Repair: `scripts/fix-accrual-from-doj.ts` (dry run, `--apply`) corrected
   stored allocations after the joining-month fix.
 
 ### 5.4 Attendance
 
-- Geo gate over `punch_zones` (any zone, own radius); remote approval lifts it.
+- Geo gate over `punch_zones` (any zone, own radius); a remote request lifts it
+  from the moment it is raised (pending or approved).
   A refused punch names the nearest zone, the distance and the radius
   ("You are 1.3 km from Aerocity (allowed 250 m)…"). The web client takes the
   sharpest fresh fix over ~5 s (never a cached one); Admin → Punch zones can
@@ -585,7 +603,10 @@ and the scheduler's reminders (§5.12). Email is out of scope (v2).
   remote → punch → absent. Hour rules (`attendance.hourRules`, from their start
   date): under the half-day threshold = half day; under the short-day threshold
   rings the employee and RM. Personal work hours override the zone's.
-- Remote work: dual approval; HR inbox filtered by reach.
+- Remote work (2026-11-05): the RM alone approves (HR only for someone with no
+  RM; self-governed people approved as raised). While it waits the person may
+  punch from anywhere; if declined or withdrawn, those remote punches are
+  ignored and the days read absent. HR's list is read-only, filtered by reach.
 
 ### 5.5 Work updates & goals
 
@@ -604,7 +625,8 @@ tags, monthly miss allowance with a flag and a one-time RM bell.
   **PT by state** (`payroll.ptStates`: zones → state, slabs with a February
   amount; the slip snapshots `pt_state`), TDS from the salary row, auto-cover of
   absence from the configured leave order, previous month's approved R&R
-  awards, **approved reimbursement claims** spent by the run month, and pending
+  awards (reimbursement claims are not on the payslip since 2026-11-05 — they are
+  paid from the reimbursement sheet), and pending
   **corrections** to earlier months, and **loan / advance EMIs** due this month.
 - **Structure**: Basic and HRA are the person's `basic_percent` / `hra_percent`
   from the salary record (blank = 50 / 25), LTA 10%, special = the remainder;
@@ -655,7 +677,7 @@ HR closes a quarter (`early: true` for the running one): goals freeze and one
 `quarter_reports` row per person is written — goals and category scores,
 computed score and band (**E3 85+, E2 70+, E1 50+, below 50**), work updates vs
 working days, months over the miss allowance, attendance and late check-ins,
-awards, feedback notes, at-risk goals, **PIP candidate** (< 50) and **appraisal
+awards, feedback notes, at-risk goals and **appraisal
 eligibility** (six months' service by the quarter end). The manager at close (or
 HR whose grant reaches them) sets a final score with a reason; no approval step.
 Employees see their own; the person sheet shows the latest. The board on My
@@ -688,7 +710,7 @@ working day after that hour; it **claims** `(job, run_key=date)` in
 `ops.scheduled_job_runs` — the unique key means one run per day across any
 number of instances; a failed run retries after 30 minutes, three attempts. The
 `approval-reminders` job finds every waiting leave, remote-work request,
-attendance fix, reimbursement, late work update, access request and R&R
+attendance fix, late work update, access request and R&R
 nomination, works out who it waits on (the same rules as the decision
 endpoints), and rings each approver after `APPROVAL_REMINDERS.afterWorkingDays`
 (2 working days, fixed), then every `repeatEveryWorkingDays` (2), the
@@ -705,7 +727,7 @@ All jobs (each daily on working days at `SCHEDULER_DAILY_AT`):
 | `return-reminders`   | asks holders of overdue lab loans / gate-pass items "back or still out?" every 2 working days; after 5 working days overdue tells OPS and the RM (`RETURN_REMINDERS`, §5.14) |
 | `exit-day`           | on a last working day: interview request + OPS told; afterwards relieves the leaver (§5.15)                                                                                  |
 | `probation`          | RM bell 7 days before the date; HR reminders past it; auto-confirm at +7 days (§5.16)                                                                                        |
-| `pip`                | RM bell when a fortnightly check-in is due; RM + HR when a PIP ended without an outcome (§5.17)                                                                              |
+| `pip`                | RM + HR when a PIP ended without an outcome (§5.17)                                                                                                                          |
 
 ### 5.13 Concerns & open door
 
@@ -762,8 +784,8 @@ redirect there, and bells link to the tabs.
   `assigned`). Statuses: assigned, idle, in_use_shared (router, printer),
   needs_repair, scrapped, gifted, lost. Issue / return / transfer / move /
   status changes all append to `asset_events`; nothing is deleted. CSV import
-  with a dry run. Joiner kits per designation (`asset_kits`) drive
-  `kit-check` and the onboarding OPS task.
+  with a dry run. (Joiner kits per designation — `asset_kits` — were removed
+  on 2026-11-05; the table stays for history. OPS decides each joiner's assets.)
 - **Requests**: any employee asks (new / upgrade / replacement / repair /
   return) into the shared OPS queue; fulfilling an upgrade / replacement issues
   the new item and takes the old one back in one step.
@@ -818,19 +840,25 @@ HR is told. While a review is open the person stays on the probation leave gate.
 
 ### 5.17 Performance improvement plans
 
-- Never automatic: a quarter closing with a final score **under 50** rings the
-  RM ("consider a PIP"); the RM decides.
-- The effective RM opens it: reason, measurable targets (title + measure),
-  support, start date → **60 days**. One open PIP per person.
-- **HR approves** (or sends back) — `hrbp.people update` in reach; then the
-  employee acknowledges. A dispute about it doesn't pause it.
-- The RM logs a **check-in every 14 days** (rating on track / at risk / off
-  track); the `pip` job rings the RM when one is due.
+Reworked 2026-11-05 (learner, after the test run):
+- Never suggested by a score — it is the RM's own decision (no under-50 bell
+  or "PIP candidate" flag any more).
+- The effective RM opens it (HR in reach only when the person has no RM of
+  their own — none, or the Admin account): reason, measurable targets
+  (title + measure), support, start date → **active at once for 60 days**.
+  `GET /pips/can-start/:employeeId` tells the person sheet who may. One open
+  PIP per person.
+- **No HR approval, no acknowledgement, no check-ins.** The employee gets a
+  bell (email later — `TODO(email)` in `pip.service.ts`), HR in reach an FYI
+  bell. A dispute about it doesn't pause it.
 - At the end the RM records **passed**, **extend 30 days** (once) or **not
-  passed** — not passed rings HR, who may start a termination. The RM can
-  withdraw before approval, HR at any time.
-- Screens: the person sheet (RM), My performance (employee), Quarter reports
-  (HR approval queue).
+  passed** — not passed rings HR, who may start a termination. The `pip` job
+  rings the RM + HR while an ended PIP has no outcome. The RM or HR can
+  withdraw a running PIP.
+- Screens: the person sheet (RM / HR), My performance (employee, read-only),
+  Quarter reports (HR's read-only list of running PIPs).
+- `pending_hr`, the HR-decision / acknowledgement columns and `pip_checkins`
+  are history only (migration 0079 started any waiting PIP).
 
 ### 5.18 Loans & advances
 
@@ -860,7 +888,7 @@ HR is told. While a review is open the person stays on the probation leave gate.
 | Instant revocation                     | per-request grants; per-request active check; refresh families revoked on deactivation                                               |
 | Payslip immutability                   | finalized runs reject edits; changes go through corrections                                                                          |
 | Append-only audit, no sensitive values | repositories write audit in the same transaction                                                                                     |
-| Confidential leave                     | menstrual hidden from RM surfaces and never named in reminders                                                                       |
+| Confidential leave                     | menstrual: only the RM's approval queue names it; never named in reminders                                                                      |
 | Money races                            | conditional UPDATEs; finalize re-checks claims and corrections in-transaction                                                        |
 | Exactly-once jobs                      | unique (job, run_key) claim                                                                                                          |
 | Parameterized SQL only                 | Drizzle + `db.query($n)` placeholders                                                                                                |
@@ -915,6 +943,6 @@ From the September architecture notes, still the intended shape for TA:
   becomes an employee (no login, no payroll).
 - **Mark hired** (one transaction) creates the employee record from the
   candidate; the onboarding journey then fans out per portal — which already
-  exists: HR / RM tasks, the OPS kit task and the payroll salary + bank task
+  exists: HR / RM tasks, the OPS assets task and the payroll salary + bank task
   (§5.1). "Fully onboarded" = every task done.
 - The record is the channel between portals; no free-text hand-off note.

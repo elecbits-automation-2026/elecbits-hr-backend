@@ -37,6 +37,17 @@ export const seatsOverviewSchema = z
   })
   .openapi('SeatsOverview');
 
+/** A past holder: when they held the seat, why it ended, and who ended it. */
+export const pastSeatSchema = seatSchema
+  .extend({
+    endedAt: z.string().datetime(),
+    /** replaced | vacated | relieved (exit day) */
+    endedReason: z.string().nullable(),
+    /** Null when the system ended it (exit day). */
+    endedByName: z.string().nullable(),
+  })
+  .openapi('PastSeat');
+
 // A department head needs its department; the company-wide seats must not have one.
 const deptRule = (v: { seat: string; departmentId?: string }) =>
   (v.seat === 'dept_head') === (v.departmentId !== undefined);
@@ -68,5 +79,6 @@ export const vacateSeatSchema = z
 export type SeatKind = z.infer<typeof seatKindSchema>;
 export type SeatDto = z.infer<typeof seatSchema>;
 export type SeatsOverviewDto = z.infer<typeof seatsOverviewSchema>;
+export type PastSeatDto = z.infer<typeof pastSeatSchema>;
 export type AssignSeatInput = z.infer<typeof assignSeatSchema>;
 export type VacateSeatInput = z.infer<typeof vacateSeatSchema>;

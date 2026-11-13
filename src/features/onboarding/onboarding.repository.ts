@@ -1,9 +1,10 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
   employees,
   onboardingJourneys,
+  onboardingTaskFiles,
   onboardingTasks,
   policies,
   policyAcks,
@@ -59,33 +60,38 @@ export const createOnboardingRepository = (db: DbClient) => ({
 
   /** Journey + its copied template tasks + audit, one transaction (§10). */
   /**
-   * The joiner hand-off, worked out from the records: the kit counts as
-   * issued when the designation has a kit and every line is held; payroll
-   * when a CTC and bank account + IFSC are on the salary record.
+   * Steps that finish on their own, worked out from the records: payroll when
+   * a CTC and bank account + IFSC are on the salary record; the account step
+   * once the joiner has claimed their login. (OPS decides and ticks the asset
+   * step itself — there is no designation kit any more, 2026-11-05.)
    */
-  autoDone: async (employeeId: string): Promise<{ ops: boolean; payroll: boolean }> => {
-    const [kit, pay] = await Promise.all([
-      db.query<{ total: number; ok: number }>(
-        `SELECT count(*)::int AS total, count(*) FILTER (WHERE x.held >= x.qty)::int AS ok
-           FROM (SELECT k.qty,
-                        (SELECT count(*) FROM ops.assets a
-                          WHERE a.category_id = k.category_id AND a.holder_id = e.id) AS held
-                   FROM ops.asset_kits k
-                   JOIN org.employees e ON lower(k.designation) = lower(e.designation)
-                  WHERE e.id = $1) x`,
-        [employeeId],
-      ),
-      db.query<{ ready: boolean }>(
-        `SELECT (ctc IS NOT NULL AND bank_account_no IS NOT NULL AND ifsc_code IS NOT NULL) AS ready
-           FROM org.employee_salary WHERE employee_id = $1`,
-        [employeeId],
-      ),
-    ]);
-    return {
-      ops: (kit[0]?.total ?? 0) > 0 && kit[0]!.ok === kit[0]!.total,
-      payroll: pay[0]?.ready ?? false,
-    };
+  autoDone: async (employeeId: string): Promise<{ payroll: boolean; claim: boolean }> => {
+    const rows = await db.query<{ payroll: boolean; claim: boolean }>(
+      `SELECT coalesce((SELECT ctc IS NOT NULL AND bank_account_no IS NOT NULL AND ifsc_code IS NOT NULL
+                           FROM org.employee_salary WHERE employee_id = $1), false) AS payroll,
+              EXISTS (SELECT 1 FROM users u WHERE u.employee_id = $1) AS claim`,
+      [employeeId],
+    );
+    return { payroll: rows[0]?.payroll ?? false, claim: rows[0]?.claim ?? false };
   },
+
+  /** Journeys of the people whose effective RM is `rmId` (the RM's Onboarding → My team). */
+  journeysForRm: async (rmId: string) =>
+    db.orm
+      .select({
+        row: onboardingJourneys,
+        employeeName: employees.name,
+        employeeCode: employees.employeeCode,
+      })
+      .from(onboardingJourneys)
+      .innerJoin(employees, eq(onboardingJourneys.employeeId, employees.id))
+      .where(
+        and(
+          sql`coalesce(${employees.leaveApprover}, ${employees.reportsTo}) = ${rmId}`,
+          ne(employees.status, 'inactive'),
+        ),
+      )
+      .orderBy(asc(onboardingJourneys.status), asc(onboardingJourneys.dueOn)),
 
   /** Open journeys' tasks owned by OPS or payroll, with the joiner. */
   teamTasks: (owner: 'ops' | 'payroll') =>
@@ -93,13 +99,14 @@ export const createOnboardingRepository = (db: DbClient) => ({
       task_id: string;
       title: string;
       done_at: Date | null;
+      done_note: string | null;
       employee_id: string;
       name: string;
       employee_code: string;
       designation: string | null;
       date_of_joining: string | null;
     }>(
-      `SELECT t.id AS task_id, t.title, t.done_at, e.id AS employee_id, e.name, e.employee_code,
+      `SELECT t.id AS task_id, t.title, t.done_at, t.done_note, e.id AS employee_id, e.name, e.employee_code,
               e.designation, e.date_of_joining::text
          FROM org.onboarding_tasks t
          JOIN org.onboarding_journeys j ON j.id = t.journey_id
@@ -161,6 +168,7 @@ export const createOnboardingRepository = (db: DbClient) => ({
   setTaskDone: async (
     task: TaskRow,
     done: boolean,
+    note: string | null,
     actor: ActorContext,
   ): Promise<TaskRow> => {
     return db.transaction(async (tx) => {
@@ -168,8 +176,8 @@ export const createOnboardingRepository = (db: DbClient) => ({
         .update(onboardingTasks)
         .set(
           done
-            ? { doneAt: new Date(), doneBy: actor.actorEmployeeId }
-            : { doneAt: null, doneBy: null },
+            ? { doneAt: new Date(), doneBy: actor.actorEmployeeId, doneNote: note }
+            : { doneAt: null, doneBy: null, doneNote: null },
         )
         .where(eq(onboardingTasks.id, task.id))
         .returning();
@@ -177,9 +185,67 @@ export const createOnboardingRepository = (db: DbClient) => ({
         actorUserId: actor.actorUserId,
         action: 'onboarding.task_toggled',
         subject: `onboarding_journeys:${task.journeyId}`,
-        detail: JSON.stringify({ taskKey: task.taskKey, done }),
+        detail: JSON.stringify({ taskKey: task.taskKey, done, note }),
       });
       return rows[0]!;
+    });
+  },
+
+  /** File name / size / when for each task that has one (no bytes). */
+  fileMeta: async (
+    taskIds: string[],
+  ): Promise<Map<string, { fileName: string; sizeBytes: number; uploadedAt: Date }>> => {
+    if (taskIds.length === 0) return new Map();
+    const rows = await db.orm
+      .select({
+        taskId: onboardingTaskFiles.taskId,
+        fileName: onboardingTaskFiles.fileName,
+        sizeBytes: onboardingTaskFiles.sizeBytes,
+        uploadedAt: onboardingTaskFiles.uploadedAt,
+      })
+      .from(onboardingTaskFiles)
+      .where(inArray(onboardingTaskFiles.taskId, taskIds));
+    return new Map(rows.map(({ taskId, ...m }) => [taskId, m]));
+  },
+
+  findTaskFile: async (taskId: string) => {
+    const rows = await db.orm
+      .select()
+      .from(onboardingTaskFiles)
+      .where(eq(onboardingTaskFiles.taskId, taskId))
+      .limit(1);
+    return rows[0];
+  },
+
+  /** Store (or replace) the task's file and mark the task done, with audit, in one transaction. */
+  saveTaskFile: async (
+    task: TaskRow,
+    file: { fileName: string; contentType: string; data: Buffer },
+    actor: ActorContext,
+  ): Promise<void> => {
+    await db.transaction(async (tx) => {
+      const values = {
+        fileName: file.fileName,
+        contentType: file.contentType,
+        sizeBytes: file.data.length,
+        data: file.data,
+        uploadedBy: actor.actorEmployeeId,
+        uploadedAt: new Date(),
+      };
+      await tx.orm
+        .insert(onboardingTaskFiles)
+        .values({ taskId: task.id, ...values })
+        .onConflictDoUpdate({ target: onboardingTaskFiles.taskId, set: values });
+      await tx.orm
+        .update(onboardingTasks)
+        .set({ doneAt: new Date(), doneBy: actor.actorEmployeeId })
+        .where(eq(onboardingTasks.id, task.id));
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: 'onboarding.task_file_uploaded',
+        subject: `onboarding_journeys:${task.journeyId}`,
+        detail: JSON.stringify({ taskKey: task.taskKey, fileName: file.fileName, bytes: file.data.length }),
+      });
     });
   },
 

@@ -111,7 +111,7 @@ export const createRequestsService = (deps: {
     // a request from them could only be decided by themselves (refused below
     // in decide), so it would sit pending forever.
     if ((await requireHr(actor.actorEmployeeId)).bypass) {
-      throw createError(422, 'Admin assigns batches directly — no request needed', {
+      throw createError(422, 'Admin gives roles directly — no request needed', {
         code: 'ASSIGN_DIRECTLY',
       });
     }
@@ -153,7 +153,7 @@ export const createRequestsService = (deps: {
       .catch((err: unknown) => {
         const e = err as { code?: string; cause?: { code?: string } };
         if (e.code === '23503' || e.cause?.code === '23503') {
-          throw createError(422, 'A requested batch or module does not exist', {
+          throw createError(422, 'A requested role or area does not exist', {
             code: 'UNKNOWN_ITEM',
           });
         }

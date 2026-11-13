@@ -420,7 +420,10 @@ const correctionsFor = (
 
 type ClaimLine = Awaited<ReturnType<PayrollRepository['claimsFor']>>[number];
 
-/** The claims a slip carries: approved-unpaid while a draft, paid-by-it once published. */
+/**
+ * The claims a published slip paid — history from before claims moved to the
+ * reimbursement sheet (2026-11-05). Drafts carry none any more.
+ */
 const claimsOn = (
   slip: { employeeId: string },
   run: { id: string; month: string; status: PayrollRunRow['status'] },
@@ -429,10 +432,7 @@ const claimsOn = (
   claims
     .filter(
       (c) =>
-        c.employeeId === slip.employeeId &&
-        (run.status === 'draft'
-          ? c.status === 'approved' && c.spentOn.slice(0, 7) <= run.month
-          : c.paidRunId === run.id),
+        run.status !== 'draft' && c.employeeId === slip.employeeId && c.paidRunId === run.id,
     )
     .map((c) => ({
       id: c.id,
@@ -695,14 +695,12 @@ export const createPayrollService = (deps: {
         .map((t) => [t.employee_id, t.last_working_day]),
     );
 
-    const [months, awards, corrections, claims] = await Promise.all([
+    const [months, awards, corrections] = await Promise.all([
       attendance.peopleMonth(people, month, lastDays),
       // R&R awards approved LAST month pay this month (approval month + 1).
       repo.recognitionAwardsApprovedIn(previousMonth(month)),
       // Every still-pending correction to an earlier month rides on this slip.
       repo.pendingCorrectionsBefore(month),
-      // Approved reimbursement claims spent by this month (the claim trail).
-      repo.approvedClaimsUpTo(month),
     ]);
     const byEmployee = new Map(months.map((m) => [m.employee.id, m]));
     const remaining = await loadRemaining(
@@ -764,7 +762,9 @@ export const createPayrollService = (deps: {
         // Per-month adjustments start at zero — PR fills them on the draft.
         healthInsurance: 0,
         cnpsEmployer: 0,
-        reimbursement: round2(claims.get(p.id) ?? 0),
+        // Claims are paid from the reimbursement sheet, not the payslip
+        // (learner, 2026-11-05) — new slips carry none.
+        reimbursement: 0,
         performanceBonus: 0,
         recognitionBonus: awards.get(p.id) ?? 0,
         otherBonus: 0,
@@ -1169,13 +1169,6 @@ export const createPayrollService = (deps: {
       const { run: dto } = await getRun(updated.id);
       return dto;
     } catch (err) {
-      if ((err as { code?: string }).code === 'REIMBURSEMENTS_CHANGED') {
-        throw createError(
-          409,
-          'Reimbursement claims changed since this draft was built — use "Re-pull from attendance", then finalize',
-          { code: 'REIMBURSEMENTS_CHANGED' },
-        );
-      }
       if ((err as { code?: string }).code === 'CORRECTIONS_CHANGED') {
         throw createError(
           409,

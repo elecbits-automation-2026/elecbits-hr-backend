@@ -139,6 +139,8 @@ export const exitSchema = z
       .nullable(),
     // Payroll / HR.
     fnf: fnfPreviewSchema.nullable(),
+    /** Claims not paid yet — paid from the reimbursement sheet (payroll / HR only). */
+    unpaidClaims: z.object({ count: z.number().int(), total: z.number() }).nullable(),
     // What the caller may do now (the server still checks every action).
     can: z.object({
       withdraw: z.boolean(),

@@ -54,10 +54,6 @@ export const assetsController = {
     res.json(await assetsServiceFor(req).detail(idParam(req)));
   },
 
-  kitCheck: async (req: Request, res: Response): Promise<void> => {
-    res.json(await assetsServiceFor(req).kitCheck(idParam(req, 'employeeId')));
-  },
-
   create: async (req: Request, res: Response): Promise<void> => {
     const input: CreateAssetInput = req.body;
     const asset = await assetsServiceFor(req).create(input, actorOf(req));

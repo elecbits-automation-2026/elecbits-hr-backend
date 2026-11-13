@@ -153,6 +153,9 @@ export const env = {
     workStart: process.env.WORK_START ?? '09:30',
     workEnd: process.env.WORK_END ?? '18:30',
     graceMinutes: Number(process.env.WORK_GRACE_MIN ?? 15),
+    // Testing shortcut, off unless asked for: a punch from this machine
+    // (loopback) with NO location counts as inside a zone. Never in production.
+    devLoopbackInZone: !isProduction && process.env.ATTENDANCE_DEV_LOOPBACK === 'true',
   },
 
   // --- Background jobs ------------------------------------------------------

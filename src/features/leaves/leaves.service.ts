@@ -9,10 +9,12 @@ import type { AuthzRepository } from '../access/authz.repository.js';
 import { createRmOrHrGate } from '../access/rmOrHr.gate.js';
 import { createSelfGovernance } from '../access/selfGovernance.js';
 import type { SettingsReader } from '../settings/index.js';
+import { checkUpload } from '../../shared/helpers/uploads.js';
 import {
   CAPPED_LEAVE_TYPES,
   EL_BALANCE_CAP,
   EL_YEARLY_USE_LIMIT,
+  SICK_CERT_AFTER_DAYS,
   accruedAllocation,
   type CappedLeaveType,
 } from '../../shared/constants/constants.js';
@@ -108,7 +110,6 @@ const toLeave = (row: LeaveRequestJoinedRow): LeaveRequestDto => ({
   createdAt: row.createdAt.toISOString(),
 });
 
-const CERT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const CERT_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -405,13 +406,11 @@ export const createLeavesService = (deps: {
     // an RM slot exists, so a request can never require nobody.
     const myHrAccess = await authz.resolveAccess(employeeId, 'hrbp.leaves', 'update');
     let hrRequired = !(rmRequired && hasBroadScope(myHrAccess.scopes));
-    // Menstrual leave is CONFIDENTIAL (policy §9.2): the RM never sees it, so
-    // HR fills the only slot — even for an HRBP's own request (another broad
-    // hrbp.leaves holder approves; nobody fills a slot on their own request).
-    if (input.type === 'menstrual') {
-      rmRequired = false;
-      hrRequired = true;
-    }
+    // Menstrual leave needs the RM AND HR (learner, 2026-11-05 — it used to
+    // be HR-only): HR is never waived for it, even for an HRBP's own request
+    // (another broad hrbp.leaves holder approves). Other RM surfaces still
+    // show it as a generic leave day.
+    if (input.type === 'menstrual') hrRequired = true;
 
     const row = await repo.insertRequest(
       {
@@ -572,6 +571,18 @@ export const createLeavesService = (deps: {
       return withEmployee(updated);
     }
 
+    // Sick leave of more than SICK_CERT_AFTER_DAYS days needs its medical
+    // certificate before anyone approves it (learner, 2026-11-05); the form
+    // uploads it with the request. Declining stays possible.
+    const cert = (await repo.certificateInfo([id])).get(id);
+    if (cert?.needed && !cert.fileName) {
+      throw createError(
+        422,
+        `Sick leave of more than ${SICK_CERT_AFTER_DAYS} days needs the medical certificate before it can be approved`,
+        { code: 'CERTIFICATE_REQUIRED' },
+      );
+    }
+
     // Approve: fill every unfilled slot the caller holds (a person wearing
     // both hats completes the request in one decision).
     const now = new Date();
@@ -713,13 +724,10 @@ export const createLeavesService = (deps: {
     if (leave.status === 'declined' || leave.status === 'cancelled') {
       throw createError(409, `This leave is ${leave.status}`, { code: 'LEAVE_CLOSED' });
     }
-    const type = file.contentType.split(';')[0]!.trim().toLowerCase();
-    if (!CERT_TYPES.includes(type)) {
-      throw createError(422, 'Upload a PDF, JPG or PNG', { code: 'BAD_FILE_TYPE' });
-    }
-    if (file.data.length === 0 || file.data.length > CERT_MAX_BYTES) {
-      throw createError(422, 'The file must be under 10 MB', { code: 'BAD_FILE_SIZE' });
-    }
+    const type = checkUpload(file, ['pdf', 'jpg', 'png'], {
+      maxBytes: CERT_MAX_BYTES,
+      what: 'The certificate',
+    });
     await repo.upsertCertificate(
       { leaveId: id, fileName: file.fileName, contentType: type, data: file.data },
       actor,

@@ -21,7 +21,6 @@ import {
   COMPLAINT_CATEGORIES,
   DISPUTE_AREAS,
   POSH_CATEGORY,
-  WHISTLEBLOWER_CATEGORIES,
   type ConcernDto,
   type CreateConcernInput,
   type DecideInput,
@@ -36,17 +35,15 @@ import {
   type ResolveInput,
 } from './concerns.schema.js';
 
-const PREFIX = { dispute: 'DSP', complaint: 'CMP', whistleblower: 'WBR' } as const;
-const CATEGORIES: Record<ConcernRow['track'], readonly string[]> = {
+const PREFIX = { dispute: 'DSP', complaint: 'CMP' } as const;
+const CATEGORIES: Record<CreateConcernInput['track'], readonly string[]> = {
   dispute: DISPUTE_AREAS,
   complaint: COMPLAINT_CATEGORIES,
-  whistleblower: WHISTLEBLOWER_CATEGORIES,
 };
 const QUEUE_LABEL: Record<QueueName, string> = {
   manager: 'Disputes waiting on you (level 1)',
   hr: 'HR — disputes (level 2) and complaints',
   mrc: 'Management Review Committee (level 3)',
-  vigil: 'Whistleblower reports',
 };
 const LINK = '/grievances?tab=concerns';
 
@@ -54,7 +51,9 @@ const notFound = () =>
   createError(404, 'Concern not found', { code: 'CONCERN_NOT_FOUND' });
 
 /**
- * Concerns (Batch 4) — three policy tracks behind one "Raise a concern" form.
+ * Concerns (Batch 4) — two policy tracks behind one "Raise a concern" form.
+ * (The whistleblower track was removed on 2026-11-05; any old report is
+ * handled like a complaint.)
  *
  *  dispute       Dispute Resolution Framework: level 1 the effective RM, level
  *                2 HR (hrbp.grievances update reaching the raiser), level 3
@@ -66,7 +65,6 @@ const notFound = () =>
  *  complaint     Equal Opportunity §J / anti-bullying: HR reaching the raiser
  *                (org HR when anonymous); acknowledge within complaintAck
  *                working days, outcome within the calendar-day target.
- *  whistleblower vigil team only (hrbp.vigil, org): plain HR never sees it.
  *
  * Everywhere: the SUBJECT of a case never sees or handles it; nobody handles
  * their own case; an earlier-level decider cannot decide level 3. Sexual
@@ -97,9 +95,7 @@ export const createConcernsService = (deps: {
   /** Who may act on this case right now (never the raiser or the subject). */
   const handlersOf = async (c: ConcernRow): Promise<string[]> => {
     let ids: string[] = [];
-    if (c.track === 'whistleblower') {
-      ids = await authz.listBroadHolders('hrbp.vigil', 'update');
-    } else if (c.track === 'dispute' && c.level === 1) {
+    if (c.track === 'dispute' && c.level === 1) {
       const raiser = c.raisedBy ? await repo.findEmployee(c.raisedBy) : undefined;
       const rm = raiser ? (raiser.leaveApprover ?? raiser.reportsTo) : null;
       ids = rm ? [rm] : [];
@@ -124,13 +120,11 @@ export const createConcernsService = (deps: {
   };
 
   const queueOf = (c: ConcernRow): QueueName =>
-    c.track === 'whistleblower'
-      ? 'vigil'
-      : c.track === 'dispute' && c.level === 1
-        ? 'manager'
-        : c.track === 'dispute' && c.level === 3
-          ? 'mrc'
-          : 'hr';
+    c.track === 'dispute' && c.level === 1
+      ? 'manager'
+      : c.track === 'dispute' && c.level === 3
+        ? 'mrc'
+        : 'hr';
 
   /** The deadline that matters now: an extension, else ack until acknowledged, else resolve. */
   const dueOf = (c: ConcernRow): string | null =>
@@ -308,9 +302,7 @@ export const createConcernsService = (deps: {
         dueResolveOn = await plusWorking(rules.l2Decide);
       }
     } else {
-      dueAckOn = await plusWorking(
-        input.track === 'complaint' ? rules.complaintAck : rules.vigilAck,
-      );
+      dueAckOn = await plusWorking(rules.complaintAck);
     }
 
     const key = anonymous ? randomBytes(24).toString('base64url') : null;
@@ -359,7 +351,7 @@ export const createConcernsService = (deps: {
               to: handlers,
               event: {
                 type: 'concern.raised',
-                title: `New ${input.track === 'whistleblower' ? 'whistleblower report' : input.track} ${code}`,
+                title: `New ${input.track} ${code}`,
                 link: LINK,
               },
             },
@@ -483,11 +475,9 @@ export const createConcernsService = (deps: {
     }
     const rules = await settings.effective('concerns.timelines');
     const dueResolveOn =
-      c.track === 'complaint'
-        ? addDaysIso(today(), rules.complaintResolveCalendarDays)
-        : c.track === 'whistleblower'
-          ? addDaysIso(today(), rules.vigilResolveCalendarDays)
-          : c.dueResolveOn;
+      c.track === 'dispute'
+        ? c.dueResolveOn
+        : addDaysIso(today(), rules.complaintResolveCalendarDays);
     const row = await repo.transition(
       id,
       c.status,

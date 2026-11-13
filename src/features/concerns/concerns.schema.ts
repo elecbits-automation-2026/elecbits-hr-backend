@@ -22,23 +22,13 @@ export const COMPLAINT_CATEGORIES = [
   'other',
 ] as const;
 
-/** Whistleblower policy §4.2 / §5 — reportable concerns. */
-export const WHISTLEBLOWER_CATEGORIES = [
-  'fraud',
-  'corruption',
-  'violation_of_law',
-  'code_of_conduct',
-  'misuse_of_assets',
-  'audit_controls',
-  'health_safety',
-  'retaliation',
-  'other',
-] as const;
-
 /** Never stored: the Internal Committee handles it under the POSH policy. */
 export const POSH_CATEGORY = 'sexual_harassment';
 
+// `whistleblower` is history only: the section was removed (learner,
+// 2026-11-05) — nothing new is raised on it; old rows read as complaints.
 const TRACK = z.enum(['dispute', 'complaint', 'whistleblower']);
+const RAISE_TRACK = z.enum(['dispute', 'complaint']);
 const STATUS = z.enum([
   'open',
   'acknowledged',
@@ -58,14 +48,14 @@ const OUTCOME = z.enum([
 
 export const createConcernSchema = z
   .object({
-    track: TRACK,
+    track: RAISE_TRACK,
     category: z.string().trim().min(2).max(40),
     title: z.string().trim().min(5).max(200),
     detail: z.string().trim().min(20).max(5000),
     subjectEmployeeId: z.string().uuid().optional(),
     /** A retaliation report or follow-on case: the earlier case's code. */
     relatedCode: z.string().trim().max(30).optional(),
-    /** Complaints and whistleblower reports only. */
+    /** Complaints only. */
     anonymous: z.boolean().optional(),
     /** Disputes: the decision was the manager's own — start at HR (level 2). */
     aboutMyManager: z.boolean().optional(),
@@ -188,7 +178,7 @@ export const createdConcernSchema = z
 
 export const queueSummarySchema = z
   .object({
-    queue: z.enum(['manager', 'hr', 'mrc', 'vigil']),
+    queue: z.enum(['manager', 'hr', 'mrc']),
     label: z.string(),
     open: z.number().int(),
     overdue: z.number().int(),

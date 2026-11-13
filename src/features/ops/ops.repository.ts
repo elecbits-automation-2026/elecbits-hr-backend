@@ -240,7 +240,7 @@ export const createOpsRepository = (db: DbClient) => ({
       params.push(filter.ids);
       where.push(`a.id = ANY($${params.length}::uuid[])`);
     }
-    if (filter.gatePassOnly) where.push(`c.requires_gate_pass`);
+    if (filter.gatePassOnly) where.push(`c.requires_gate_pass AND c.kind = 'lab'`);
     return db.query<AssetViewRow>(
       `${ASSET_VIEW} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.asset_code`,
       params,

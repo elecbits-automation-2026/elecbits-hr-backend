@@ -35,6 +35,12 @@ import type {
 
 const DAY_MS = 86_400_000;
 
+/**
+ * Remote requests that let someone punch from anywhere and keep those remote
+ * punches counted: approved, or still waiting on the RM.
+ */
+const WFH_COUNTS = ['pending', 'partially_approved', 'approved'] as const;
+
 /** YYYY-MM-DD in server-local time (en-CA formats as ISO). */
 const localDate = (d = new Date()): string => d.toLocaleDateString('en-CA');
 
@@ -99,7 +105,8 @@ const nearestZone = (
  * `office`; outside every zone (or location missing/denied) punching is
  * blocked unless an approved remote-work request covers the day. In at one
  * zone and out at another is fine — both punches run the same check. Local
- * loopback without coords counts as in-zone in development only.
+ * loopback without coords counts as in-zone only when ATTENDANCE_DEV_LOOPBACK
+ * is switched on (testing; never production).
  */
 const isInsideAnyZone = (
   coords: { lat: number; lng: number } | null,
@@ -111,7 +118,7 @@ const isInsideAnyZone = (
       (z) => distanceMeters(coords.lat, coords.lng, z.lat, z.lng) <= z.radiusM,
     );
   }
-  if (env.nodeEnv === 'development' && ip) {
+  if (env.attendance.devLoopbackInZone && ip) {
     const norm = normalizeIp(ip);
     return norm === '127.0.0.1' || norm === '::1';
   }
@@ -439,9 +446,14 @@ export const createAttendanceService = (deps: {
     }
   };
 
-  /** An approved remote-work request covering the date lifts the geo block. */
-  const hasApprovedRemote = async (employeeId: string, date: string): Promise<boolean> =>
-    (await repo.listApprovedWfh([employeeId], date, date)).length > 0;
+  /**
+   * A remote-work request covering the date lifts the geo block AS SOON AS it
+   * is raised (learner, 2026-11-05): pending is enough to clock in / out from
+   * anywhere. If the RM then declines it, those remote punches stop counting
+   * and the day reads absent (loadClassifierData).
+   */
+  const hasLiveRemote = async (employeeId: string, date: string): Promise<boolean> =>
+    (await repo.listWfhRanges([employeeId], date, date, WFH_COUNTS)).length > 0;
 
   /** Resolve where this punch may happen, or throw the policy error. */
   const resolvePunchSource = async (
@@ -450,7 +462,7 @@ export const createAttendanceService = (deps: {
     ip: string | undefined,
     coords: { lat: number; lng: number } | null,
   ): Promise<'office' | 'remote'> => {
-    if (await hasApprovedRemote(employeeId, date)) return 'remote';
+    if (await hasLiveRemote(employeeId, date)) return 'remote';
     const stored = await repo.listZones();
     const zones: Zone[] = stored.length
       ? stored.map((z) => ({
@@ -606,11 +618,12 @@ export const createAttendanceService = (deps: {
     month: string,
   ): Promise<ClassifierData> => {
     const { from, to } = monthRange(month);
-    const [holidayRows, punchRows, leaves, wfh, schedRows, policy] = await Promise.all([
+    const [holidayRows, punchRows, leaves, wfh, liveWfh, schedRows, policy] = await Promise.all([
       repo.listHolidays(from, to),
       repo.listPunches(employeeIds, from, to),
       repo.listApprovedLeaves(employeeIds, from, to),
       repo.listApprovedWfh(employeeIds, from, to),
+      repo.listWfhRanges(employeeIds, from, to, WFH_COUNTS),
       repo.listSchedules(employeeIds),
       settings.effectiveMany([
         'attendance.workHours',
@@ -619,9 +632,19 @@ export const createAttendanceService = (deps: {
       ] as const),
     ]);
     const fallback = scheduleFrom(policy['attendance.workHours']);
+    // A REMOTE punch counts only while a request covers its day (approved or
+    // still waiting on the RM); once declined or withdrawn, the punch is
+    // ignored and the day is absent (learner, 2026-11-05).
+    const counted = punchRows.filter(
+      (p) =>
+        p.source !== 'remote' ||
+        liveWfh.some(
+          (w) => w.employeeId === p.employeeId && inRange(p.date, w.startDate, w.endDate),
+        ),
+    );
     return {
       holidays: new Map(holidayRows.map((h) => [h.date, h.name])),
-      punches: new Map(punchRows.map((p) => [`${p.employeeId}:${p.date}`, p])),
+      punches: new Map(counted.map((p) => [`${p.employeeId}:${p.date}`, p])),
       leaves,
       wfh,
       schedules: new Map(
@@ -895,7 +918,31 @@ export const createAttendanceService = (deps: {
     await requireAdmin(actor.actorEmployeeId);
     const row = await repo.findZone(id);
     if (!row) throw createError(404, 'Zone not found', { code: 'ZONE_NOT_FOUND' });
-    await repo.deleteZone(row, actor);
+    // Assets, stock and their history keep pointing at the zone — removing
+    // it would orphan them, so say what is still there instead of a 500.
+    const use = await repo.zoneUsage(id);
+    const held = [
+      use.assets && `${use.assets} asset${use.assets === 1 ? '' : 's'}`,
+      use.stock && `${use.stock} stock record${use.stock === 1 ? '' : 's'}`,
+      use.history && `${use.history} asset history entr${use.history === 1 ? 'y' : 'ies'}`,
+      use.people && `${use.people} ${use.people === 1 ? 'person' : 'people'} based here`,
+    ].filter(Boolean);
+    if (held.length > 0) {
+      throw createError(409, `${row.name} is still in use: ${held.join(', ')} — it can't be removed`, {
+        code: 'ZONE_IN_USE',
+      });
+    }
+    try {
+      await repo.deleteZone(row, actor);
+    } catch (err) {
+      // A reference added since the check above (foreign-key violation).
+      if ((err as { code?: string }).code === '23503') {
+        throw createError(409, `${row.name} is still in use — it can't be removed`, {
+          code: 'ZONE_IN_USE',
+        });
+      }
+      throw err;
+    }
   };
 
   /**
@@ -1115,6 +1162,12 @@ export const createAttendanceService = (deps: {
     actor: ActorContext,
   ): Promise<WfhRequestDto> => {
     await rejectSystemAccount(employeeId);
+    // Remote work is asked for ahead (or for today), never for days gone by.
+    if (input.startDate < localDate()) {
+      throw createError(422, 'Remote work can start today at the earliest', {
+        code: 'WFH_IN_PAST',
+      });
+    }
     const me = await repo.findEmployeeApprovers(employeeId);
     const values = {
       employeeId,
@@ -1160,17 +1213,19 @@ export const createAttendanceService = (deps: {
   const teamWfh = async (rmId: string) =>
     withWfhApproverNames((await repo.listWfhForRm(rmId)).map(toWfh));
 
-  /** The HR inbox for remote requests (route gated on hrbp.attendance read). */
+  /** HR's view of waiting remote requests (read-only — the RM decides). */
   const wfhQueue = async () =>
     withWfhApproverNames((await repo.listWfhPendingAll()).map(toWfh));
 
   const WFH_LIVE: ReadonlyArray<WfhRow['status']> = ['pending', 'partially_approved'];
 
   /**
-   * DUAL approval (user decision), mirroring leaves: the effective RM fills
-   * the RM slot; any `hrbp.attendance update` holder fills the HR slot; one in
-   * is partially_approved, both in is approved; either declining ends it. Only
-   * `approved` lifts the punch geo-block or classifies days.
+   * RM ONLY (learner, 2026-11-05 — it used to need the RM and HR): the
+   * effective RM (or the named leave approver) approves or declines, and one
+   * approval is final. Only when someone has no RM at all does an
+   * `hrbp.attendance update` holder decide. The request lets the person punch
+   * from anywhere while it waits; a decline makes those days absent.
+   * (`partially_approved` is a leftover of the old two-step flow.)
    */
   const decideWfh = async (
     id: string,
@@ -1195,11 +1250,12 @@ export const createAttendanceService = (deps: {
     const target = await repo.findEmployeeApprovers(row.employeeId);
     // A named leave approver JOINS the chain alongside the RM (user decision).
     const holdsRmSlot = caller === target?.leaveApprover || caller === target?.reportsTo;
-    // The HR slot: a hrbp.attendance grant that REACHES this person (M4,
-    // Phase 3 — a dept grant decides for its department only).
-    const holdsHrSlot = await authz.reaches(caller, 'hrbp.attendance', 'update', row.employeeId);
+    // No RM at all (shouldn't happen for real people): HR in reach decides.
+    const noRmExists = !target?.leaveApprover && !target?.reportsTo;
+    const holdsHrSlot =
+      noRmExists && (await authz.reaches(caller, 'hrbp.attendance', 'update', row.employeeId));
     if (!holdsRmSlot && !holdsHrSlot) {
-      throw createError(403, 'You are not an approver for this request', {
+      throw createError(403, 'Only this person’s RM approves remote work', {
         code: 'NOT_AN_APPROVER',
       });
     }
@@ -1246,12 +1302,6 @@ export const createAttendanceService = (deps: {
         code: 'SLOT_ALREADY_DECIDED',
       });
     }
-    // No stored waiver: the RM slot is satisfied live — a target with no
-    // RM and no leave approver (shouldn't happen for real people) needs HR alone.
-    const noRmExists = !target?.leaveApprover && !target?.reportsTo;
-    const rmSatisfied = noRmExists || Boolean(row.rmApprovedBy) || fillsRm;
-    const hrSatisfied = Boolean(row.hrApprovedBy) || fillsHr;
-    const final = rmSatisfied && hrSatisfied;
     const slots = [...(fillsRm ? ['rm'] : []), ...(fillsHr ? ['hr'] : [])];
 
     const updated = await repo
@@ -1260,11 +1310,12 @@ export const createAttendanceService = (deps: {
         {
           ...(fillsRm ? { rmApprovedBy: caller, rmApprovedAt: now } : {}),
           ...(fillsHr ? { hrApprovedBy: caller, hrApprovedAt: now } : {}),
-          status: final ? 'approved' : 'partially_approved',
+          // One approval is final.
+          status: 'approved',
         },
         {
           action: 'remote.approved',
-          detail: { startDate: row.startDate, endDate: row.endDate, slots, final },
+          detail: { startDate: row.startDate, endDate: row.endDate, slots },
         },
         actor,
         {

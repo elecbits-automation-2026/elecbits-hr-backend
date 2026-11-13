@@ -24,7 +24,6 @@ import {
  *   GET  /?holderId=               the register (or one person's holdings)
  *   GET  /incidents                damage / loss / theft, open first
  *   POST /incidents/:id/close      close (loss / theft may mark the asset lost)
- *   GET  /kit-check/:employeeId    joiner kit vs what they hold
  *   POST /import                   CSV rows; dryRun checks only
  *   POST /                         register one asset (holder = issue at once)
  *   GET  /:id                      detail + history + incidents + passes
@@ -48,7 +47,6 @@ assetsRoutes.post(
   validateBody(closeIncidentSchema),
   assetsController.closeIncident,
 );
-assetsRoutes.get('/kit-check/:employeeId', read, assetsController.kitCheck);
 assetsRoutes.post(
   '/import',
   create,

@@ -1,6 +1,7 @@
 import createError from 'http-errors';
 import { env } from '../../config/env.js';
 import { localDateOf } from '../../shared/helpers/helpers.js';
+import { checkUpload } from '../../shared/helpers/uploads.js';
 import type { CreateEmployeeInput, EmployeesService } from '../employees/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { CandidatesService } from './candidates.service.js';
@@ -16,13 +17,8 @@ import { POSITION_PROGRESS } from './hiring.service.js';
 
 const LINK_TA = '/hr/hiring';
 const LINK_APPROVALS = '/hiring/approvals';
-const LINK_ONBOARDING = '/hr/onboarding';
+const LINK_JOINERS = '/hiring/joiners';
 const LETTER_MAX_BYTES = 10 * 1024 * 1024;
-const LETTER_TYPES = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-]);
 /** Company email only (house rule §5.4). */
 const COMPANY_DOMAIN = env.auth.companyEmailDomain.toLowerCase();
 
@@ -100,18 +96,11 @@ export const createHireService = (deps: {
   const ta = (a: { recruiter_id: string | null; ta_rm_id: string | null }) =>
     [...new Set([a.recruiter_id, a.ta_rm_id].filter((x): x is string => !!x))];
 
-  const checkLetter = (file: { contentType: string; data: Buffer }) => {
-    if (file.data.length === 0 || file.data.length > LETTER_MAX_BYTES) {
-      throw createError(422, 'The offer letter must be a file under 10 MB', { code: 'FILE_SIZE' });
-    }
-    const type = file.contentType.split(';')[0]!.trim().toLowerCase();
-    if (!LETTER_TYPES.has(type)) {
-      throw createError(422, 'Upload the offer letter as a PDF or Word file', {
-        code: 'FILE_TYPE',
-      });
-    }
-    return type;
-  };
+  const checkLetter = (file: { fileName: string; data: Buffer }) =>
+    checkUpload(file, ['pdf', 'doc', 'docx'], {
+      maxBytes: LETTER_MAX_BYTES,
+      what: 'The offer letter',
+    });
 
   // ── Documents ──────────────────────────────────────────────────────────
 
@@ -408,7 +397,7 @@ export const createHireService = (deps: {
               `Handover: ${a.candidate_name} (${a.candidate_code ?? '—'}) joins ${a.department_name} as ` +
               `${a.role_title} on ${a.joining_date ?? 'TBD'} · documents ${docs.received} received, ` +
               `${docs.pending} pending${a.next_action ? ` · open: ${a.next_action}` : ''}`,
-            link: LINK_ONBOARDING,
+            link: LINK_JOINERS,
           },
         },
       ]);
@@ -422,11 +411,29 @@ export const createHireService = (deps: {
     };
   };
 
-  /** HRBP confirms the person actually joined (on or after the joining date). */
-  const confirmJoined = async (id: string, actor: ActorContext) => {
+  const assertHrbp = async (actor: ActorContext) => {
     if (!(await hiring.hrbpHolders()).includes(actor.actorEmployeeId)) {
       throw createError(403, 'HRBP confirms the joining', { code: 'NOT_HRBP' });
     }
+  };
+
+  /** HRBP's handover list: hired people to receive, and the last 30 days' joiners. */
+  const joiners = async (actor: ActorContext) => {
+    await assertHrbp(actor);
+    return Promise.all(
+      (await repo.joinerIds()).map(async (j) => ({
+        ...(await applications.one(j.id)),
+        recruiterName: j.recruiter_name,
+        pendingDocuments: (await repo.documentsOf(j.id))
+          .filter((d) => d.status === 'requested')
+          .map((d) => d.name),
+      })),
+    );
+  };
+
+  /** HRBP confirms the person actually joined (on or after the joining date). */
+  const confirmJoined = async (id: string, actor: ActorContext) => {
+    await assertHrbp(actor);
     const a = await find(id);
     if (a.joining_date && a.joining_date > localDateOf(new Date())) {
       throw createError(409, `They join on ${a.joining_date} — confirm on or after that day`, {
@@ -447,10 +454,13 @@ export const createHireService = (deps: {
     return applications.one(id);
   };
 
-  /** Backed out before joining: deactivate the record, reopen the position. */
+  /**
+   * Backed out before joining: deactivate the record, reopen the position.
+   * TA or HRBP (who holds the handover) records it.
+   */
   const noShow = async (id: string, reason: string, actor: ActorContext) => {
     const a = await find(id);
-    assertTa(a, actor);
+    if (!(await hiring.hrbpHolders()).includes(actor.actorEmployeeId)) assertTa(a, actor);
     if (a.stage !== 'hired' || !a.employee_id)
       throw wrongStage('Only a hired candidate can not join');
     if (!(await repo.employeeBeforeJoining(a.employee_id, localDateOf(new Date())))) {
@@ -503,6 +513,7 @@ export const createHireService = (deps: {
     shareOffer,
     endOffer,
     markHired,
+    joiners,
     confirmJoined,
     noShow,
   };

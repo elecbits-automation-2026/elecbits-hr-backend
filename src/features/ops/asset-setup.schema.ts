@@ -1,26 +1,13 @@
 import { z } from '../../shared/zod.js';
 import { assetCategoryRefSchema } from './assets.schema.js';
 
-export const kitSchema = z
-  .object({
-    designation: z.string(),
-    items: z.array(
-      z.object({
-        categoryId: z.string().uuid(),
-        categoryName: z.string(),
-        qty: z.number().int(),
-      }),
-    ),
-  })
-  .openapi('AssetKit');
-
-/** OPS setup: categories (kind + gate-pass flag) and joiner kits by designation. */
+/**
+ * OPS setup: categories (kind + gate-pass flag). There are no joiner kits by
+ * designation any more — OPS decides each joiner's assets (2026-11-05).
+ */
 export const assetSetupSchema = z
   .object({
     categories: z.array(assetCategoryRefSchema.extend({ assetCount: z.number().int() })),
-    kits: z.array(kitSchema),
-    // Designations in use on employee records — the kit picker.
-    designations: z.array(z.string()),
   })
   .openapi('AssetSetup');
 
@@ -43,20 +30,6 @@ export const updateCategorySchema = createCategorySchema
   .strict()
   .openapi('UpdateAssetCategory');
 
-export const putKitSchema = z
-  .object({
-    designation: z.string().trim().min(1).max(80),
-    // Empty list = no kit for this designation.
-    items: z
-      .array(
-        z.object({ categoryId: z.string().uuid(), qty: z.number().int().min(1).max(20) }),
-      )
-      .max(30),
-  })
-  .strict()
-  .openapi('PutAssetKit');
-
 export type AssetSetupDto = z.infer<typeof assetSetupSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
-export type PutKitInput = z.infer<typeof putKitSchema>;

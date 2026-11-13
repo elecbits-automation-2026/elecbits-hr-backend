@@ -195,5 +195,15 @@ export const INVITE_LINK_DAYS = 7;
 export const REGULARIZE_WINDOW_DAYS = 14;
 /** Waiting approvals ring after / repeat every this many working days. */
 export const APPROVAL_REMINDERS = { afterWorkingDays: 2, repeatEveryWorkingDays: 2 } as const;
+/**
+ * Reimbursements are approved once a month (learner, 2026-11-05): PR and the
+ * Admin account get one bell on this day — or the first working day after it.
+ */
+export const REIMBURSEMENT_DIGEST_DAY = 25;
+/**
+ * Sick leave of MORE than this many days needs its medical certificate
+ * before it can be approved — uploaded with the request (learner, 2026-11-05).
+ */
+export const SICK_CERT_AFTER_DAYS = 3;
 /** Overdue lab loans / gate passes: ask again every N, escalate after M working days. */
 export const RETURN_REMINDERS = { repeatEveryWorkingDays: 2, escalateAfterWorkingDays: 5 } as const;

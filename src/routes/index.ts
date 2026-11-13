@@ -130,7 +130,7 @@ apiV1.use('/notifications', notificationsRoutes);
 // Background jobs (Admin): scheduler state, recent runs, run now.
 apiV1.use('/admin/jobs', jobsRoutes);
 
-// Concerns (Batch 4): disputes, complaints, whistleblower reports.
+// Concerns (Batch 4): disputes and complaints.
 apiV1.use('/concerns', concernsRoutes);
 
 // Open door (Batch 4): HR and department heads publish slots, anyone books.

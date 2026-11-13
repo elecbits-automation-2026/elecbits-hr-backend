@@ -1,11 +1,10 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import createError from 'http-errors';
 import type { DbClient } from '../../db/client.js';
-import { auditLog, pipCheckins, pips, remindersSent } from '../../db/schema/index.js';
+import { auditLog, pips, remindersSent } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 
 export type PipRow = typeof pips.$inferSelect;
-export type CheckinRow = typeof pipCheckins.$inferSelect;
 
 export interface ActorContext {
   actorUserId: string | null;
@@ -59,15 +58,6 @@ export const createPipRepository = (db: DbClient) => {
             : [],
         ),
 
-    checkins: async (pipIds: string[]): Promise<CheckinRow[]> =>
-      pipIds.length
-        ? db.orm
-            .select()
-            .from(pipCheckins)
-            .where(inArray(pipCheckins.pipId, pipIds))
-            .orderBy(asc(pipCheckins.on), asc(pipCheckins.createdAt))
-        : [],
-
     people: async (ids: string[]) => {
       const unique = [...new Set(ids.filter(Boolean))];
       if (unique.length === 0) return new Map<string, PersonRow>();
@@ -120,17 +110,6 @@ export const createPipRepository = (db: DbClient) => {
         await audit(tx, actor, action, id);
         await ring(tx, bells);
         return true;
-      }),
-
-    addCheckin: (
-      values: typeof pipCheckins.$inferInsert,
-      actor: ActorContext,
-      bells: Bell[],
-    ): Promise<void> =>
-      db.transaction(async (tx) => {
-        await tx.orm.insert(pipCheckins).values(values);
-        await audit(tx, actor, 'pip.checkin', values.pipId);
-        await ring(tx, bells);
       }),
 
     lastReminder: async (kind: string, subjectId: string): Promise<Date | null> =>

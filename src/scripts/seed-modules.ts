@@ -22,9 +22,6 @@ const MODULE_SEED: Array<{ key: string; name: string; parentKey?: string }> = [
   // POSH/ICC cases are deliberately never stored (§12) — this module only
   // covers the non-statutory grievance flow.
   { key: 'hrbp.grievances', name: 'Grievances & open door' },
-  // Whistleblower cases (Batch 4): the vigil team only — plain HR access
-  // never opens them. Granted by Admin; no baseline batch holds it.
-  { key: 'hrbp.vigil', name: 'Whistleblower cases' },
   { key: 'hrbp.exits', name: 'Exits' },
   // Leave requests: the HR half of the dual approval (RM is a relationship,
   // not a grant — the leaves service checks reports_to/leave_approver itself).

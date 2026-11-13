@@ -155,12 +155,14 @@ export const payslipCorrectionStatusEnum = pgEnum('payslip_correction_status', [
   'cancelled',
 ]);
 
-// A reimbursement claim: the RM, then Payroll (self-governed / no-RM people
-// skip the RM step); approved claims ride on the next payroll run and turn
-// `paid` when it finalizes.
+// A reimbursement claim: PR, then the Admin account (PR people's own claims
+// go to Admin only; an Admin approval at either step is final). Approved
+// claims are paid from the reimbursement sheet and marked `paid` there.
+// `pending_rm` is history only (the RM step was removed 2026-11-05).
 export const reimbursementStatusEnum = pgEnum('reimbursement_status', [
   'pending_rm',
   'pending_payroll',
+  'pending_admin',
   'approved',
   'paid',
   'declined',
@@ -172,7 +174,8 @@ export const reimbursementStatusEnum = pgEnum('reimbursement_status', [
 export const goalCategoryEnum = pgEnum('goal_category', ['fundamental', 'corporate', 'general']);
 
 // Batch 4 — concerns: three policy tracks (Dispute Resolution Framework,
-// Equal Opportunity / anti-bullying complaints, Whistleblower). POSH is never
+// Equal Opportunity / anti-bullying complaints, Whistleblower — removed
+// 2026-11-05, the value stays for history only). POSH is never
 // stored: it belongs to the Internal Committee.
 export const concernTrackEnum = pgEnum('concern_track', ['dispute', 'complaint', 'whistleblower']);
 export const concernStatusEnum = pgEnum('concern_status', [

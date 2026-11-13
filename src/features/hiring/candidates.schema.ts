@@ -309,6 +309,9 @@ export const endApplicationSchema = z
   .strict()
   .openapi('EndApplication');
 
+/** Shortest evidence accepted per scored attribute. */
+export const EVIDENCE_MIN = 10;
+
 export const submitScoreSchema = z
   .object({
     /** Every attribute of the round, scored 1–4, with evidence (as on the Excel). */
@@ -317,7 +320,12 @@ export const submitScoreSchema = z
         z.object({
           attribute: z.string().trim().min(1),
           score: z.number().int().min(1).max(4),
-          evidence: z.string().trim().max(4000).optional(),
+          // Evidence is mandatory (workflow deck): a short written reason, not "ok".
+          evidence: z
+            .string()
+            .trim()
+            .min(EVIDENCE_MIN, `Write the evidence for this score (at least ${EVIDENCE_MIN} characters)`)
+            .max(4000),
         }),
       )
       .min(1),

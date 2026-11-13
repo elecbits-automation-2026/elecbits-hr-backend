@@ -44,7 +44,7 @@ const BATCH_SEED: Array<{ name: string; description: string; grants: GrantSeed[]
       // Policy library: manage + the acknowledgement tracker.
       { moduleKey: 'hrbp.policies', actions: RIGHTS_LEVELS.editor, scope: 'org' },
       // Concerns (Batch 4): disputes at level 2 + complaints, and open-door
-      // slots. Whistleblower reports are NOT here — that is hrbp.vigil.
+      // slots.
       { moduleKey: 'hrbp.grievances', actions: RIGHTS_LEVELS.editor, scope: 'org' },
       // Exits: resignations, terminations, HR clearance (exit module).
       { moduleKey: 'hrbp.exits', actions: RIGHTS_LEVELS.editor, scope: 'org' },

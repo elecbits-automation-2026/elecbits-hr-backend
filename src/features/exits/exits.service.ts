@@ -272,6 +272,7 @@ export const createExitsService = (deps: {
       holdings:
         (v.ops || hrRead) && live ? await custody.openCustody(x.employeeId) : null,
       fnf: fnfDto,
+      unpaidClaims: showMoney ? await repo.unpaidClaims(x.employeeId) : null,
       can: {
         withdraw: isLeaver && x.status === 'submitted',
         acknowledge:

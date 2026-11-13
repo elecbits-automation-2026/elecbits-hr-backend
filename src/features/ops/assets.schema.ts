@@ -277,27 +277,12 @@ export const closeIncidentSchema = z
   .strict()
   .openapi('CloseAssetIncident');
 
-export const kitCheckSchema = z
-  .object({
-    designation: z.string().nullable(),
-    items: z.array(
-      z.object({
-        categoryId: z.string().uuid(),
-        categoryName: z.string(),
-        qty: z.number().int(),
-        held: z.number().int(),
-      }),
-    ),
-  })
-  .openapi('KitCheck');
-
 export type AssetCategoryRefDto = z.infer<typeof assetCategoryRefSchema>;
 export type AssetDto = z.infer<typeof assetSchema>;
 export type AssetDetailDto = z.infer<typeof assetDetailSchema>;
 export type AssetEventDto = z.infer<typeof assetEventSchema>;
 export type AssetIncidentDto = z.infer<typeof assetIncidentSchema>;
 export type AssetOptionsDto = z.infer<typeof assetOptionsSchema>;
-export type KitCheckDto = z.infer<typeof kitCheckSchema>;
 export type CreateAssetInput = z.infer<typeof createAssetSchema>;
 export type UpdateAssetInput = z.infer<typeof updateAssetSchema>;
 export type ImportAssetsInput = z.infer<typeof importAssetsSchema>;

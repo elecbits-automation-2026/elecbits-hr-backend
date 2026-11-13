@@ -80,7 +80,6 @@ const toReport = (r: ReportRow): QuarterReportDto => ({
   recognitions: r.report.recognitions,
   feedback: r.report.feedback as QuarterReportDto['feedback'],
   atRiskGoals: r.report.atRiskGoals,
-  pipCandidate: r.report.pipCandidate,
   appraisalEligible: r.report.appraisalEligible,
 });
 
@@ -115,7 +114,7 @@ const overviewOf = (reports: QuarterReportDto[]): TeamOverviewDto[] => {
  * Policy). HR (hrbp.people update, org) closes a quarter: goals freeze and one
  * report per person is written from the record — goals by category and the
  * computed score/band, work-update discipline, attendance, recognition,
- * notes, at-risk goals, PIP candidacy (score under 50) and appraisal
+ * notes, at-risk goals and appraisal
  * eligibility (six months' service). Nothing is recomputed later. The
  * person's manager at close — or HR whose grant reaches them — may set a
  * final score with a reason; no approval step (user decision).
@@ -279,27 +278,16 @@ export const createQuarterReportsService = (deps: {
             g.progress < 40 &&
             (Date.parse(g.dueOn) - Date.parse(closeDate)) / DAY_MS < 30,
         ).length,
-        pipCandidate: score !== null && score < 50,
+        // A PIP is the RM's own decision, never suggested by a score
+        // (learner, 2026-11-05); the column stays for older reports.
+        pipCandidate: false,
         appraisalEligible:
           p.dateOfJoining !== null && addMonthsIso(p.dateOfJoining, 6) <= cycle.endDate,
       };
     });
 
     const rms = [...new Set(rows.map((r) => r.rmId).filter((id): id is string => !!id))];
-    // Poor performance rings the RM, who decides on a PIP (close-out) — no auto start.
-    const nameOf = new Map(people.map((p) => [p.id, p.name]));
-    const pipBells = rows
-      .filter((r) => r.pipCandidate && r.rmId)
-      .map((r) => ({
-        to: [r.rmId!],
-        event: {
-          type: 'quarter.pip_candidate',
-          title: `${name}: ${nameOf.get(r.employeeId) ?? 'someone in your team'} scored below 50 — consider a performance improvement plan`,
-          link: '/my-team',
-        },
-      }));
     const ok = await repo.closeWithReports(cycle.id, rows, actor, [
-      ...pipBells,
       {
         to: rows.map((r) => r.employeeId),
         event: {

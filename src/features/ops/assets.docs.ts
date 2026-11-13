@@ -12,7 +12,6 @@ import {
   importAssetsSchema,
   importResultSchema,
   issueAssetSchema,
-  kitCheckSchema,
   moveAssetSchema,
   reportIncidentSchema,
   returnAssetSchema,
@@ -80,12 +79,6 @@ export const registerAssetsDocs = (registry: OpenAPIRegistry): void => {
     'Close an incident (loss / theft may mark the asset lost)',
     assetDetailSchema,
     closeIncidentSchema,
-  );
-  p(
-    'get',
-    '/api/v1/assets/kit-check/{employeeId}',
-    'Joiner kit vs holdings',
-    kitCheckSchema,
   );
   p(
     'post',

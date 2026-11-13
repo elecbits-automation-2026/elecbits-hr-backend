@@ -196,8 +196,16 @@ export const createEmployeesService = (deps: {
         departmentId: input.departmentId ?? null,
         designation: input.designation ?? null,
       });
+      // Company-wide HR, plus whoever sent the invite (they hear it too).
       const hr =
-        missing.length > 0 ? await authz.listBroadHolders('hrbp.people', 'update') : [];
+        missing.length > 0
+          ? [
+              ...new Set([
+                ...(await authz.listBroadHolders('hrbp.people', 'update')),
+                ...(actor.actorEmployeeId ? [actor.actorEmployeeId] : []),
+              ]),
+            ]
+          : [];
       const labels: Record<(typeof INTAKE_FIELDS)[number], string> = {
         dateOfJoining: 'joining date',
         departmentId: 'department',
@@ -241,7 +249,7 @@ export const createEmployeesService = (deps: {
         });
       }
       if (isFkViolation(err)) {
-        throw createError(422, 'A selected batch or department does not exist', {
+        throw createError(422, 'A selected role or department does not exist', {
           code: 'BATCH_NOT_FOUND',
         });
       }
@@ -337,10 +345,24 @@ export const createEmployeesService = (deps: {
         });
       }
     }
+    // A moved joining date moves the probation end with it (unless HR sets the
+    // end themselves) — it was left at the old date (test pass 2026-11-03).
+    let confirmationDate: string | undefined;
+    if (input.dateOfJoining && input.confirmationDate === undefined) {
+      const before = await repo.findById(id);
+      const months = (await newHirePolicy())['people.newHireDefaults'].probationMonths;
+      if (before && before.dateOfJoining !== input.dateOfJoining && months !== null) {
+        confirmationDate = addMonthsIso(input.dateOfJoining, months);
+      }
+    }
     try {
       const row = await repo.update(
         id,
-        { ...input, ...(name !== undefined ? { name } : {}) },
+        {
+          ...input,
+          ...(name !== undefined ? { name } : {}),
+          ...(confirmationDate ? { confirmationDate } : {}),
+        },
         actor,
       );
       if (!row)

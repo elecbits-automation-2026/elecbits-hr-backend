@@ -364,11 +364,6 @@ export const createExitsRepository = (db: DbClient) => ({
               AND rm_required AND rm_approved_at IS NULL`,
           [ids],
         );
-        await tx.query(
-          `UPDATE org.reimbursement_claims SET status = 'pending_payroll'
-            WHERE employee_id = ANY($1::uuid[]) AND status = 'pending_rm'`,
-          [ids],
-        );
       }
       await audit(tx, actor, 'exit.relieved', exit.id, {
         orphanedReports: orphans.length,
@@ -397,6 +392,22 @@ export const createExitsRepository = (db: DbClient) => ({
     }),
 
   // ── F&F inputs ───────────────────────────────────────────────────────────
+
+  /**
+   * The leaver's claims not paid yet (waiting on PR / Admin, or approved) —
+   * paid from the reimbursement sheet, not the F&F slip (2026-11-05).
+   */
+  unpaidClaims: async (employeeId: string): Promise<{ count: number; total: number }> => {
+    const r = (
+      await db.query<{ count: string; total: string }>(
+        `SELECT count(*) AS count, coalesce(sum(amount), 0) AS total
+           FROM org.reimbursement_claims
+          WHERE employee_id = $1 AND status IN ('pending_payroll', 'pending_admin', 'approved')`,
+        [employeeId],
+      )
+    )[0]!;
+    return { count: Number(r.count), total: Number(r.total) };
+  },
 
   ctcOf: async (employeeId: string): Promise<number | null> => {
     const r = (

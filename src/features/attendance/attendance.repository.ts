@@ -33,6 +33,32 @@ const effectiveRmIs = (rmId: string) =>
   or(eq(employees.leaveApprover, rmId), eq(employees.reportsTo, rmId));
 
 /** The only place the attendance feature touches the database. */
+/** WFH ranges in these statuses overlapping [from, to]. */
+const wfhRanges = async (
+  db: DbClient,
+  employeeIds: string[],
+  from: string,
+  to: string,
+  statuses: ReadonlyArray<WfhRow['status']>,
+) => {
+  if (employeeIds.length === 0) return [];
+  return db.orm
+    .select({
+      employeeId: wfhRequests.employeeId,
+      startDate: wfhRequests.startDate,
+      endDate: wfhRequests.endDate,
+    })
+    .from(wfhRequests)
+    .where(
+      and(
+        inArray(wfhRequests.employeeId, employeeIds),
+        inArray(wfhRequests.status, [...statuses]),
+        lte(wfhRequests.startDate, to),
+        gte(wfhRequests.endDate, from),
+      ),
+    );
+};
+
 export const createAttendanceRepository = (db: DbClient) => ({
   // --- punches --------------------------------------------------------------
 
@@ -122,6 +148,22 @@ export const createAttendanceRepository = (db: DbClient) => ({
       .where(eq(punchZones.id, id))
       .limit(1);
     return rows[0];
+  },
+
+  /** What still points at a zone — any of these blocks removing it. */
+  zoneUsage: async (
+    id: string,
+  ): Promise<{ assets: number; stock: number; history: number; people: number }> => {
+    const [row] = await db.query<{ assets: number; stock: number; history: number; people: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM ops.assets WHERE zone_id = $1) AS assets,
+         (SELECT count(*)::int FROM ops.stock_levels WHERE zone_id = $1)
+           + (SELECT count(*)::int FROM ops.stock_movements WHERE zone_id = $1) AS stock,
+         (SELECT count(*)::int FROM ops.asset_events WHERE zone_id = $1) AS history,
+         (SELECT count(*)::int FROM org.employees WHERE base_zone_id = $1 AND status <> 'inactive') AS people`,
+      [id],
+    );
+    return row ?? { assets: 0, stock: 0, history: 0, people: 0 };
   },
 
   deleteZone: async (
@@ -221,24 +263,19 @@ export const createAttendanceRepository = (db: DbClient) => ({
   },
 
   /** Approved WFH ranges overlapping [from, to] — classifier input. */
-  listApprovedWfh: async (employeeIds: string[], from: string, to: string) => {
-    if (employeeIds.length === 0) return [];
-    return db.orm
-      .select({
-        employeeId: wfhRequests.employeeId,
-        startDate: wfhRequests.startDate,
-        endDate: wfhRequests.endDate,
-      })
-      .from(wfhRequests)
-      .where(
-        and(
-          inArray(wfhRequests.employeeId, employeeIds),
-          eq(wfhRequests.status, 'approved'),
-          lte(wfhRequests.startDate, to),
-          gte(wfhRequests.endDate, from),
-        ),
-      );
-  },
+  listApprovedWfh: async (employeeIds: string[], from: string, to: string) =>
+    wfhRanges(db, employeeIds, from, to, ['approved']),
+
+  /**
+   * WFH ranges in these statuses overlapping [from, to] — e.g. approved +
+   * still waiting, which lift the geo block and keep remote punches counted.
+   */
+  listWfhRanges: (
+    employeeIds: string[],
+    from: string,
+    to: string,
+    statuses: ReadonlyArray<WfhRow['status']>,
+  ) => wfhRanges(db, employeeIds, from, to, statuses),
 
   // --- people ---------------------------------------------------------------
 

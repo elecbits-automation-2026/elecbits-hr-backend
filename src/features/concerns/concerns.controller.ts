@@ -37,7 +37,7 @@ const requireId = (req: Request): string => {
   return id;
 };
 
-const QUEUES = new Set<QueueName>(['manager', 'hr', 'mrc', 'vigil']);
+const QUEUES = new Set<QueueName>(['manager', 'hr', 'mrc']);
 
 /** HTTP layer only. Bodies are never logged — confidentiality (policy §9). */
 export const concernsController = {

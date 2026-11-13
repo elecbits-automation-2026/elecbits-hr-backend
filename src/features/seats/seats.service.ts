@@ -2,6 +2,7 @@ import createError from 'http-errors';
 import type { ActorContext, OpenSeat, SeatsRepository } from './seats.repository.js';
 import type {
   AssignSeatInput,
+  PastSeatDto,
   SeatDto,
   SeatsOverviewDto,
   VacateSeatInput,
@@ -119,7 +120,18 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
     }
   };
 
-  return { overview, assign, vacate };
+  /** Who held each seat before (ended rows are kept, never deleted). */
+  const history = async (actor: ActorContext): Promise<PastSeatDto[]> => {
+    await assertAdmin(actor);
+    return (await repo.listEnded()).map((s) => ({
+      ...toSeat(s),
+      endedAt: new Date(s.ended_at).toISOString(),
+      endedReason: s.ended_reason,
+      endedByName: s.ended_by_name,
+    }));
+  };
+
+  return { overview, assign, vacate, history };
 };
 
 export type SeatsService = ReturnType<typeof createSeatsService>;

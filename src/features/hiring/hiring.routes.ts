@@ -76,7 +76,8 @@ import {
  *   Offer (2026-10-27): GET|POST /applications/:id/documents, PUT …/documents/:docId, PUT …/folder,
  *     PUT …/offer-letter (draft), PUT …/offer-draft, POST …/offer/submit → the HR Head:
  *     GET /offers/pending, PUT …/signed-offer, POST …/offer/approve | …/offer/return;
- *     TA: POST …/offer (share) | offer-declined | withdraw-offer | hire | no-show; HRBP: POST …/joined
+ *     TA: POST …/offer (share) | offer-declined | withdraw-offer | hire;
+ *     HRBP: GET /joiners (the handover list), POST …/joined; TA or HRBP: POST …/no-show
  *   (Urgent hiring is offline for now: HR adds the person via HR → People.)
  */
 export const hiringRoutes = Router();
@@ -350,11 +351,12 @@ hiringRoutes.post(
   validateBody(markHiredSchema),
   hireController.markHired,
 );
-// HRBP confirms the actual joining (checked in the service).
+// HRBP: the handover list and the actual joining (checked in the service).
+hiringRoutes.get('/joiners', hireController.joiners);
 hiringRoutes.post('/applications/:id/joined', hireController.confirmJoined);
+// TA or HRBP (checked in the service).
 hiringRoutes.post(
   '/applications/:id/no-show',
-  taUpdates,
   validateBody(endOfferSchema),
   hireController.noShow,
 );

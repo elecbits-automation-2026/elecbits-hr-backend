@@ -1,4 +1,5 @@
 import createError from 'http-errors';
+import { checkUpload } from '../../shared/helpers/uploads.js';
 import type {
   ActorContext,
   PoliciesRepository,
@@ -263,10 +264,12 @@ export const createPoliciesService = (deps: { repo: PoliciesRepository }) => {
     actor: ActorContext,
   ): Promise<PolicyDto> => {
     const policy = await requireRow(policyId);
-    if (doc.data.length === 0) {
-      throw createError(422, 'The uploaded file is empty', { code: 'EMPTY_DOCUMENT' });
-    }
-    await repo.upsertDocument(policy, doc, actor);
+    // Served back to every employee — the bytes must really be a document.
+    const contentType = checkUpload(doc, ['pdf'], {
+      maxBytes: 20 * 1024 * 1024,
+      what: 'The policy document',
+    });
+    await repo.upsertDocument(policy, { ...doc, contentType }, actor);
     const updated = await requireRow(policyId);
     return toPolicy(updated, await repo.documentPolicyIds());
   };
