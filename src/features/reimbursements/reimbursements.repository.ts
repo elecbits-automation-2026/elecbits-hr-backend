@@ -4,11 +4,12 @@ import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
   claimReceipts,
+  departments,
   employees,
+  employeeSalary,
   payrollRuns,
   reimbursementClaims,
 } from '../../db/schema/index.js';
-import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import type { CreateClaimInput, ReimbursementStatus } from './reimbursements.schema.js';
 
 export type ClaimRow = typeof reimbursementClaims.$inferSelect;
@@ -19,15 +20,21 @@ export interface ActorContext {
   actorEmployeeId: string;
 }
 
-const rmDecider = alias(employees, 'rm_decider');
+/** The two steps a claim waits at: PR, then the Admin account. */
+export type OpenStatus = 'pending_payroll' | 'pending_admin';
+
 const payrollDecider = alias(employees, 'payroll_decider');
+const adminDecider = alias(employees, 'admin_decider');
+const payer = alias(employees, 'payer');
 
 const joined = {
   row: reimbursementClaims,
   employeeName: employees.name,
   employeeCode: employees.employeeCode,
-  rmDecidedByName: rmDecider.name,
+  department: departments.name,
   payrollDecidedByName: payrollDecider.name,
+  adminDecidedByName: adminDecider.name,
+  paidByName: payer.name,
   paidInMonth: payrollRuns.month,
 };
 
@@ -35,31 +42,15 @@ export type ClaimJoinedRow = {
   row: ClaimRow;
   employeeName: string;
   employeeCode: string;
-  rmDecidedByName: string | null;
+  department: string | null;
   payrollDecidedByName: string | null;
+  adminDecidedByName: string | null;
+  paidByName: string | null;
   paidInMonth: string | null;
 };
 
-/**
- * Move one employee's open DRAFT payslips by an approved claim — the
- * Reimbursement line and final pay together, for every draft month on or
- * after the month the money was spent. Inside the caller's transaction.
- */
-const shiftDrafts = async (
-  tx: DbClient,
-  employeeId: string,
-  spentOn: string,
-  delta: number,
-): Promise<void> => {
-  await tx.query(
-    `UPDATE org.payslips p
-        SET reimbursement = reimbursement + $1, final_pay = final_pay + $1, updated_at = now()
-       FROM org.payroll_runs r
-      WHERE p.run_id = r.id AND r.status = 'draft'
-        AND p.employee_id = $2 AND r.month >= to_char($3::date, 'YYYY-MM')`,
-    [delta, employeeId, spentOn],
-  );
-};
+/** The month a claim was approved in: Admin's decision, or PR's for older claims. */
+const approvedMonth = sql<string | null>`to_char(coalesce(${reimbursementClaims.adminDecidedAt}, ${reimbursementClaims.payrollDecidedAt}) AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')`;
 
 /** The only place the reimbursements feature touches the database. */
 export const createReimbursementsRepository = (db: DbClient) => {
@@ -68,11 +59,13 @@ export const createReimbursementsRepository = (db: DbClient) => {
       .select(joined)
       .from(reimbursementClaims)
       .innerJoin(employees, eq(reimbursementClaims.employeeId, employees.id))
-      .leftJoin(rmDecider, eq(reimbursementClaims.rmDecidedBy, rmDecider.id))
+      .leftJoin(departments, eq(employees.departmentId, departments.id))
       .leftJoin(
         payrollDecider,
         eq(reimbursementClaims.payrollDecidedBy, payrollDecider.id),
       )
+      .leftJoin(adminDecider, eq(reimbursementClaims.adminDecidedBy, adminDecider.id))
+      .leftJoin(payer, eq(reimbursementClaims.paidBy, payer.id))
       .leftJoin(payrollRuns, eq(reimbursementClaims.paidRunId, payrollRuns.id));
 
   return {
@@ -83,8 +76,6 @@ export const createReimbursementsRepository = (db: DbClient) => {
             id: employees.id,
             name: employees.name,
             status: employees.status,
-            reportsTo: employees.reportsTo,
-            leaveApprover: employees.leaveApprover,
           })
           .from(employees)
           .where(eq(employees.id, employeeId))
@@ -99,32 +90,69 @@ export const createReimbursementsRepository = (db: DbClient) => {
         .where(eq(reimbursementClaims.employeeId, employeeId))
         .orderBy(desc(reimbursementClaims.createdAt)),
 
-    /** Claims waiting on this RM: their effective reports, RM step only. */
-    listForRm: (rmId: string): Promise<ClaimJoinedRow[]> =>
+    /**
+     * PR / Admin's view: everything, or some statuses; `month` (YYYY-MM)
+     * keeps the claims approved in that month (the reimbursement sheet).
+     */
+    listAll: (filter: {
+      statuses?: ReimbursementStatus[];
+      month?: string;
+    }): Promise<ClaimJoinedRow[]> =>
       select()
         .where(
           and(
-            eq(reimbursementClaims.status, 'pending_rm'),
-            sql`coalesce(${employees.leaveApprover}, ${employees.reportsTo}) = ${rmId}`,
+            filter.statuses?.length
+              ? inArray(reimbursementClaims.status, filter.statuses)
+              : undefined,
+            filter.month ? sql`${approvedMonth} = ${filter.month}` : undefined,
           ),
-        )
-        .orderBy(reimbursementClaims.createdAt),
-
-    /** Payroll's view: everything, or one or more statuses. */
-    listAll: (statuses?: ReimbursementStatus[]): Promise<ClaimJoinedRow[]> =>
-      select()
-        .where(
-          statuses?.length ? inArray(reimbursementClaims.status, statuses) : undefined,
         )
         .orderBy(desc(reimbursementClaims.createdAt)),
 
-    /** New claim + audit + the first approver's bell, one transaction. */
+    /** Approved claims with the bank details the transfer file needs (PR scope). */
+    toPay: (month?: string) =>
+      db.orm
+        .select({
+          claimId: reimbursementClaims.id,
+          employeeId: employees.id,
+          name: employees.name,
+          employeeCode: employees.employeeCode,
+          email: employees.email,
+          department: departments.name,
+          spentOn: reimbursementClaims.spentOn,
+          category: reimbursementClaims.category,
+          description: reimbursementClaims.description,
+          amount: reimbursementClaims.amount,
+          prName: payrollDecider.name,
+          adminName: adminDecider.name,
+          approvedMonth,
+          bankName: employeeSalary.bankName,
+          accountNo: employeeSalary.bankAccountNo,
+          ifsc: employeeSalary.ifscCode,
+        })
+        .from(reimbursementClaims)
+        .innerJoin(employees, eq(reimbursementClaims.employeeId, employees.id))
+        .leftJoin(departments, eq(employees.departmentId, departments.id))
+        .leftJoin(employeeSalary, eq(employeeSalary.employeeId, employees.id))
+        .leftJoin(
+          payrollDecider,
+          eq(reimbursementClaims.payrollDecidedBy, payrollDecider.id),
+        )
+        .leftJoin(adminDecider, eq(reimbursementClaims.adminDecidedBy, adminDecider.id))
+        .where(
+          and(
+            eq(reimbursementClaims.status, 'approved'),
+            month ? sql`${approvedMonth} = ${month}` : undefined,
+          ),
+        )
+        .orderBy(employees.name, reimbursementClaims.spentOn),
+
+    /** New claim + audit, one transaction (no bells — the monthly digest rings). */
     insert: async (
       employeeId: string,
       input: CreateClaimInput,
-      status: 'pending_rm' | 'pending_payroll',
+      status: OpenStatus,
       actor: ActorContext,
-      bell: { to: string[]; event: NotificationEvent },
     ): Promise<ClaimRow> =>
       db.transaction(async (tx) => {
         const rows = await tx.orm
@@ -145,21 +173,18 @@ export const createReimbursementsRepository = (db: DbClient) => {
           subject: `employees:${employeeId}`,
           detail: JSON.stringify({ claimId: rows[0]!.id, status }),
         });
-        await insertNotifications(tx, bell.to, bell.event);
         return rows[0]!;
       }),
 
     /**
      * One step of the trail. The WHERE re-asserts the expected status so a
-     * double decision returns nothing; an approval that completes the trail
-     * shifts the open payroll drafts in the same transaction.
+     * double decision returns nothing.
      */
     decide: async (
       id: string,
-      from: 'pending_rm' | 'pending_payroll',
+      from: OpenStatus,
       patch: Partial<ClaimRow>,
       actor: ActorContext,
-      bell: { to: string[]; event: NotificationEvent },
     ): Promise<ClaimRow | undefined> =>
       db.transaction(async (tx) => {
         const rows = await tx.orm
@@ -171,17 +196,59 @@ export const createReimbursementsRepository = (db: DbClient) => {
           .returning();
         const row = rows[0];
         if (!row) return undefined;
-        if (row.status === 'approved') {
-          await shiftDrafts(tx, row.employeeId, row.spentOn, Number(row.amount));
-        }
         await tx.orm.insert(auditLog).values({
           actorUserId: actor.actorUserId,
           action: `reimbursement.${row.status === 'declined' ? 'declined' : 'approved'}`,
           subject: `employees:${row.employeeId}`,
           detail: JSON.stringify({ claimId: row.id, step: from, status: row.status }),
         });
-        await insertNotifications(tx, bell.to, bell.event);
         return row;
+      }),
+
+    /**
+     * Mark approved claims paid by bank transfer, all or none: if any id is
+     * not `approved` any more the transaction rolls back (NOT_APPROVED).
+     */
+    markPaid: async (
+      claimIds: string[],
+      payment: { paidOn: string; reference: string },
+      actor: ActorContext,
+    ): Promise<ClaimRow[]> =>
+      db.transaction(async (tx) => {
+        const rows = await tx.orm
+          .update(reimbursementClaims)
+          .set({
+            status: 'paid',
+            paidOn: payment.paidOn,
+            paymentRef: payment.reference,
+            paidBy: actor.actorEmployeeId,
+            paidAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              inArray(reimbursementClaims.id, claimIds),
+              eq(reimbursementClaims.status, 'approved'),
+            ),
+          )
+          .returning();
+        if (rows.length !== new Set(claimIds).size) {
+          throw Object.assign(new Error('Claims changed'), { code: 'NOT_APPROVED' });
+        }
+        for (const row of rows) {
+          await tx.orm.insert(auditLog).values({
+            actorUserId: actor.actorUserId,
+            action: 'reimbursement.paid',
+            subject: `employees:${row.employeeId}`,
+            detail: JSON.stringify({
+              claimId: row.id,
+              amount: Number(row.amount),
+              paidOn: payment.paidOn,
+              reference: payment.reference,
+            }),
+          });
+        }
+        return rows;
       }),
 
     /** The claimant withdraws a claim that is still waiting on someone. */
@@ -194,7 +261,7 @@ export const createReimbursementsRepository = (db: DbClient) => {
             and(
               eq(reimbursementClaims.id, id),
               eq(reimbursementClaims.employeeId, actor.actorEmployeeId),
-              inArray(reimbursementClaims.status, ['pending_rm', 'pending_payroll']),
+              inArray(reimbursementClaims.status, ['pending_payroll', 'pending_admin']),
             ),
           )
           .returning();

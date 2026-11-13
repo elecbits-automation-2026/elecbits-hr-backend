@@ -27,7 +27,7 @@ import {
  *  - dispute: an employee contests a decision — Dispute Resolution Framework,
  *    level 1 RM → 2 HR → 3 Management Review Committee (final);
  *  - complaint: someone's conduct — Equal Opportunity §J / anti-bullying;
- *  - whistleblower: misconduct, fraud, ethics — the vigil team only.
+ *  - whistleblower: history only — the section was removed 2026-11-05.
  * `raised_by` is null for an anonymous report (complaints and whistleblower
  * only); the raiser then follows up with the code + a key whose HASH is kept
  * here. Bodies never reach the audit log.

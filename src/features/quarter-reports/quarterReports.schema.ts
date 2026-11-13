@@ -67,8 +67,6 @@ export const quarterReportSchema = z
     recognitions: z.number().int(),
     feedback: z.object({ appreciation: z.number().int(), concern: z.number().int() }),
     atRiskGoals: z.number().int(),
-    /** Final score under 50 — the PIP card says so (no PIP workflow yet). */
-    pipCandidate: z.boolean(),
     /** Six months' service by the quarter's end (policy §18.11). */
     appraisalEligible: z.boolean(),
   })

@@ -3,17 +3,16 @@ import { opsPath } from './assets.docs.js';
 import {
   assetSetupSchema,
   createCategorySchema,
-  putKitSchema,
   updateCategorySchema,
 } from './asset-setup.schema.js';
 
-/** OpenAPI registration for OPS setup (categories, kits). */
+/** OpenAPI registration for OPS setup (categories). */
 export const registerAssetSetupDocs = (registry: OpenAPIRegistry): void => {
   opsPath(
     registry,
     'get',
     '/api/v1/asset-setup',
-    'Categories, kits, designations',
+    'Asset categories with counts',
     assetSetupSchema,
   );
   opsPath(
@@ -31,13 +30,5 @@ export const registerAssetSetupDocs = (registry: OpenAPIRegistry): void => {
     'Edit an asset category',
     assetSetupSchema,
     updateCategorySchema,
-  );
-  opsPath(
-    registry,
-    'put',
-    '/api/v1/asset-setup/kits',
-    "Replace a designation's joiner kit",
-    assetSetupSchema,
-    putKitSchema,
   );
 };

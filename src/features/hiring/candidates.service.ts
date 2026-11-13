@@ -1,5 +1,6 @@
 import createError from 'http-errors';
 import { addDaysIso, localDateOf } from '../../shared/helpers/helpers.js';
+import { checkUpload } from '../../shared/helpers/uploads.js';
 import type {
   ApplicationRow,
   CandidateRow,
@@ -31,11 +32,6 @@ import { POSITION_PROGRESS } from './hiring.service.js';
 /** Talent-pool retention (TA design): 6 months after the last consideration. */
 const RETAIN_DAYS = 183;
 const CV_MAX_BYTES = 10 * 1024 * 1024;
-const CV_TYPES = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-]);
 const LINK_INTERVIEWS = '/hiring/interviews';
 const LINK_TA = '/hr/hiring';
 const LINK_PLAN = '/hiring/plan';
@@ -65,9 +61,9 @@ const whenText = (iso: string) =>
     minute: '2-digit',
   });
 
-const MODE_TEXT = { in_person: 'in person', video: 'video call', phone: 'phone call' } as const;
+export const MODE_TEXT = { in_person: 'in person', video: 'video call', phone: 'phone call' } as const;
 
-const ROUND_TEXT: Record<InterviewRound, string> = {
+export const ROUND_TEXT: Record<InterviewRound, string> = {
   hr: 'HR',
   technical: 'Technical',
   practical: 'Practical',
@@ -331,13 +327,10 @@ export const createCandidatesService = (deps: {
     if (c.anonymised_at) {
       throw createError(409, 'This candidate was anonymised', { code: 'ANONYMISED' });
     }
-    if (file.data.length === 0 || file.data.length > CV_MAX_BYTES) {
-      throw createError(422, 'The CV must be a file under 10 MB', { code: 'CV_SIZE' });
-    }
-    const type = file.contentType.split(';')[0]!.trim().toLowerCase();
-    if (!CV_TYPES.has(type)) {
-      throw createError(422, 'Upload the CV as a PDF or Word file', { code: 'CV_TYPE' });
-    }
+    const type = checkUpload(file, ['pdf', 'doc', 'docx'], {
+      maxBytes: CV_MAX_BYTES,
+      what: 'The CV',
+    });
     await repo.saveCv(id, { ...file, contentType: type }, actor);
     return candidate(id);
   };

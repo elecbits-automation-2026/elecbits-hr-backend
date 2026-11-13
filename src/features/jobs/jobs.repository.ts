@@ -142,14 +142,29 @@ export const createJobsRepository = (db: DbClient) => ({
       [],
     ),
 
-  pendingReimbursements: async () =>
-    db.query<Owner & { id: string; status: string; amount: string; since: Date }>(
-      `SELECT c.id, c.status::text, c.amount, ${OWNER_COLUMNS},
-              coalesce(c.rm_decided_at, c.created_at) AS since
-         FROM org.reimbursement_claims c JOIN org.employees e ON e.id = c.employee_id
-        WHERE c.status IN ('pending_rm', 'pending_payroll')`,
+  /** The monthly reimbursement digest's numbers. */
+  reimbursementCounts: async () => {
+    const rows = await db.query<{
+      pending_pr: string;
+      pending_admin: string;
+      approved: string;
+      approved_total: string;
+    }>(
+      `SELECT count(*) FILTER (WHERE status = 'pending_payroll') AS pending_pr,
+              count(*) FILTER (WHERE status = 'pending_admin') AS pending_admin,
+              count(*) FILTER (WHERE status = 'approved') AS approved,
+              coalesce(sum(amount) FILTER (WHERE status = 'approved'), 0) AS approved_total
+         FROM org.reimbursement_claims`,
       [],
-    ),
+    );
+    const r = rows[0]!;
+    return {
+      pendingPr: Number(r.pending_pr),
+      pendingAdmin: Number(r.pending_admin),
+      approved: Number(r.approved),
+      approvedTotal: Number(r.approved_total),
+    };
+  },
 
   pendingLateUpdates: async () =>
     db.query<Owner & { id: string; date: string; since: Date }>(

@@ -3,7 +3,6 @@ import { actorOf, idParam } from './assets.controller.js';
 import { createAssetSetupRepository } from './asset-setup.repository.js';
 import type {
   CreateCategoryInput,
-  PutKitInput,
   UpdateCategoryInput,
 } from './asset-setup.schema.js';
 import { createAssetSetupService } from './asset-setup.service.js';
@@ -28,9 +27,5 @@ export const assetSetupController = {
   updateCategory: async (req: Request, res: Response): Promise<void> => {
     const input: UpdateCategoryInput = req.body;
     res.json(await service(req).updateCategory(idParam(req), input, actorOf(req)));
-  },
-  putKit: async (req: Request, res: Response): Promise<void> => {
-    const input: PutKitInput = req.body;
-    res.json(await service(req).putKit(input, actorOf(req)));
   },
 };

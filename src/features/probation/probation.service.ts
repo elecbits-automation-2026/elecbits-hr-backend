@@ -90,7 +90,9 @@ export const createProbationService = (deps: {
       autoConfirmed: r.autoConfirmed,
       exitId: r.exitId,
       can: {
-        recommend: open && viewer.id !== r.employeeId && (isRm || (!p?.rm_id && hr)),
+        // One recommendation per review: once sent it waits on HR.
+        recommend:
+          r.status === 'pending' && viewer.id !== r.employeeId && (isRm || (!p?.rm_id && hr)),
         decide: open && viewer.id !== r.employeeId && hr,
         letter:
           r.status === 'confirmed' && (viewer.id === r.employeeId || isRm || hrRead),
@@ -149,6 +151,11 @@ export const createProbationService = (deps: {
     actor: ActorContext & { actorEmployeeId: string },
   ) => {
     const { r, dto } = await load(id, actor.actorEmployeeId);
+    if (r.status === 'recommended') {
+      throw createError(409, 'Already recommended — HR decides next', {
+        code: 'ALREADY_RECOMMENDED',
+      });
+    }
     if (!dto.can.recommend) {
       throw createError(
         403,
@@ -161,7 +168,7 @@ export const createProbationService = (deps: {
     const hr = await authz.listBroadHolders('hrbp.people', 'update', r.employeeId);
     const ok = await repo.transition(
       id,
-      OPEN,
+      ['pending'],
       {
         status: 'recommended',
         recommendation: input.recommendation,

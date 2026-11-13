@@ -9,8 +9,9 @@ export const teamTaskSchema = z
     taskId: z.string().uuid(),
     title: z.string(),
     done: z.boolean(),
-    // Done by the system: the kit is all held / salary + bank are on record.
+    // Done by the system (payroll: salary + bank are on record).
     autoDone: z.boolean(),
+    doneNote: z.string().nullable(),
     employee: z.object({
       id: z.string().uuid(),
       name: z.string(),
@@ -22,6 +23,13 @@ export const teamTaskSchema = z
   .openapi('OnboardingTeamTask');
 
 export type TeamTaskDto = z.infer<typeof teamTaskSchema>;
+export type ToggleTaskInput = z.infer<typeof toggleTaskSchema>;
+
+/** Ticking a plain step needs a short note of what was done; un-ticking needs none. */
+export const toggleTaskSchema = z
+  .object({ note: z.string().trim().max(1000).optional() })
+  .strict()
+  .openapi('ToggleOnboardingTask');
 
 /** HR starts a journey by hand (rehires, or joiners older than the window). */
 export const startJourneySchema = z
@@ -47,6 +55,17 @@ export const onboardingTaskSchema = z
     done: z.boolean(),
     doneAt: z.string().datetime().nullable(),
     doneByName: z.string().nullable(),
+    /** What was done — required on a hand tick (proof). */
+    doneNote: z.string().nullable(),
+    /** A document step: completes by uploading the file, not by a tick. */
+    needsFile: z.boolean(),
+    /** Completes on its own from the records (account claimed, payroll set up). */
+    auto: z.boolean(),
+    /** May the viewer tick it (plain step) or upload it (document step) — its owner only. */
+    canAct: z.boolean(),
+    file: z
+      .object({ fileName: z.string(), sizeBytes: z.number().int(), uploadedAt: z.string().datetime() })
+      .nullable(),
   })
   .openapi('OnboardingTask');
 

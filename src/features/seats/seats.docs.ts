@@ -1,7 +1,9 @@
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
+import { z } from '../../shared/zod.js';
 import {
   assignSeatSchema,
+  pastSeatSchema,
   seatSchema,
   seatsOverviewSchema,
   vacateSeatSchema,
@@ -17,6 +19,19 @@ export const registerSeatsDocs = (registry: OpenAPIRegistry): void => {
     security: [{ bearerAuth: [] }],
     responses: {
       200: jsonResponse('Seats', seatsOverviewSchema),
+      401: errorResponse('Not authenticated'),
+      403: errorResponse('Not the Admin account'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/seats/history',
+    tags: ['Seats'],
+    summary: 'Past seat holders, most recently ended first (Admin account only)',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: jsonResponse('Past holders', z.array(pastSeatSchema)),
       401: errorResponse('Not authenticated'),
       403: errorResponse('Not the Admin account'),
     },

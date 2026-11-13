@@ -44,7 +44,36 @@ export const registerOnboardingDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: jsonResponse('Updated journey', journeySchema),
       403: errorResponse('Not the task owner'),
-      409: errorResponse('Policy-linked step — completed by acknowledging the policy'),
+      409: errorResponse(
+        'Policy step (acknowledge the policy), document step (upload the file), or payroll step without CTC + bank',
+      ),
+    },
+  });
+
+  registry.registerPath({
+    method: 'put',
+    path: '/api/v1/onboarding/tasks/{id}/file',
+    tags: ['Onboarding'],
+    summary:
+      'Upload the document for a document step (ID/address, bank/PAN/UAN, BGV) — raw PDF/JPG/PNG body, ?filename=; completes the step',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: jsonResponse('Updated journey', journeySchema),
+      403: errorResponse('Not the joiner or HR reaching them'),
+      404: errorResponse('Not a document step'),
+      422: errorResponse('Wrong file type, empty, or over 10 MB'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/onboarding/tasks/{id}/file',
+    tags: ['Onboarding'],
+    summary: 'Open the uploaded document (the joiner, or HR whose people grant reaches them)',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: { description: 'The file' },
+      404: errorResponse('No such step, not visible to you, or nothing uploaded yet'),
     },
   });
 

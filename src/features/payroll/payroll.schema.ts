@@ -80,8 +80,8 @@ export const payslipSchema = z
     deductionsTotal: z.number(),
     netPay: z.number(),
     /**
-     * The approved claims behind `reimbursement` (a draft: approved and
-     * unpaid, spent by this month; a published run: the ones it paid).
+     * The claims behind `reimbursement` on runs published before claims
+     * moved to the reimbursement sheet (2026-11-05); empty otherwise.
      */
     reimbursementClaims: z.array(
       z.object({

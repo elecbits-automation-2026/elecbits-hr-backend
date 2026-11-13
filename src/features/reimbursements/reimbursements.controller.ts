@@ -6,6 +6,7 @@ import { createReimbursementsRepository } from './reimbursements.repository.js';
 import type {
   CreateClaimInput,
   DecideClaimInput,
+  MarkPaidInput,
   ReimbursementClaimDto,
 } from './reimbursements.schema.js';
 import { createReimbursementsService } from './reimbursements.service.js';
@@ -29,13 +30,23 @@ const requireId = (req: Request): string => {
 };
 
 const STATUSES = new Set<ReimbursementClaimDto['status']>([
-  'pending_rm',
   'pending_payroll',
+  'pending_admin',
   'approved',
   'paid',
   'declined',
   'cancelled',
 ]);
+
+/** ?month=YYYY-MM, or undefined (400 when malformed). */
+const monthParam = (req: Request): string | undefined => {
+  const m = req.query.month;
+  if (m === undefined || m === '') return undefined;
+  if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) {
+    throw createError(400, 'month must be YYYY-MM', { code: 'BAD_MONTH' });
+  }
+  return m;
+};
 
 /** HTTP layer only: read validated input, call the service, shape the response. */
 export const reimbursementsController = {
@@ -43,16 +54,33 @@ export const reimbursementsController = {
     res.json(await service(req).mine(req.auth!.employeeId));
   },
 
-  team: async (req: Request, res: Response): Promise<void> => {
-    res.json(await service(req).forRm(req.auth!.employeeId));
-  },
-
   queue: async (req: Request, res: Response): Promise<void> => {
     const raw = typeof req.query.status === 'string' ? req.query.status.split(',') : [];
     const statuses = raw.filter((s): s is ReimbursementClaimDto['status'] =>
       STATUSES.has(s as ReimbursementClaimDto['status']),
     );
-    res.json(await service(req).queue(statuses));
+    res.json(await service(req).queue({ statuses, month: monthParam(req) }));
+  },
+
+  bankFile: async (req: Request, res: Response): Promise<void> => {
+    const month = monthParam(req);
+    const file = await service(req).bankFile(month);
+    req.log.info({ month: month ?? 'all' }, 'reimbursement bank file exported');
+    res
+      .setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      )
+      .setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`)
+      .setHeader('Cache-Control', 'private, no-store')
+      .send(file.data);
+  },
+
+  markPaid: async (req: Request, res: Response): Promise<void> => {
+    const input: MarkPaidInput = req.body;
+    const out = await service(req).markPaid(input, actor(req));
+    req.log.info({ paid: out.paid }, 'reimbursements marked paid');
+    res.json(out);
   },
 
   create: async (req: Request, res: Response): Promise<void> => {

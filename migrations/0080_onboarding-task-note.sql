@@ -1,0 +1,1 @@
+ALTER TABLE "org"."onboarding_tasks" ADD COLUMN "done_note" text;

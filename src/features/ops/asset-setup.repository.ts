@@ -1,9 +1,9 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
-import { assetCategories, assetKits } from '../../db/schema/index.js';
+import { assetCategories } from '../../db/schema/index.js';
 import { auditIn, type ActorContext } from './ops.repository.js';
 
-/** DB access for OPS setup: categories and joiner kits. */
+/** DB access for OPS setup: categories. */
 export const createAssetSetupRepository = (db: DbClient) => ({
   categoriesWithCounts: () =>
     db.query<{
@@ -18,26 +18,6 @@ export const createAssetSetupRepository = (db: DbClient) => ({
               (SELECT count(*)::int FROM ops.assets a WHERE a.category_id = c.id) AS asset_count
          FROM ops.asset_categories c ORDER BY c.name`,
     ),
-
-  kits: () =>
-    db.query<{
-      designation: string;
-      category_id: string;
-      category_name: string;
-      qty: number;
-    }>(
-      `SELECT k.designation, k.category_id, c.name AS category_name, k.qty
-         FROM ops.asset_kits k JOIN ops.asset_categories c ON c.id = k.category_id
-        ORDER BY lower(k.designation), c.name`,
-    ),
-
-  designations: async (): Promise<string[]> =>
-    (
-      await db.query<{ designation: string }>(
-        `SELECT DISTINCT designation FROM org.employees
-          WHERE designation IS NOT NULL AND btrim(designation) <> '' ORDER BY designation`,
-      )
-    ).map((r) => r.designation),
 
   /** Name or prefix already used (case-insensitive), ignoring one category. */
   clash: async (
@@ -78,28 +58,6 @@ export const createAssetSetupRepository = (db: DbClient) => ({
         });
       }
       return rows[0];
-    }),
-
-  /** Replace one designation's kit. */
-  replaceKit: (
-    designation: string,
-    items: Array<{ categoryId: string; qty: number }>,
-    actor: ActorContext,
-  ) =>
-    db.transaction(async (tx) => {
-      await tx.orm
-        .delete(assetKits)
-        .where(sql`lower(${assetKits.designation}) = lower(${designation})`);
-      if (items.length) {
-        await tx.orm
-          .insert(assetKits)
-          .values(
-            items.map((i) => ({ designation, categoryId: i.categoryId, qty: i.qty })),
-          );
-      }
-      await auditIn(tx, actor, 'ops.kit_set', `asset_kits:${designation}`, {
-        lines: items.length,
-      });
     }),
 });
 

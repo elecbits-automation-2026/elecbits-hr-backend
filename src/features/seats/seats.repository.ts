@@ -23,6 +23,13 @@ export interface OpenSeat {
   started_at: Date;
 }
 
+/** A seat row that has ended — the history the Admin page lists. */
+export interface EndedSeat extends OpenSeat {
+  ended_at: Date;
+  ended_reason: string | null;
+  ended_by_name: string | null;
+}
+
 const audit = (
   tx: DbClient,
   actor: ActorContext,
@@ -55,6 +62,22 @@ export const createSeatsRepository = (db: DbClient) => ({
          LEFT JOIN org.departments d ON d.id = s.department_id
         WHERE s.ended_at IS NULL
         ORDER BY s.seat, d.name`,
+    ),
+
+  /** Past holders (rows are ended, never deleted), most recently ended first. */
+  listEnded: (limit = 200) =>
+    db.query<EndedSeat>(
+      `SELECT s.id, s.seat, s.department_id, d.name AS department_name,
+              s.employee_id, e.name AS employee_name, s.acting, s.started_at,
+              s.ended_at, s.ended_reason, eb.name AS ended_by_name
+         FROM org.seats s
+         JOIN org.employees e ON e.id = s.employee_id
+         LEFT JOIN org.departments d ON d.id = s.department_id
+         LEFT JOIN org.employees eb ON eb.id = s.ended_by
+        WHERE s.ended_at IS NOT NULL
+        ORDER BY s.ended_at DESC
+        LIMIT $1`,
+      [limit],
     ),
 
   departments: () =>

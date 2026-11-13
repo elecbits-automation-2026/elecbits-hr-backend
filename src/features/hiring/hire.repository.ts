@@ -285,6 +285,17 @@ export const createHireRepository = (db: DbClient) => ({
     }),
 
   /** Applications whose offer waits for the HR Head. */
+  /** Hired and not yet joined, or joined in the last 30 days — soonest joining first. */
+  joinerIds: async (): Promise<Array<{ id: string; recruiter_name: string | null }>> =>
+    db.query<{ id: string; recruiter_name: string | null }>(
+      `SELECT a.id, e.name AS recruiter_name
+         FROM ta.applications a
+         JOIN ta.positions p ON p.id = a.position_id
+         LEFT JOIN org.employees e ON e.id = p.recruiter_id
+        WHERE a.stage = 'hired' OR (a.stage = 'joined' AND a.joined_at > now() - interval '30 days')
+        ORDER BY a.stage = 'joined', a.joining_date NULLS LAST, a.hired_at`,
+    ),
+
   pendingOfferIds: async (): Promise<string[]> =>
     (
       await db.query<{ id: string }>(

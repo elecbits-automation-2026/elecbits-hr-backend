@@ -53,12 +53,12 @@ export const createBatchesService = (deps: { repo: BatchesRepository }) => {
   ) => {
     const existing = await repo.findById(batchId);
     if (!existing) {
-      throw createError(404, 'Batch not found', { code: 'BATCH_NOT_FOUND' });
+      throw createError(404, 'Role not found', { code: 'BATCH_NOT_FOUND' });
     }
     if (PROTECTED_NAMES.has(existing.name) && input.name !== existing.name) {
       throw createError(
         422,
-        'Seeded batches cannot be renamed — the portal gates on their names',
+        'Built-in roles can’t be renamed — the menus depend on them',
         {
           code: 'SEEDED_BATCH_NAME',
         },
@@ -67,20 +67,20 @@ export const createBatchesService = (deps: { repo: BatchesRepository }) => {
     if (await repo.isHolder(batchId, actor.actorEmployeeId)) {
       // Editing a batch you hold is editing your own access — the same
       // self-approval ban as assign/revoke (§10), with no Owner exception.
-      throw createError(403, 'You cannot edit a batch you hold yourself', {
+      throw createError(403, 'You can’t edit a role you have yourself', {
         code: 'NO_SELF_APPROVAL',
       });
     }
     const batch = await repo.updateWithGrants(batchId, input, actor);
     if (!batch) {
-      throw createError(404, 'Batch not found', { code: 'BATCH_NOT_FOUND' });
+      throw createError(404, 'Role not found', { code: 'BATCH_NOT_FOUND' });
     }
     return toBatch(batch);
   };
 
   const holders = async (batchId: string) => {
     if (!(await repo.findById(batchId))) {
-      throw createError(404, 'Batch not found', { code: 'BATCH_NOT_FOUND' });
+      throw createError(404, 'Role not found', { code: 'BATCH_NOT_FOUND' });
     }
     return (await repo.listHolders(batchId)).map((h) => ({
       ...h,
@@ -96,7 +96,7 @@ export const createBatchesService = (deps: { repo: BatchesRepository }) => {
       });
     }
     if (!(await repo.findById(batchId))) {
-      throw createError(404, 'Batch not found', { code: 'BATCH_NOT_FOUND' });
+      throw createError(404, 'Role not found', { code: 'BATCH_NOT_FOUND' });
     }
     // TODO(skeleton): check batch_assign_rights for the caller; outside the
     // assignable list -> 403 telling the client to open a grant request (§3.3).
@@ -111,11 +111,11 @@ export const createBatchesService = (deps: { repo: BatchesRepository }) => {
       });
     }
     if (!(await repo.findById(batchId))) {
-      throw createError(404, 'Batch not found', { code: 'BATCH_NOT_FOUND' });
+      throw createError(404, 'Role not found', { code: 'BATCH_NOT_FOUND' });
     }
     const removed = await repo.detachFromEmployee(batchId, employeeId, actor);
     if (!removed) {
-      throw createError(404, 'This employee does not hold that batch', {
+      throw createError(404, 'This person doesn’t have that role', {
         code: 'NOT_A_HOLDER',
       });
     }

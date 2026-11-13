@@ -1,12 +1,16 @@
-import { addDaysIso, localDateOf } from '../../shared/helpers/helpers.js';
+import { addDaysIso, addWorkingDays, localDateOf } from '../../shared/helpers/helpers.js';
 import { quarterOf } from '../performance/index.js';
 import type { SettingsReader } from '../settings/index.js';
+import { MODE_TEXT, ROUND_TEXT } from './candidates.service.js';
+import type { InterviewRound } from './hiring.schema.js';
 import type { HiringRepository, PositionStatus } from './hiring.repository.js';
 import { POSITION_PROGRESS, planningQuarter } from './hiring.service.js';
 import type { HiringJobsRepository, QuarterlyBell } from './hiringJobs.repository.js';
 
 const LINK_PLAN = '/hiring/plan';
 const LINK_APPROVALS = '/hiring/approvals';
+const LINK_TA = '/hr/hiring';
+const LINK_INTERVIEWS = '/hiring/interviews';
 
 /** The quarter after the one containing `today`, with its first day. */
 const nextQuarter = (today: string) => {
@@ -32,6 +36,9 @@ const longDate = (iso: string) =>
  *    quarter's plan (late lines wait a quarter; urgent needs use Urgent hire).
  *  - talent-pool retention: candidates 6 months past their last
  *    consideration, with nothing in play and never hired, are anonymised.
+ *  - reminders (once each): the owner of a next action past its due date,
+ *    and each interviewer the working day before their interview. Moving a
+ *    due date or rescheduling an interview re-arms its reminder.
  *  - goal carry-over: a position still being worked gets its recruiter's
  *    hiring goal in the CURRENT quarter (same weight, progress from its
  *    stage). The earlier quarter's goal stays as it was (frozen when HR
@@ -94,6 +101,48 @@ export const createHiringJobsService = (deps: {
     return { ...closed, reminded };
   };
 
+  const reminders = async (now: Date): Promise<Record<string, number>> => {
+    const today = localDateOf(now);
+    const bells: QuarterlyBell[] = [];
+
+    for (const a of await repo.overdueActions(today)) {
+      bells.push({
+        kind: `next_action_due:${a.due}`,
+        subjectId: a.application_id,
+        recipientId: a.owner_id,
+        type: 'hiring.action_overdue',
+        title: `Overdue since ${longDate(a.due)}: ${a.next_action} — ${a.candidate_name} (${a.role_title})`,
+        link: LINK_TA,
+      });
+    }
+    const overdue = bells.length;
+
+    // "Tomorrow" = the next working day, so Friday covers the weekend and Monday.
+    const workWeek = await settings.effective('attendance.workWeek');
+    const holidays = await repo.holidaysBetween(today, addDaysIso(today, 30));
+    const until = addWorkingDays(today, 1, workWeek, holidays);
+    for (const sl of await repo.upcomingSlots()) {
+      const day = localDateOf(new Date(sl.starts_at));
+      if (day <= today || day > until) continue;
+      const at = new Date(sl.starts_at).toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      bells.push({
+        kind: `interview_soon:${new Date(sl.starts_at).toISOString().slice(0, 16)}`,
+        subjectId: sl.slot_id,
+        recipientId: sl.interviewer_id,
+        type: 'hiring.interview_soon',
+        title:
+          `Interview ${longDate(day)} ${at}: ${sl.candidate_name}, ${ROUND_TEXT[sl.round as InterviewRound]} round ` +
+          `for ${sl.role_title} · ${MODE_TEXT[sl.mode]}${sl.location ? ` · ${sl.location}` : ''}`,
+        link: LINK_INTERVIEWS,
+      });
+    }
+    await repo.sendBells(bells);
+    return { overdue, interviews: bells.length - overdue };
+  };
+
   const retention = async (now: Date): Promise<Record<string, number>> => {
     const ids = await repo.expiredCandidateIds(localDateOf(now));
     return { anonymised: await repo.anonymise(ids) };
@@ -117,7 +166,7 @@ export const createHiringJobsService = (deps: {
     return { carried };
   };
 
-  return { planWindow, retention, carryOver };
+  return { planWindow, reminders, retention, carryOver };
 };
 
 export type HiringJobsService = ReturnType<typeof createHiringJobsService>;

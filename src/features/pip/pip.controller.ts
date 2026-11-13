@@ -4,7 +4,7 @@ import type { DbClient } from '../../db/client.js';
 import { isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
 import { createSettingsRepository } from '../settings/index.js';
-import { createPipRepository } from './pip.repository.js';
+import { createPipRepository } from './pip.whats repository.js';
 import type {
   CancelPipInput,
   CreateCheckinInput,

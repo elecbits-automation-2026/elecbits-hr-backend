@@ -4,9 +4,7 @@ import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
 import { z } from '../../shared/zod.js';
 import {
   cancelPipSchema,
-  createCheckinSchema,
   createPipSchema,
-  decidePipSchema,
   pipOutcomeSchema,
   pipSchema,
 } from './pip.schema.js';
@@ -35,23 +33,20 @@ export const registerPipDocs = (registry: OpenAPIRegistry): void => {
       },
     });
   p('get', '/api/v1/pips', 'PIPs I can see', z.array(pipSchema));
-  p('post', '/api/v1/pips', 'RM: open a PIP', pipSchema, createPipSchema);
+  p(
+    'post',
+    '/api/v1/pips',
+    'RM (HR when there is no RM): open a PIP — active at once for 60 days; the employee and HR are told',
+    pipSchema,
+    createPipSchema,
+  );
+  p(
+    'get',
+    '/api/v1/pips/can-start/{employeeId}',
+    'May I start a PIP for this person now? (the RM, or HR when they have no RM)',
+    z.object({ canStart: z.boolean() }),
+  );
   p('get', '/api/v1/pips/{id}', 'One PIP', pipSchema);
-  p(
-    'post',
-    '/api/v1/pips/{id}/decide',
-    'HR: approve or decline',
-    pipSchema,
-    decidePipSchema,
-  );
-  p('post', '/api/v1/pips/{id}/acknowledge', 'Employee: acknowledge', pipSchema);
-  p(
-    'post',
-    '/api/v1/pips/{id}/checkins',
-    'RM: log a check-in',
-    pipSchema,
-    createCheckinSchema,
-  );
   p(
     'post',
     '/api/v1/pips/{id}/outcome',
@@ -59,5 +54,5 @@ export const registerPipDocs = (registry: OpenAPIRegistry): void => {
     pipSchema,
     pipOutcomeSchema,
   );
-  p('post', '/api/v1/pips/{id}/cancel', 'Withdraw', pipSchema, cancelPipSchema);
+  p('post', '/api/v1/pips/{id}/cancel', 'Withdraw (the RM or HR)', pipSchema, cancelPipSchema);
 };

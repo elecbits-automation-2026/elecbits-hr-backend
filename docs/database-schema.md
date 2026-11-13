@@ -6,13 +6,13 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**88 tables · 67 enums.**
+**89 tables · 67 enums.**
 
 | Schema   | Tables | Holds                                                                                               |
 | -------- | ------ | --------------------------------------------------------------------------------------------------- |
 | `access` | 11     | Owner, modules, batches, grants, requests, audit log                                                |
 | `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
-| `org`    | 47     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `org`    | 48     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
 | `public` | 2      | Sign-in identities and refresh tokens                                                               |
 | `ta`     | 16     | Hiring: quarterly plans, requisitions, interview rounds, approvals                                  |
 
@@ -75,7 +75,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `probation_outcome`         | `confirm`, `end`                                                                                                                                                                       |
 | `probation_status`          | `pending`, `recommended`, `confirmed`, `ended`                                                                                                                                         |
 | `recognition_status`        | `pending`, `approved`, `declined`                                                                                                                                                      |
-| `reimbursement_status`      | `pending_rm`, `pending_payroll`, `approved`, `paid`, `declined`, `cancelled`                                                                                                           |
+| `reimbursement_status`      | `pending_rm`, `pending_payroll`, `pending_admin`, `approved`, `paid`, `declined`, `cancelled`                                                                                          |
 | `remote_work_type`          | `wfh`, `client_visit`, `remote`                                                                                                                                                        |
 | `request_status`            | `pending`, `approved`, `approved_narrower`, `declined`, `cancelled`                                                                                                                    |
 | `requisition_status`        | `draft`, `queued`, `submitted`, `returned`, `approved`, `cancelled`, `rejected`                                                                                                        |
@@ -883,6 +883,19 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `created_at`  | timestamp with time zone |      | `now()`             |                               |
 | `updated_at`  | timestamp with time zone |      | `now()`             |                               |
 
+### onboarding_task_files
+
+| Column         | Type                     | Null | Default             | Notes                                |
+| -------------- | ------------------------ | ---- | ------------------- | ------------------------------------ |
+| `id`           | uuid                     |      | `gen_random_uuid()` | PK                                   |
+| `task_id`      | uuid                     |      |                     | unique · → `org.onboarding_tasks.id` |
+| `file_name`    | text                     |      |                     |                                      |
+| `content_type` | text                     |      |                     |                                      |
+| `size_bytes`   | integer                  |      |                     |                                      |
+| `data`         | bytea                    |      |                     |                                      |
+| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`                 |
+| `uploaded_at`  | timestamp with time zone |      | `now()`             |                                      |
+
 ### onboarding_tasks
 
 | Column        | Type                     | Null | Default             | Notes                          |
@@ -897,6 +910,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `policy_code` | text                     | yes  |                     |                                |
 | `done_at`     | timestamp with time zone | yes  |                     |                                |
 | `done_by`     | uuid                     | yes  |                     | → `org.employees.id`           |
+| `done_note`   | text                     | yes  |                     |                                |
 
 - Unique index `onboarding_tasks_uq` (`journey_id`, `task_key`)
 - Index `onboarding_tasks_journey_idx` (`journey_id`)
@@ -1252,8 +1266,14 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `rm_decided_at`      | timestamp with time zone | yes  |                     |                         |
 | `payroll_decided_by` | uuid                     | yes  |                     | → `org.employees.id`    |
 | `payroll_decided_at` | timestamp with time zone | yes  |                     |                         |
+| `admin_decided_by`   | uuid                     | yes  |                     | → `org.employees.id`    |
+| `admin_decided_at`   | timestamp with time zone | yes  |                     |                         |
 | `decline_reason`     | text                     | yes  |                     |                         |
 | `paid_run_id`        | uuid                     | yes  |                     | → `org.payroll_runs.id` |
+| `paid_on`            | date                     | yes  |                     |                         |
+| `payment_ref`        | text                     | yes  |                     |                         |
+| `paid_by`            | uuid                     | yes  |                     | → `org.employees.id`    |
+| `paid_at`            | timestamp with time zone | yes  |                     |                         |
 | `created_at`         | timestamp with time zone |      | `now()`             |                         |
 | `updated_at`         | timestamp with time zone |      | `now()`             |                         |
 

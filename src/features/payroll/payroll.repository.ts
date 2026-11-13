@@ -1,5 +1,5 @@
 import { alias } from 'drizzle-orm/pg-core';
-import { and, desc, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   loanRepayments,
@@ -581,45 +581,6 @@ export const createPayrollRepository = (db: DbClient) => ({
           });
         }
       }
-      // Reimbursements: the same check for approved claims spent by this
-      // month, then they are marked paid by this run.
-      const claims = await tx.query<{ id: string; employee_id: string; amount: string }>(
-        `SELECT c.id, c.employee_id, c.amount
-           FROM org.reimbursement_claims c
-           JOIN org.payslips p ON p.employee_id = c.employee_id AND p.run_id = $1
-          WHERE c.status = 'approved' AND to_char(c.spent_on, 'YYYY-MM') <= $2
-          FOR UPDATE OF c`,
-        [run.id, run.month],
-      );
-      const owed = new Map<string, number>();
-      for (const c of claims) {
-        owed.set(c.employee_id, (owed.get(c.employee_id) ?? 0) + Number(c.amount));
-      }
-      const reimbursed = await tx.query<{ employee_id: string; reimbursement: string }>(
-        `SELECT employee_id, reimbursement FROM org.payslips WHERE run_id = $1`,
-        [run.id],
-      );
-      for (const slip of reimbursed) {
-        if (
-          Math.round((owed.get(slip.employee_id) ?? 0) * 100) !==
-          Math.round(Number(slip.reimbursement) * 100)
-        ) {
-          throw Object.assign(new Error('Reimbursements changed'), {
-            code: 'REIMBURSEMENTS_CHANGED',
-          });
-        }
-      }
-      if (claims.length > 0) {
-        await tx.orm
-          .update(reimbursementClaims)
-          .set({ status: 'paid', paidRunId: run.id, updatedAt: new Date() })
-          .where(
-            inArray(
-              reimbursementClaims.id,
-              claims.map((c) => c.id),
-            ),
-          );
-      }
 
       if (carried.length > 0) {
         await tx.orm
@@ -734,21 +695,7 @@ export const createPayrollRepository = (db: DbClient) => ({
     return rows[0];
   },
 
-  /**
-   * Per employee, approved-but-unpaid reimbursement claims spent in or before
-   * `month` — what a draft for that month carries (draft build).
-   */
-  approvedClaimsUpTo: async (month: string): Promise<Map<string, number>> => {
-    const rows = await db.query<{ employee_id: string; total: string }>(
-      `SELECT employee_id, sum(amount) AS total FROM org.reimbursement_claims
-        WHERE status = 'approved' AND to_char(spent_on, 'YYYY-MM') <= $1
-        GROUP BY employee_id`,
-      [month],
-    );
-    return new Map(rows.map((r) => [r.employee_id, Number(r.total)]));
-  },
-
-  /** Approved and paid claims of these people — the payslip's claim lines. */
+  /** Claims a payroll run paid (before 2026-11-05) — old payslips' claim lines. */
   claimsFor: async (employeeIds: string[]) => {
     if (employeeIds.length === 0) return [];
     return db.orm
@@ -766,7 +713,7 @@ export const createPayrollRepository = (db: DbClient) => ({
       .where(
         and(
           inArray(reimbursementClaims.employeeId, employeeIds),
-          inArray(reimbursementClaims.status, ['approved', 'paid']),
+          isNotNull(reimbursementClaims.paidRunId),
         ),
       )
       .orderBy(reimbursementClaims.spentOn);

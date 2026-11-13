@@ -7,7 +7,7 @@ import { auditController } from './audit.controller.js';
  * Audit log — mounted at /api/v1/audit-log. Read-only: entries are appended by
  * mutations inside their own transactions and are immutable (§10).
  *
- *   GET / -> 200 AuditEntry[]
+ *   GET /?q=&page=&pageSize= -> 200 AuditPage (newest first; 50 a page by default, max 200)
  */
 export const auditRoutes = Router();
 

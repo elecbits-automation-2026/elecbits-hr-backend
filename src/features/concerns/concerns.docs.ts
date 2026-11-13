@@ -27,7 +27,7 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
     path: '/api/v1/concerns',
     tags,
     summary:
-      'Raise a concern: dispute (3 levels), complaint (EO / anti-bullying) or whistleblower report. Sexual harassment is refused (422 POSH_ROUTE) — the Internal Committee handles it',
+      'Raise a concern: dispute (3 levels) or complaint (EO / anti-bullying). Sexual harassment is refused (422 POSH_ROUTE) — the Internal Committee handles it',
     security: bearer,
     request: { body: jsonBody(createConcernSchema) },
     responses: {
@@ -61,7 +61,7 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
     [
       '/api/v1/concerns/queue/{queue}',
       'get',
-      'One queue: manager | hr | mrc | vigil',
+      'One queue: manager | hr | mrc',
       z.array(concernSchema),
     ],
     [
@@ -73,7 +73,7 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
     [
       '/api/v1/concerns/{id}/acknowledge',
       'post',
-      'Handler acknowledges (complaints, whistleblower, disputes at level 2)',
+      'Handler acknowledges (complaints, disputes at level 2)',
       concernSchema,
     ],
     [
@@ -110,7 +110,7 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
     ],
     [
       '/api/v1/concerns/{id}/resolve',
-      'Outcome + resolution for a complaint or whistleblower report',
+      'Outcome + resolution for a complaint',
       resolveSchema as unknown as typeof decideSchema,
     ],
     [

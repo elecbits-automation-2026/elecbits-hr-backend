@@ -519,6 +519,62 @@
       "when": 1793096215007,
       "tag": "0073_offer-approval-docs",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793702426733,
+      "tag": "0074_onboarding-task-files",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793859109146,
+      "tag": "0075_reimbursement-admin-step",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793859117119,
+      "tag": "0076_reimbursement-sheet-data",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793861270931,
+      "tag": "0077_remote-work-rm-only",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793864435385,
+      "tag": "0078_remove-whistleblower-laptop-passes",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1793867463676,
+      "tag": "0079_pip-starts-active",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1793869742433,
+      "tag": "0080_onboarding-task-note",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1793869744952,
+      "tag": "0081_onboarding-owner-ticks-data",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,18 @@ import { applicationSchema } from './candidates.schema.js';
 export const pendingOfferSchema = applicationSchema.openapi('PendingOffer');
 
 /**
+ * The HRBP handover (workflow deck step 16): a hired candidate not yet
+ * joined, or joined in the last 30 days, with what is still open.
+ */
+export const joinerSchema = applicationSchema
+  .extend({
+    recruiterName: z.string().nullable(),
+    /** Checklist items still asked of the candidate. */
+    pendingDocuments: z.array(z.string()),
+  })
+  .openapi('Joiner');
+
+/**
  * TA's draft of the offer after negotiation (workflow deck step 15): CTC,
  * joining date and any other terms. Changing approved terms reopens approval.
  */

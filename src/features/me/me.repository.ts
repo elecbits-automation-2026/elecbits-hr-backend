@@ -1,5 +1,6 @@
 import { and, desc, eq, ne, or } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
+import { ONBOARDING_AUTO_CREATE_WINDOW_DAYS } from '../../shared/constants/constants.js';
 import {
   assetCategories,
   assets,
@@ -112,6 +113,28 @@ export const createMeRepository = (db: DbClient) => ({
         ),
       )
       .orderBy(employees.name);
+  },
+
+  /**
+   * Onboarding is worth showing in the menu: my own journey is still open (or
+   * would auto-start — a recent joiner without one yet), or one of my reports'
+   * journeys is open (the RM's "My team" tab).
+   */
+  showOnboarding: async (employeeId: string): Promise<boolean> => {
+    const rows = await db.query<{ show: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM org.onboarding_journeys j
+                       WHERE j.employee_id = $1 AND j.status = 'open')
+           OR EXISTS (SELECT 1 FROM org.onboarding_journeys j
+                        JOIN org.employees e ON e.id = j.employee_id
+                       WHERE j.status = 'open' AND e.status <> 'inactive'
+                         AND coalesce(e.leave_approver, e.reports_to) = $1)
+           OR EXISTS (SELECT 1 FROM org.employees e
+                       WHERE e.id = $1 AND e.date_of_joining >= current_date - $2::int
+                         AND NOT EXISTS (SELECT 1 FROM org.onboarding_journeys j WHERE j.employee_id = e.id))
+           AS show`,
+      [employeeId, ONBOARDING_AUTO_CREATE_WINDOW_DAYS],
+    );
+    return rows[0]?.show ?? false;
   },
 
   /** True when anyone routes to this person as RM or leave approver. */

@@ -9,6 +9,7 @@ import { assignSeatSchema, vacateSeatSchema } from './seats.schema.js';
  * only — checked in the service (learner, 2026-10-26).
  *
  *   GET  /        -> 200 SeatsOverview   holders + empty seats
+ *   GET  /history -> 200 PastSeat[]      past holders, most recently ended first
  *   PUT  /        -> 200 Seat            assign / replace the holder
  *   POST /vacate  -> 204                 end the holder, seat left empty
  */
@@ -17,5 +18,6 @@ export const seatsRoutes = Router();
 seatsRoutes.use(authenticate);
 
 seatsRoutes.get('/', seatsController.overview);
+seatsRoutes.get('/history', seatsController.history);
 seatsRoutes.put('/', validateBody(assignSeatSchema), seatsController.assign);
 seatsRoutes.post('/vacate', validateBody(vacateSeatSchema), seatsController.vacate);

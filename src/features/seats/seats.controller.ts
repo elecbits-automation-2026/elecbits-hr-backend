@@ -16,6 +16,10 @@ export const seatsController = {
     res.json(await service(req).overview(actor(req)));
   },
 
+  history: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).history(actor(req)));
+  },
+
   assign: async (req: Request, res: Response): Promise<void> => {
     const input: AssignSeatInput = req.body;
     const seat = await service(req).assign(input, actor(req));

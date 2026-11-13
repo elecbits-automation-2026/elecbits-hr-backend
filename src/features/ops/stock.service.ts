@@ -105,7 +105,8 @@ export const createStockService = (deps: {
           throw createError(422, 'Who is it for?', { code: 'EMPLOYEE_REQUIRED' });
         }
         const e = await ops.employee(input.employeeId);
-        if (!e || e.status !== 'active') {
+        // Serving notice still counts (learner, 2026-11-05).
+        if (!e || (e.status !== 'active' && e.status !== 'exiting')) {
           throw createError(422, 'Pick an active employee', { code: 'NOT_ACTIVE' });
         }
         lines = [

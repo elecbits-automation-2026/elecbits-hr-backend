@@ -7,6 +7,7 @@ import {
   candidateDocumentSchema,
   endOfferSchema,
   folderLinkSchema,
+  joinerSchema,
   markHiredResultSchema,
   markHiredSchema,
   offerDraftSchema,
@@ -96,6 +97,17 @@ export const registerHireDocs = (registry: OpenAPIRegistry): void => {
   });
   registry.registerPath({
     method: 'get',
+    path: '/api/v1/hiring/joiners',
+    tags,
+    summary: 'HRBP handover: hired people not yet joined, and joiners of the last 30 days',
+    security,
+    responses: {
+      200: jsonResponse('Joiners', z.array(joinerSchema)),
+      403: errorResponse('Not in the HRBP batch'),
+    },
+  });
+  registry.registerPath({
+    method: 'get',
     path: '/api/v1/hiring/offers/pending',
     tags,
     summary: 'Offers waiting for my approval and signature (the HR Head)',
@@ -143,7 +155,8 @@ export const registerHireDocs = (registry: OpenAPIRegistry): void => {
     403: 'Not HRBP',
     409: 'Not hired, or before the joining date',
   });
-  call('post', '/applications/{id}/no-show', 'Did not join: deactivate the record, reopen the position', endOfferSchema, applicationSchema, {
+  call('post', '/applications/{id}/no-show', 'Did not join (TA or HRBP): deactivate the record, reopen the position', endOfferSchema, applicationSchema, {
+    403: 'Not TA for this position, nor HRBP',
     409: 'Already joined, or not hired',
   });
 };

@@ -856,7 +856,7 @@ export const createHiringService = (deps: {
     if ((await repo.taRmOptions(input.taRmId)).length === 0) {
       throw createError(
         422,
-        'A TA RM holds the TA batch and has at least one person reporting to them',
+        'A TA RM has the Hiring team role and at least one person reporting to them',
         { code: 'NOT_A_TA_RM' },
       );
     }
@@ -931,7 +931,7 @@ export const createHiringService = (deps: {
     if (!self && !recruiter.in_ta) {
       throw createError(
         422,
-        'Recruiters must be in the TA batch — Admin adds them in Access batches',
+        'Recruiters need the Hiring team role — Admin gives it in Roles & access',
         { code: 'NOT_IN_TA_BATCH' },
       );
     }

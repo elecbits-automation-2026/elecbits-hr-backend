@@ -11,6 +11,7 @@ import {
 } from '../../db/schema/index.js';
 import {
   EL_BALANCE_CAP,
+  SICK_CERT_AFTER_DAYS,
   accruedAllocation,
   type CappedLeaveType,
 } from '../../shared/constants/constants.js';
@@ -186,10 +187,10 @@ export const createLeavesRepository = (db: DbClient) => ({
           // A named leave approver JOINS the chain, never replaces the RM (user
           // decision): both see the queue and either may fill the RM slot.
           or(eq(employees.leaveApprover, rmId), eq(employees.reportsTo, rmId)),
-          // Menstrual leave is CONFIDENTIAL (policy §9.2): HR-only, so the RM
-          // queue never carries the row; the absence still shows on the team
-          // calendar as a generic leave day.
-          ne(leaveRequests.type, 'menstrual'),
+          // Menstrual leave the RM approves since 2026-11-05 is in the queue;
+          // older HR-only ones (rm_required = false) stay out of it. The team
+          // calendar still shows it as a generic leave day.
+          or(ne(leaveRequests.type, 'menstrual'), eq(leaveRequests.rmRequired, true)),
         ),
       )
       .orderBy(desc(leaveRequests.createdAt));
@@ -222,16 +223,16 @@ export const createLeavesRepository = (db: DbClient) => ({
       uploaded_at: Date | null;
     }>(
       `SELECT l.id, c.file_name, c.uploaded_at,
-              (l.type = 'sick' AND l.days >= 3 AND EXISTS (
+              (l.type = 'sick' AND (l.days > $2 OR (l.days >= 3 AND EXISTS (
                  SELECT 1 FROM org.exits x
                   WHERE x.employee_id = l.employee_id
                     AND x.status IN ('submitted','accepted','relieved','settled')
                     AND l.start_date >= x.notice_start_on
-                    AND l.start_date <= x.last_working_day)) AS needed
+                    AND l.start_date <= x.last_working_day)))) AS needed
          FROM org.leave_requests l
          LEFT JOIN org.leave_certificates c ON c.leave_id = l.id
         WHERE l.id = ANY($1::uuid[])`,
-      [ids],
+      [ids, SICK_CERT_AFTER_DAYS],
     );
     return new Map(
       rows.map((r) => [

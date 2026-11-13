@@ -206,17 +206,6 @@ export const createAssetsRepository = (db: DbClient) => ({
       return true;
     }),
 
-  /** Kit lines for a designation with how many of each category the person holds. */
-  kitCheck: (designation: string, employeeId: string) =>
-    db.query<{ category_id: string; category_name: string; qty: number; held: number }>(
-      `SELECT k.category_id, c.name AS category_name, k.qty,
-              (SELECT count(*)::int FROM ops.assets a
-                WHERE a.category_id = k.category_id AND a.holder_id = $2) AS held
-         FROM ops.asset_kits k JOIN ops.asset_categories c ON c.id = k.category_id
-        WHERE lower(k.designation) = lower($1)
-        ORDER BY c.name`,
-      [designation, employeeId],
-    ),
 });
 
 /**

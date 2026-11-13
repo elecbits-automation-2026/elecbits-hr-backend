@@ -16,11 +16,11 @@ import { payrollRuns } from './payroll.js';
 import { bytea } from './policies.js';
 
 /**
- * Reimbursement claims (refinement plan, Phase 3 — the approval trail behind
- * the payslip's Reimbursement line). The employee claims; the effective RM
- * approves, then Payroll. An approved claim is carried by the next payroll
- * draft (payslips.reimbursement is the sum of them, never typed) and is
- * marked paid, with the run, when that run finalizes.
+ * Reimbursement claims. The employee claims; PR approves, then the Admin
+ * account (learner, 2026-11-05). Approved claims are NOT on the payslip:
+ * they sit on the reimbursement sheet until PR pays them by bank transfer
+ * and marks them paid (date + reference). Claims paid by a payroll run
+ * before that change keep their `paid_run_id`; the RM columns are history.
  */
 export const reimbursementClaims = orgSchema.table(
   'reimbursement_claims',
@@ -40,8 +40,15 @@ export const reimbursementClaims = orgSchema.table(
     rmDecidedAt: timestamp('rm_decided_at', { withTimezone: true }),
     payrollDecidedBy: uuid('payroll_decided_by').references(() => employees.id),
     payrollDecidedAt: timestamp('payroll_decided_at', { withTimezone: true }),
+    adminDecidedBy: uuid('admin_decided_by').references(() => employees.id),
+    adminDecidedAt: timestamp('admin_decided_at', { withTimezone: true }),
     declineReason: text('decline_reason'),
     paidRunId: uuid('paid_run_id').references(() => payrollRuns.id),
+    // Paid from the sheet: the transfer date and the bank reference (UTR).
+    paidOn: date('paid_on'),
+    paymentRef: text('payment_ref'),
+    paidBy: uuid('paid_by').references(() => employees.id),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

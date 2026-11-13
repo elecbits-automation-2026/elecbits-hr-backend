@@ -136,6 +136,10 @@ export const hireController = {
     res.json(await service(req).submitOffer(req.params.id!, actor(req)));
   },
 
+  joiners: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).joiners(actor(req)));
+  },
+
   pendingOffers: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).pendingOffers(req.auth!.employeeId));
   },

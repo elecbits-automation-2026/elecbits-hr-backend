@@ -8,14 +8,6 @@ export const pipTargetSchema = z.object({
   measure: z.string().trim().min(3).max(500),
 });
 
-export const pipCheckinSchema = z.object({
-  id: z.string().uuid(),
-  on: z.string(),
-  rating: z.enum(['on_track', 'at_risk', 'off_track']),
-  note: z.string(),
-  by: ref,
-});
-
 export const pipSchema = z
   .object({
     id: z.string().uuid(),
@@ -26,6 +18,7 @@ export const pipSchema = z
       designation: z.string().nullable(),
     }),
     rm: ref,
+    // `pending_hr` is history only — PIPs start active since 2026-11-05.
     status: z.enum(['pending_hr', 'active', 'passed', 'not_passed', 'cancelled']),
     reason: z.string(),
     targets: z.array(pipTargetSchema),
@@ -33,20 +26,10 @@ export const pipSchema = z
     startOn: z.string(),
     endOn: z.string(),
     extended: z.boolean(),
-    hrBy: ref.nullable(),
-    hrAt: z.string().datetime().nullable(),
-    hrNote: z.string().nullable(),
-    acknowledgedAt: z.string().datetime().nullable(),
     outcomeNote: z.string().nullable(),
     outcomeBy: ref.nullable(),
     outcomeAt: z.string().datetime().nullable(),
-    checkins: z.array(pipCheckinSchema),
-    // When the next fortnightly check-in is due (active only).
-    nextCheckinOn: z.string().nullable(),
     can: z.object({
-      decide: z.boolean(),
-      acknowledge: z.boolean(),
-      checkin: z.boolean(),
       outcome: z.boolean(),
       cancel: z.boolean(),
     }),
@@ -54,7 +37,7 @@ export const pipSchema = z
   })
   .openapi('Pip');
 
-/** The RM opens a PIP — targets, support, a start date (60 days). */
+/** The RM opens a PIP — targets, support, a start date; it runs 60 days. */
 export const createPipSchema = z
   .object({
     employeeId: z.string().uuid(),
@@ -65,22 +48,6 @@ export const createPipSchema = z
   })
   .strict()
   .openapi('CreatePip');
-
-export const decidePipSchema = z
-  .object({
-    approve: z.boolean(),
-    note: z.string().trim().max(2000).optional(),
-  })
-  .strict()
-  .openapi('DecidePip');
-
-export const createCheckinSchema = z
-  .object({
-    rating: z.enum(['on_track', 'at_risk', 'off_track']),
-    note: z.string().trim().min(5).max(3000),
-  })
-  .strict()
-  .openapi('PipCheckin');
 
 /** At the end: passed, one 30-day extension, or not passed. */
 export const pipOutcomeSchema = z
@@ -98,7 +65,5 @@ export const cancelPipSchema = z
 
 export type PipDto = z.infer<typeof pipSchema>;
 export type CreatePipInput = z.infer<typeof createPipSchema>;
-export type DecidePipInput = z.infer<typeof decidePipSchema>;
-export type CreateCheckinInput = z.infer<typeof createCheckinSchema>;
 export type PipOutcomeInput = z.infer<typeof pipOutcomeSchema>;
 export type CancelPipInput = z.infer<typeof cancelPipSchema>;

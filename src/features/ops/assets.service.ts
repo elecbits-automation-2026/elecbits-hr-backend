@@ -13,7 +13,6 @@ import {
   type ImportAssetsInput,
   type ImportResultDto,
   type IssueAssetInput,
-  type KitCheckDto,
   type MoveAssetInput,
   type ReportIncidentInput,
   type ReturnAssetInput,
@@ -92,7 +91,9 @@ export const createAssetsService = (deps: {
   const liveEmployee = async (id: string) => {
     const e = await ops.employee(id);
     if (!e) throw createError(404, 'Employee not found', { code: 'EMPLOYEE_NOT_FOUND' });
-    if (e.status !== 'active') {
+    // People serving notice ('exiting') can still be given assets (learner,
+    // 2026-11-05); the exit clearance lists whatever they hold.
+    if (e.status !== 'active' && e.status !== 'exiting') {
       throw createError(422, `${e.name} is not an active employee`, {
         code: 'NOT_ACTIVE',
       });
@@ -189,23 +190,6 @@ export const createAssetsService = (deps: {
       events: events.map(toEvent),
       incidents: incidents.map(toIncident),
       passes: passes.map(toPassSummary),
-    };
-  };
-
-  /** A joiner's kit against what they already hold (person sheet, OPS only). */
-  const kitCheck = async (employeeId: string): Promise<KitCheckDto> => {
-    const e = await ops.employee(employeeId);
-    if (!e) throw createError(404, 'Employee not found', { code: 'EMPLOYEE_NOT_FOUND' });
-    if (!e.designation) return { designation: null, items: [] };
-    const rows = await repo.kitCheck(e.designation, employeeId);
-    return {
-      designation: e.designation,
-      items: rows.map((r) => ({
-        categoryId: r.category_id,
-        categoryName: r.category_name,
-        qty: r.qty,
-        held: r.held,
-      })),
     };
   };
 
@@ -803,7 +787,6 @@ export const createAssetsService = (deps: {
     options,
     list,
     detail,
-    kitCheck,
     create,
     importRows,
     update,

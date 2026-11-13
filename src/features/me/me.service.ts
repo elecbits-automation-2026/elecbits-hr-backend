@@ -56,6 +56,7 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       seats,
       hiringApprover,
       hasInterviews,
+      showOnboarding,
     ] = await Promise.all([
       repo.listBatchNames(employeeId),
       repo.isOwner(employeeId),
@@ -74,6 +75,7 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       repo.openSeats(employeeId),
       repo.isHiringApprover(employeeId),
       repo.hasInterviews(employeeId),
+      repo.showOnboarding(employeeId),
     ]);
     return {
       id: employee.id,
@@ -120,6 +122,7 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       seats,
       hiringApprover,
       hasInterviews,
+      showOnboarding,
     };
   };
 

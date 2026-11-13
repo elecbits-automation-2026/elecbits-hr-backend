@@ -108,6 +108,79 @@ export const createHiringJobsRepository = (db: DbClient) => ({
     });
   },
 
+  // ── Reminders (workflow deck: overdue actions, tomorrow's interviews) ───
+
+  /**
+   * Live applications whose next action is past due and whose owner hasn't
+   * had a bell for THIS due date (`kind` = next_action_due:<due>), so moving
+   * the date re-arms the reminder.
+   */
+  overdueActions: (today: string) =>
+    db.query<{
+      application_id: string;
+      owner_id: string;
+      next_action: string;
+      due: string;
+      candidate_name: string;
+      role_title: string;
+    }>(
+      `SELECT a.id AS application_id, a.next_action_owner_id AS owner_id, a.next_action,
+              a.next_action_due::text AS due, c.name AS candidate_name, r.role_title
+         FROM ta.applications a
+         JOIN ta.candidates c ON c.id = a.candidate_id
+         JOIN ta.positions p ON p.id = a.position_id
+         JOIN ta.requisitions r ON r.id = p.requisition_id
+         JOIN org.employees e ON e.id = a.next_action_owner_id AND e.status = 'active'
+        WHERE a.next_action IS NOT NULL AND a.next_action_due < $1::date
+          AND a.stage NOT IN ('rejected', 'withdrawn', 'offer_declined', 'offer_withdrawn',
+                              'no_show', 'joined')
+          AND NOT EXISTS (SELECT 1 FROM ops.reminders_sent s
+                           WHERE s.kind = 'next_action_due:' || a.next_action_due::text
+                             AND s.subject_id = a.id AND s.recipient_id = a.next_action_owner_id)`,
+      [today],
+    ),
+
+  /**
+   * Scheduled interview slots in the coming week (the service picks the
+   * ones on the next working day), not yet reminded for that start (`kind` = interview_soon:<starts_at>),
+   * so a rescheduled slot is reminded again.
+   */
+  upcomingSlots: () =>
+    db.query<{
+      slot_id: string;
+      interviewer_id: string;
+      starts_at: Date;
+      round: string;
+      mode: 'in_person' | 'video' | 'phone';
+      location: string | null;
+      candidate_name: string;
+      role_title: string;
+    }>(
+      `SELECT s.id AS slot_id, s.interviewer_id, s.starts_at, s.round::text AS round, s.mode::text AS mode,
+              s.location, c.name AS candidate_name, r.role_title
+         FROM ta.interview_slots s
+         JOIN ta.applications a ON a.id = s.application_id
+         JOIN ta.candidates c ON c.id = a.candidate_id
+         JOIN ta.positions p ON p.id = a.position_id
+         JOIN ta.requisitions r ON r.id = p.requisition_id
+        WHERE s.status = 'scheduled'
+          AND s.starts_at > now() AND s.starts_at < now() + interval '8 days'
+          AND NOT EXISTS (SELECT 1 FROM ops.reminders_sent x
+                           WHERE x.kind = 'interview_soon:' || to_char(s.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI')
+                             AND x.subject_id = s.id AND x.recipient_id = s.interviewer_id)
+        ORDER BY s.starts_at`,
+    ),
+
+  holidaysBetween: async (from: string, to: string): Promise<Set<string>> =>
+    new Set(
+      (
+        await db.query<{ date: string }>(
+          `SELECT date::text AS date FROM org.holidays WHERE date BETWEEN $1 AND $2`,
+          [from, to],
+        )
+      ).map((r) => r.date),
+    ),
+
   // ── Talent-pool retention ───────────────────────────────────────────────
 
   /**

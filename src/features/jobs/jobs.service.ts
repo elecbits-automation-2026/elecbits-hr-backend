@@ -2,6 +2,7 @@ import createError from 'http-errors';
 import { env } from '../../config/env.js';
 import {
   APPROVAL_REMINDERS,
+  REIMBURSEMENT_DIGEST_DAY,
   RETURN_REMINDERS,
 } from '../../shared/constants/constants.js';
 import {
@@ -145,18 +146,17 @@ export const createJobsService = (deps: {
       );
     }
 
+    // Remote work waits on the RM only (learner, 2026-11-05); HR decides
+    // only for someone with no RM at all.
     for (const w of await repo.pendingRemoteWork()) {
-      const approvers = [
-        ...(w.rm_open && w.effective_rm
+      const approvers = w.effective_rm
+        ? w.rm_open
           ? [{ id: w.effective_rm, link: '/team-attendance' }]
-          : []),
-        ...(w.hr_open
-          ? (await holders('hrbp.attendance', 'update', w.employee_id)).map((id) => ({
-              id,
-              link: '/hr/attendance',
-            }))
-          : []),
-      ];
+          : []
+        : (await holders('hrbp.attendance', 'update', w.employee_id)).map((id) => ({
+            id,
+            link: '/hr/attendance',
+          }));
       consider(
         'remote_work',
         w.id,
@@ -180,27 +180,6 @@ export const createJobsService = (deps: {
         r.employee_id,
         r.since,
         `${r.name}'s attendance fix for ${r.date}`,
-        approvers,
-      );
-    }
-
-    for (const c of await repo.pendingReimbursements()) {
-      const amount = `₹${Number(c.amount).toLocaleString('en-IN')}`;
-      const approvers =
-        c.status === 'pending_rm'
-          ? c.effective_rm
-            ? [{ id: c.effective_rm, link: '/reimbursements' }]
-            : []
-          : (await holders('pr.payroll', 'update')).map((id) => ({
-              id,
-              link: '/hr/payroll',
-            }));
-      consider(
-        'reimbursement',
-        c.id,
-        c.employee_id,
-        c.since,
-        `${c.name}'s ${amount} claim`,
         approvers,
       );
     }
@@ -431,6 +410,44 @@ export const createJobsService = (deps: {
     return { overdue: items.length, asked, escalated, bells: out.length };
   };
 
+  /**
+   * reimbursement-digest: claims are approved once a month, so instead of a
+   * bell per claim PR and the Admin account get ONE bell a month, on
+   * REIMBURSEMENT_DIGEST_DAY (or the first working day after it), saying
+   * what waits for them. Nothing to the claimants.
+   */
+  const reimbursementDigest = async (now: Date): Promise<Record<string, number>> => {
+    const today = localDate(now);
+    if (Number(today.slice(8, 10)) < REIMBURSEMENT_DIGEST_DAY) return { sent: 0 };
+    const kind = `reimbursement_digest:${today.slice(0, 7)}`;
+    const [counts, last, pr, owner] = await Promise.all([
+      repo.reimbursementCounts(),
+      repo.lastReminders(),
+      authz.listBroadHolders('pr.payroll', 'update'),
+      authz.ownerId(),
+    ]);
+    const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const toPay =
+      counts.approved > 0
+        ? ` · ${counts.approved} approved (${money(counts.approvedTotal)}) to pay`
+        : '';
+    const out: ReminderToSend[] = [];
+    const add = (id: string, waiting: number, link: string) => {
+      if (last.has(`${kind}:${id}:${id}`)) return;
+      out.push({
+        kind,
+        subjectId: id,
+        recipientId: id,
+        title: `Reimbursements this month: ${waiting} claim${waiting === 1 ? '' : 's'} waiting for you${toPay}`,
+        link,
+      });
+    };
+    for (const id of pr) add(id, counts.pendingPr, '/hr/payroll?tab=reimbursements');
+    if (owner) add(owner, counts.pendingPr + counts.pendingAdmin, '/admin/reimbursements');
+    await repo.sendReminders(out);
+    return { sent: out.length, pendingPr: counts.pendingPr, pendingAdmin: counts.pendingAdmin };
+  };
+
   /** Registry: what each job is, when it is due, and what one run does. */
   const JOBS: Record<
     string,
@@ -445,6 +462,11 @@ export const createJobsService = (deps: {
         'Rings approvers whose requests have waited past the reminder setting.',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: approvalReminders,
+    },
+    'reimbursement-digest': {
+      description: `On the ${REIMBURSEMENT_DIGEST_DAY}th of each month (or the first working day after), one bell to PR and the Admin account: claims waiting for them and approved claims to pay.`,
+      schedule: `Monthly from the ${REIMBURSEMENT_DIGEST_DAY}th at ${env.scheduler.dailyAt}`,
+      run: reimbursementDigest,
     },
     'concern-deadlines': {
       description: 'Rings the handlers of concerns past their deadline.',
@@ -471,7 +493,7 @@ export const createJobsService = (deps: {
     },
     pip: {
       description:
-        'Rings the RM when a fortnightly PIP check-in is due, and the RM + HR once a PIP has ended without an outcome.',
+        'Rings the RM + HR once a PIP has ended without an outcome (every 2 working days until it is recorded).',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => pip.daily(now),
     },
@@ -486,6 +508,12 @@ export const createJobsService = (deps: {
         'Before each quarter, reminds department heads (once) to add their hiring needs by the deadline; after it, sends every submitted line to the HR head and Admin together and moves leftover drafts to the next quarter (setting hiring.planWindow).',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => hiring.planWindow(now),
+    },
+    'hiring-reminders': {
+      description:
+        "Rings, once each: a next action's owner when it passes its due date, and each interviewer the working day before their interview (with time, mode and link).",
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => hiring.reminders(now),
     },
     'talent-pool-retention': {
       description:
@@ -566,6 +594,7 @@ export const createJobsService = (deps: {
     runs,
     runNow,
     approvalReminders,
+    reimbursementDigest,
     concernDeadlines,
     returnReminders,
   };

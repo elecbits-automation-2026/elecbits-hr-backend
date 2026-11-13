@@ -17,11 +17,11 @@ import {
 /**
  * Concerns (Batch 4) — mounted at /api/v1/concerns.
  *
- *   POST /                    raise (dispute | complaint | whistleblower)
+ *   POST /                    raise (dispute | complaint)
  *   GET  /mine                own named cases
  *   GET  /people              colleagues a concern can be about (not the caller)
  *   GET  /queues              the caller's queues with open/overdue counts
- *   GET  /queue/:queue        manager | hr | mrc | vigil
+ *   GET  /queue/:queue        manager | hr | mrc
  *   GET  /:id                 raiser view or handler view (else 404)
  *   POST /:id/notes           raiser note, or handler note / reply
  *   POST /:id/acknowledge | /decide | /resolve | /extend | /decline   handlers
