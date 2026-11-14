@@ -1,8 +1,9 @@
 import PDFDocument from 'pdfkit';
+import { drawLetterhead, type Letterhead } from '../../shared/helpers/letterhead.js';
 
 export interface ExitLetterInput {
   which: 'relieving' | 'experience';
-  company: { name: string; address: string };
+  company: Letterhead;
   employee: {
     name: string;
     employeeCode: string;
@@ -25,7 +26,7 @@ const longDate = (iso: string) =>
 
 /**
  * Relieving and experience letters (exit module, always issued once the F&F
- * is settled). Plain A4 on the payslip header's company name and address;
+ * is settled). Plain A4 on the payslip header's name, address and logo;
  * worded without pronouns so they fit anyone.
  */
 export const renderExitLetter = (input: ExitLetterInput): Promise<Buffer> =>
@@ -44,25 +45,7 @@ export const renderExitLetter = (input: ExitLetterInput): Promise<Buffer> =>
     const left = 56;
     const width = doc.page.width - 112;
 
-    doc
-      .fillColor(ink)
-      .font('Helvetica-Bold')
-      .fontSize(16)
-      .text(input.company.name, left, 56);
-    if (input.company.address) {
-      doc
-        .font('Helvetica')
-        .fontSize(9)
-        .fillColor(muted)
-        .text(input.company.address, { width });
-    }
-    doc.moveDown(1.5);
-    doc
-      .moveTo(left, doc.y)
-      .lineTo(left + width, doc.y)
-      .strokeColor('#cbd5e1')
-      .stroke();
-    doc.moveDown(1.2);
+    drawLetterhead(doc, input.company, left, width);
 
     doc
       .font('Helvetica')

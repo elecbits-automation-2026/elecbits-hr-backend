@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import { AWARD_TYPES } from '../../shared/constants/constants.js';
+import { AWARD_TYPES, REIMBURSEMENT_DIGEST_DAY } from '../../shared/constants/constants.js';
 import { z } from '../../shared/zod.js';
 
 /**
@@ -51,6 +51,23 @@ export const SATURDAY_PATTERNS = ['all_working', 'all_off', 'first_third_off'] a
 
 /** Leave types payroll may draw on to cover unmarked absence, in order. */
 export const AUTO_COVER_LEAVE_TYPES = ['earned', 'sick'] as const;
+
+/** Largest payslip logo, decoded — the JSON body limit is 100 KB and base64 adds a third. */
+export const LOGO_MAX_BYTES = 60 * 1024;
+
+/**
+ * A small PNG / JPEG as a data URL. The bytes must really be that image type
+ * (magic number), not just claim it — pdfkit draws only these two.
+ */
+const logoDataUrl = z
+  .string()
+  .regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/, 'Logo must be a PNG or JPEG image')
+  .refine((v) => {
+    const data = Buffer.from(v.slice(v.indexOf(',') + 1), 'base64');
+    const png = data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const jpg = data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+    return (png || jpg) && data.length <= LOGO_MAX_BYTES;
+  }, `Logo must be a real PNG or JPEG under ${LOGO_MAX_BYTES / 1024} KB`);
 
 const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const toMin = (hm: string): number => {
@@ -142,17 +159,28 @@ const definitions = {
       }),
     default: { halfDayBelowHours: 4, shortDayBelowHours: 8, effectiveFrom: '2026-11-01' },
   },
+  'attendance.maxLocationErrorM': {
+    area: 'attendance',
+    live: true,
+    label: 'Check-in location accuracy (metres)',
+    description:
+      'A check-in whose location is less accurate than this is refused with "turn on GPS and try again" (phones with GPS get 5–30 m; laptops often 100 m+). 0 = accept any accuracy. A remote-work request for the day skips the check.',
+    schema: z.number().int().min(0).max(5000),
+    default: 100 as number,
+  },
   'payroll.payslipHeader': {
     area: 'payroll',
     live: true,
     label: 'Payslip header',
     description:
-      'The company name and address printed at the top of every payslip PDF. Changing it changes downloads of past payslips too — the numbers never change.',
+      'The company name, address and logo (PNG or JPEG, up to 60 KB) printed at the top of every payslip PDF. Changing it changes downloads of past payslips too — the numbers never change.',
     schema: z.object({
       companyName: z.string().trim().min(2).max(120),
       address: z.string().trim().max(300),
+      /** Optional; printed at the left of the header band (learner, 2026-11-14). */
+      logo: logoDataUrl.nullable().default(null),
     }),
-    default: { companyName: 'Elecbits', address: '' },
+    default: { companyName: 'Elecbits', address: '', logo: null as string | null },
   },
   'payroll.ptStates': {
     area: 'payroll',
@@ -198,6 +226,15 @@ const definitions = {
       'When payroll is generated, requests still half-approved (one of RM/HR) for the month count as approved. Turn one off and those requests must be decided before the month can be finalized.',
     schema: z.object({ leaves: z.boolean(), remote: z.boolean() }),
     default: { leaves: true, remote: true },
+  },
+  'payroll.reimbursementDigestDay': {
+    area: 'payroll',
+    live: true,
+    label: 'Reimbursement digest day',
+    description:
+      'Day of the month (1–28) when PR and the Admin account get one bell with the claims waiting for them and the approved claims to pay. On a weekend or holiday it goes on the next working day.',
+    schema: z.number().int().min(1).max(28),
+    default: REIMBURSEMENT_DIGEST_DAY as number,
   },
   'payroll.autoCoverLeaveTypes': {
     area: 'payroll',

@@ -126,6 +126,12 @@ export const updateSalarySchema = z
     salaryCurrency: z.string().min(3).max(3).optional(),
     salaryMode: z.string().nullable().optional(),
     panNumber: z.string().nullable().optional(),
+    uanNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{12}$/, 'UAN is 12 digits')
+      .nullable()
+      .optional(),
     providentFundAccount: z.string().nullable().optional(),
     employeeAdvanceAccount: z.string().nullable().optional(),
     bankName: z.string().nullable().optional(),

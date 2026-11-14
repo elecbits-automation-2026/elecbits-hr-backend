@@ -21,6 +21,8 @@ export const employeeSalary = orgSchema.table('employee_salary', {
   // Bank / Cash / Cheque — free text like the other presentation lists.
   salaryMode: text('salary_mode'),
   panNumber: text('pan_number'),
+  // Universal Account Number (EPFO) — printed in full on the payslip.
+  uanNumber: text('uan_number'),
   providentFundAccount: text('provident_fund_account'),
   employeeAdvanceAccount: text('employee_advance_account'),
 

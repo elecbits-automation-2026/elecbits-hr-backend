@@ -1,0 +1,1 @@
+ALTER TABLE "org"."employee_salary" ADD COLUMN "uan_number" text;

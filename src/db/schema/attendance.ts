@@ -43,6 +43,10 @@ export const attendance = orgSchema.table(
     checkInLng: numeric('check_in_lng', { precision: 9, scale: 6 }),
     checkOutLat: numeric('check_out_lat', { precision: 9, scale: 6 }),
     checkOutLng: numeric('check_out_lng', { precision: 9, scale: 6 }),
+    // The browser's own error radius for each fix, whole metres (learner,
+    // 2026-11-14) — shows how much a punch's location can be trusted.
+    checkInAccuracyM: integer('check_in_accuracy_m'),
+    checkOutAccuracyM: integer('check_out_accuracy_m'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

@@ -83,7 +83,7 @@ export const createAttendanceRepository = (db: DbClient) => ({
     id: string,
     checkOutAt: Date,
     checkOutIp: string | null,
-    coords: { lat: number; lng: number } | null,
+    coords: { lat: number; lng: number; accuracyM?: number } | null,
   ) => {
     const rows = await db.orm
       .update(attendance)
@@ -92,6 +92,8 @@ export const createAttendanceRepository = (db: DbClient) => ({
         checkOutIp,
         checkOutLat: coords ? String(coords.lat) : null,
         checkOutLng: coords ? String(coords.lng) : null,
+        checkOutAccuracyM:
+          coords?.accuracyM !== undefined ? Math.round(coords.accuracyM) : null,
       })
       .where(eq(attendance.id, id))
       .returning();

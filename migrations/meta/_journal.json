@@ -575,6 +575,27 @@
       "when": 1793869744952,
       "tag": "0081_onboarding-owner-ticks-data",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1794649692238,
+      "tag": "0082_salary-uan",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794649742863,
+      "tag": "0083_salary-uan-backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794650543162,
+      "tag": "0084_punch-accuracy",
+      "breakpoints": true
     }
   ]
 }

@@ -828,7 +828,7 @@ export const createExitsService = (deps: {
     const header = await settings.effective('payroll.payslipHeader');
     const pdf = await renderExitLetter({
       which,
-      company: { name: header.companyName, address: header.address },
+      company: { name: header.companyName, address: header.address, logo: header.logo },
       employee: dto.employee,
       kind: x.kind,
       noticeStartOn: x.noticeStartOn,

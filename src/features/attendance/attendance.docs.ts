@@ -37,6 +37,9 @@ export const registerAttendanceDocs = (registry: OpenAPIRegistry): void => {
       401: errorResponse('Not authenticated'),
       403: errorResponse('Outside office range without an approved remote-work request'),
       409: errorResponse('Already checked in'),
+      422: errorResponse(
+        'LOCATION_TOO_VAGUE — the fix is less accurate than attendance.maxLocationErrorM',
+      ),
     },
   });
 

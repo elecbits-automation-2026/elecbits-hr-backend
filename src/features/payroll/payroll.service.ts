@@ -1471,7 +1471,7 @@ export const createPayrollService = (deps: {
       settings.effective('payroll.payslipHeader'),
     ]);
     const file = await renderPayslipPdf({
-      company: { name: company.companyName, address: company.address },
+      company: { name: company.companyName, address: company.address, logo: company.logo },
       month,
       runStatus,
       employee: {
@@ -1481,6 +1481,7 @@ export const createPayrollService = (deps: {
         department: header?.department ?? null,
         dateOfJoining: header?.dateOfJoining ?? null,
         panLast4: header?.panLast4 ?? null,
+        uan: header?.uan ?? null,
         bankName: header?.bankName ?? null,
         accountLast4: header?.accountLast4 ?? null,
       },

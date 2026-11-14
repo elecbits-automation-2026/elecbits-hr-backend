@@ -15,12 +15,23 @@ import {
   accruedAllocation,
   type CappedLeaveType,
 } from '../../shared/constants/constants.js';
+import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 
 /** Who performed the mutation — for the audit row (§10). */
 export interface ActorContext {
   actorUserId: string;
   actorEmployeeId: string;
 }
+
+/** A bell written in the same transaction as the change it announces. */
+export interface LeaveBell {
+  to: string[];
+  event: NotificationEvent;
+}
+
+const ring = async (tx: DbClient, bells: LeaveBell[]) => {
+  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+};
 
 export type LeaveRequestRow = typeof leaveRequests.$inferSelect;
 
@@ -489,10 +500,11 @@ export const createLeavesRepository = (db: DbClient) => ({
     return Number(rows[0]?.total ?? 0);
   },
 
-  /** Raise + audit, one transaction (§10). Audit detail never carries the reason. */
+  /** Raise + audit + bells, one transaction (§10). Audit detail never carries the reason. */
   insertRequest: async (
     values: typeof leaveRequests.$inferInsert,
     actor: ActorContext,
+    bells: LeaveBell[] = [],
   ): Promise<LeaveRequestRow> => {
     return db.transaction(async (tx) => {
       const rows = await tx.orm.insert(leaveRequests).values(values).returning();
@@ -508,6 +520,7 @@ export const createLeavesRepository = (db: DbClient) => ({
           days: row.days,
         }),
       });
+      await ring(tx, bells);
       return row;
     });
   },
@@ -575,6 +588,7 @@ export const createLeavesRepository = (db: DbClient) => ({
       rmApprovedBy: string | null;
       hrApprovedBy: string | null;
     },
+    bells: LeaveBell[] = [],
   ): Promise<LeaveRequestRow> => {
     return db.transaction(async (tx) => {
       const rows = await tx.orm
@@ -605,6 +619,7 @@ export const createLeavesRepository = (db: DbClient) => ({
         subject: `leave_requests:${id}`,
         detail: JSON.stringify(audit.detail),
       });
+      await ring(tx, bells);
       return row;
     });
   },

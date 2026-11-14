@@ -668,6 +668,7 @@ export const createPayrollRepository = (db: DbClient) => ({
         department: departments.name,
         dateOfJoining: employees.dateOfJoining,
         panLast4: sql<string | null>`right(${employeeSalary.panNumber}, 4)`,
+        uan: employeeSalary.uanNumber,
         bankName: employeeSalary.bankName,
         accountLast4: sql<string | null>`right(${employeeSalary.bankAccountNo}, 4)`,
       })
