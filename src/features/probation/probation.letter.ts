@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { drawLetterhead, type Letterhead } from '../../shared/helpers/letterhead.js';
 
 const longDate = (iso: string) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', {
@@ -12,7 +13,7 @@ const longDate = (iso: string) =>
  * Same look as the exit letters; worded without pronouns.
  */
 export const renderConfirmationLetter = (input: {
-  company: { name: string; address: string };
+  company: Letterhead;
   employee: {
     name: string;
     employeeCode: string;
@@ -38,25 +39,7 @@ export const renderConfirmationLetter = (input: {
     const left = 56;
     const width = doc.page.width - 112;
 
-    doc
-      .fillColor(ink)
-      .font('Helvetica-Bold')
-      .fontSize(16)
-      .text(input.company.name, left, 56);
-    if (input.company.address) {
-      doc
-        .font('Helvetica')
-        .fontSize(9)
-        .fillColor(muted)
-        .text(input.company.address, { width });
-    }
-    doc.moveDown(1.5);
-    doc
-      .moveTo(left, doc.y)
-      .lineTo(left + width, doc.y)
-      .strokeColor('#cbd5e1')
-      .stroke();
-    doc.moveDown(1.2);
+    drawLetterhead(doc, input.company, left, width);
     doc
       .font('Helvetica')
       .fontSize(10)

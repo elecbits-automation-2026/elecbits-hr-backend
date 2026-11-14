@@ -149,6 +149,7 @@ export const salarySchema = z
     salaryCurrency: z.string(),
     salaryMode: z.string().nullable(),
     panNumber: z.string().nullable(),
+    uanNumber: z.string().nullable(),
     providentFundAccount: z.string().nullable(),
     employeeAdvanceAccount: z.string().nullable(),
     bankName: z.string().nullable(),

@@ -284,7 +284,7 @@ export const createProbationService = (deps: {
     }
     const header = await settings.effective('payroll.payslipHeader');
     const pdf = await renderConfirmationLetter({
-      company: { name: header.companyName, address: header.address },
+      company: { name: header.companyName, address: header.address, logo: header.logo },
       employee: dto.employee,
       confirmedOn: r.decidedAt ? localDateOf(r.decidedAt) : r.dueOn,
     });

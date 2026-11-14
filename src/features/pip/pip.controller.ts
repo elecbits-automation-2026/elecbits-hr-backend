@@ -4,14 +4,8 @@ import type { DbClient } from '../../db/client.js';
 import { isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
 import { createSettingsRepository } from '../settings/index.js';
-import { createPipRepository } from './pip.whats repository.js';
-import type {
-  CancelPipInput,
-  CreateCheckinInput,
-  CreatePipInput,
-  DecidePipInput,
-  PipOutcomeInput,
-} from './pip.schema.js';
+import { createPipRepository } from './pip.repository.js';
+import type { CancelPipInput, CreatePipInput, PipOutcomeInput } from './pip.schema.js';
 import { createPipService } from './pip.service.js';
 
 /** Composition root (also used by the scheduler). */
@@ -43,20 +37,17 @@ export const pipController = {
   get: async (req: Request, res: Response): Promise<void> => {
     res.json(await pipServiceFor(req.db).get(id(req), actor(req).actorEmployeeId));
   },
+  canStart: async (req: Request, res: Response): Promise<void> => {
+    if (!isUuid(req.params.employeeId)) throw createError(400, 'Invalid id');
+    const canStart = await pipServiceFor(req.db).canStart(
+      req.params.employeeId,
+      actor(req).actorEmployeeId,
+    );
+    res.json({ canStart });
+  },
   create: async (req: Request, res: Response): Promise<void> => {
     const input: CreatePipInput = req.body;
     res.status(201).json(await pipServiceFor(req.db).create(input, actor(req)));
-  },
-  decide: async (req: Request, res: Response): Promise<void> => {
-    const input: DecidePipInput = req.body;
-    res.json(await pipServiceFor(req.db).decide(id(req), input, actor(req)));
-  },
-  acknowledge: async (req: Request, res: Response): Promise<void> => {
-    res.json(await pipServiceFor(req.db).acknowledge(id(req), actor(req)));
-  },
-  checkin: async (req: Request, res: Response): Promise<void> => {
-    const input: CreateCheckinInput = req.body;
-    res.status(201).json(await pipServiceFor(req.db).checkin(id(req), input, actor(req)));
   },
   outcome: async (req: Request, res: Response): Promise<void> => {
     const input: PipOutcomeInput = req.body;

@@ -45,6 +45,9 @@ export const attendanceDaySchema = z
     // Null when there is no corresponding punch.
     checkInTiming: z.enum(CHECK_IN_TIMINGS).nullable(),
     checkOutTiming: z.enum(CHECK_OUT_TIMINGS).nullable(),
+    /** The punch fixes' accuracy in metres; null without a punch or a fix. */
+    checkInAccuracyM: z.number().int().nullable(),
+    checkOutAccuracyM: z.number().int().nullable(),
   })
   .openapi('AttendanceDay');
 
@@ -150,12 +153,15 @@ export const createZoneSchema = z
  * policy decides the rest: inside an office zone (or covered by an approved
  * remote request) punches; otherwise the punch is REJECTED with 403
  * OUT_OF_OFFICE_RANGE — a denied/unavailable location only passes when a
- * remote request covers the day.
+ * remote request covers the day. `accuracyM` is the browser's own error
+ * radius; a check-in fix vaguer than attendance.maxLocationErrorM is refused
+ * (422 LOCATION_TOO_VAGUE) unless remote work covers the day.
  */
 export const punchSchema = z
   .object({
     lat: z.number().min(-90).max(90).optional(),
     lng: z.number().min(-180).max(180).optional(),
+    accuracyM: z.number().nonnegative().max(1_000_000).optional(),
   })
   .strict()
   .openapi('Punch');

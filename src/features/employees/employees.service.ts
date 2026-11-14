@@ -392,6 +392,7 @@ export const createEmployeesService = (deps: {
     salaryCurrency: row?.salaryCurrency ?? 'INR',
     salaryMode: row?.salaryMode ?? null,
     panNumber: row?.panNumber ?? null,
+    uanNumber: row?.uanNumber ?? null,
     providentFundAccount: row?.providentFundAccount ?? null,
     employeeAdvanceAccount: row?.employeeAdvanceAccount ?? null,
     bankName: row?.bankName ?? null,

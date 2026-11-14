@@ -26,10 +26,15 @@ import type {
 } from './leaves.schema.js';
 import type {
   ActorContext,
+  LeaveBell,
   LeaveRequestJoinedRow,
   LeaveRequestRow,
   LeavesRepository,
 } from './leaves.repository.js';
+
+/** "2026-11-20" or "2026-11-20 – 2026-11-22". The type is never named in a bell (menstrual is confidential). */
+const dateRange = (row: { startDate: string; endDate: string }) =>
+  row.startDate === row.endDate ? row.startDate : `${row.startDate} – ${row.endDate}`;
 
 const isCapped = (type: LeaveRequestRow['type']): type is CappedLeaveType =>
   (CAPPED_LEAVE_TYPES as readonly string[]).includes(type);
@@ -412,6 +417,22 @@ export const createLeavesService = (deps: {
     // show it as a generic leave day.
     if (input.type === 'menstrual') hrRequired = true;
 
+    // Bells to whoever must approve (learner, 2026-11-14) — the same people the
+    // approval-reminders job chases later, never the requester.
+    const rmId = rmRequired ? (me.leaveApprover ?? me.reportsTo) : null;
+    const hrIds = hrRequired
+      ? (await authz.listBroadHolders('hrbp.leaves', 'update', employeeId)).filter(
+          (x) => x !== employeeId && x !== rmId,
+        )
+      : [];
+    const title = `${me.name} asked for leave (${dateRange(input)})`;
+    const bells: LeaveBell[] = [
+      ...(rmId
+        ? [{ to: [rmId], event: { type: 'leave.requested', title, link: '/my-team?tab=leave' } }]
+        : []),
+      { to: hrIds, event: { type: 'leave.requested', title, link: '/hr/leaves' } },
+    ];
+
     const row = await repo.insertRequest(
       {
         employeeId,
@@ -425,6 +446,7 @@ export const createLeavesService = (deps: {
         hrRequired,
       },
       actor,
+      bells,
     );
     return withEmployee(row);
   };
@@ -566,6 +588,17 @@ export const createLeavesService = (deps: {
           { action: 'leave.declined', detail: { type: row.type, days: row.days } },
           actor,
           snapshotOf(row),
+          [
+            {
+              to: [row.employeeId],
+              event: {
+                type: 'leave.decided',
+                title: `Your leave (${dateRange(row)}) was declined`,
+                body: input.reason ?? null,
+                link: '/my-leaves',
+              },
+            },
+          ],
         )
         .catch(mapConflict);
       return withEmployee(updated);
@@ -625,6 +658,20 @@ export const createLeavesService = (deps: {
         },
         actor,
         snapshotOf(row),
+        [
+          {
+            to: [row.employeeId],
+            event: {
+              type: 'leave.decided',
+              title: final
+                ? `Your leave (${dateRange(row)}) is approved`
+                : `Your leave (${dateRange(row)}) is approved by ${
+                    fillsRm ? 'your manager' : 'HR'
+                  } — waiting for ${rmSatisfied ? 'HR' : 'your manager'}`,
+              link: '/my-leaves',
+            },
+          },
+        ],
       );
       return withEmployee(updated);
     } catch (err) {

@@ -2,7 +2,6 @@ import createError from 'http-errors';
 import { env } from '../../config/env.js';
 import {
   APPROVAL_REMINDERS,
-  REIMBURSEMENT_DIGEST_DAY,
   RETURN_REMINDERS,
 } from '../../shared/constants/constants.js';
 import {
@@ -413,12 +412,13 @@ export const createJobsService = (deps: {
   /**
    * reimbursement-digest: claims are approved once a month, so instead of a
    * bell per claim PR and the Admin account get ONE bell a month, on
-   * REIMBURSEMENT_DIGEST_DAY (or the first working day after it), saying
+   * the payroll.reimbursementDigestDay setting (or the first working day after it), saying
    * what waits for them. Nothing to the claimants.
    */
   const reimbursementDigest = async (now: Date): Promise<Record<string, number>> => {
     const today = localDate(now);
-    if (Number(today.slice(8, 10)) < REIMBURSEMENT_DIGEST_DAY) return { sent: 0 };
+    const digestDay = await settings.effective('payroll.reimbursementDigestDay');
+    if (Number(today.slice(8, 10)) < digestDay) return { sent: 0 };
     const kind = `reimbursement_digest:${today.slice(0, 7)}`;
     const [counts, last, pr, owner] = await Promise.all([
       repo.reimbursementCounts(),
@@ -464,8 +464,9 @@ export const createJobsService = (deps: {
       run: approvalReminders,
     },
     'reimbursement-digest': {
-      description: `On the ${REIMBURSEMENT_DIGEST_DAY}th of each month (or the first working day after), one bell to PR and the Admin account: claims waiting for them and approved claims to pay.`,
-      schedule: `Monthly from the ${REIMBURSEMENT_DIGEST_DAY}th at ${env.scheduler.dailyAt}`,
+      description:
+        'On the digest day of each month (Payroll setting, default the 25th; or the first working day after), one bell to PR and the Admin account: claims waiting for them and approved claims to pay.',
+      schedule: `Monthly from the digest day at ${env.scheduler.dailyAt}`,
       run: reimbursementDigest,
     },
     'concern-deadlines': {

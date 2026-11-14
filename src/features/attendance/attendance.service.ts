@@ -125,6 +125,10 @@ const isInsideAnyZone = (
   return false;
 };
 
+/** A fix's accuracy rounded to whole metres, or null when not sent. */
+const accuracyOf = (coords: { accuracyM?: number } | null): number | null =>
+  coords?.accuracyM !== undefined ? Math.round(coords.accuracyM) : null;
+
 /** The env office is the fallback zone until Admin adds the real ones. */
 const envZone = (): Zone[] => {
   const { officeLat, officeLng, officeRadiusMeters } = env.attendance;
@@ -299,6 +303,8 @@ const classifyMonth = (
       leaveType: null,
       checkInTiming: inTiming,
       checkOutTiming: outTiming,
+      checkInAccuracyM: punch?.checkInAccuracyM ?? null,
+      checkOutAccuracyM: punch?.checkOutAccuracyM ?? null,
     };
     const holidayName = data.holidays.get(date);
     const leave = data.leaves.find(
@@ -460,9 +466,19 @@ export const createAttendanceService = (deps: {
     employeeId: string,
     date: string,
     ip: string | undefined,
-    coords: { lat: number; lng: number } | null,
+    coords: { lat: number; lng: number; accuracyM?: number } | null,
   ): Promise<'office' | 'remote'> => {
     if (await hasLiveRemote(employeeId, date)) return 'remote';
+    // A fix this vague can't prove where someone is (Wi-Fi / IP guesses on
+    // laptops) — ask for a better one rather than judging it (learner, 2026-11-14).
+    const maxErrorM = await settings.effective('attendance.maxLocationErrorM');
+    if (coords?.accuracyM !== undefined && maxErrorM > 0 && coords.accuracyM > maxErrorM) {
+      throw createError(
+        422,
+        `Your location is only accurate to about ${formatDistance(coords.accuracyM)} (needs ${maxErrorM} m) — turn on GPS / precise location on your phone and try again, or submit a remote-work request for today`,
+        { code: 'LOCATION_TOO_VAGUE', accuracyM: Math.round(coords.accuracyM), maxErrorM },
+      );
+    }
     const stored = await repo.listZones();
     const zones: Zone[] = stored.length
       ? stored.map((z) => ({
@@ -506,7 +522,7 @@ export const createAttendanceService = (deps: {
   const checkIn = async (
     employeeId: string,
     ip: string | undefined,
-    coords: { lat: number; lng: number } | null,
+    coords: { lat: number; lng: number; accuracyM?: number } | null,
   ) => {
     await rejectSystemAccount(employeeId);
     const today = localDate();
@@ -533,6 +549,7 @@ export const createAttendanceService = (deps: {
         checkInIp: ip ? normalizeIp(ip) : null,
         checkInLat: coords ? String(coords.lat) : null,
         checkInLng: coords ? String(coords.lng) : null,
+        checkInAccuracyM: accuracyOf(coords),
       });
       return {
         date: row.date,
@@ -555,7 +572,7 @@ export const createAttendanceService = (deps: {
   const checkOut = async (
     employeeId: string,
     ip: string | undefined,
-    coords: { lat: number; lng: number } | null,
+    coords: { lat: number; lng: number; accuracyM?: number } | null,
   ) => {
     const today = localDate();
     const punch = await repo.findPunch(employeeId, today);

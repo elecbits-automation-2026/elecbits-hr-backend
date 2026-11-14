@@ -51,10 +51,13 @@ export const attendanceController = {
     const input: PunchInput = req.body;
     const coords =
       input.lat !== undefined && input.lng !== undefined
-        ? { lat: input.lat, lng: input.lng }
+        ? { lat: input.lat, lng: input.lng, accuracyM: input.accuracyM }
         : null;
     const result = await service(req).checkIn(req.auth!.employeeId, req.ip, coords);
-    req.log.info({ source: result.source, hasCoords: coords !== null }, 'checked in');
+    req.log.info(
+      { source: result.source, hasCoords: coords !== null, accuracyM: input.accuracyM },
+      'checked in',
+    );
     res.status(201).json(result);
   },
 
@@ -64,7 +67,13 @@ export const attendanceController = {
       input.lat !== undefined && input.lng !== undefined
         ? { lat: input.lat, lng: input.lng }
         : null;
-    res.json(await service(req).checkOut(req.auth!.employeeId, req.ip, coords));
+    res.json(
+      await service(req).checkOut(
+        req.auth!.employeeId,
+        req.ip,
+        coords && { ...coords, accuracyM: input.accuracyM },
+      ),
+    );
   },
 
   myMonth: async (req: Request, res: Response): Promise<void> => {

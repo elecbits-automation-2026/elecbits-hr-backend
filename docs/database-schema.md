@@ -422,21 +422,23 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### attendance
 
-| Column          | Type                     | Null | Default             | Notes                |
-| --------------- | ------------------------ | ---- | ------------------- | -------------------- |
-| `id`            | uuid                     |      | `gen_random_uuid()` | PK                   |
-| `employee_id`   | uuid                     |      |                     | → `org.employees.id` |
-| `date`          | date                     |      |                     |                      |
-| `check_in_at`   | timestamp with time zone |      |                     |                      |
-| `check_out_at`  | timestamp with time zone | yes  |                     |                      |
-| `source`        | attendance_source        |      |                     |                      |
-| `check_in_ip`   | text                     | yes  |                     |                      |
-| `check_out_ip`  | text                     | yes  |                     |                      |
-| `check_in_lat`  | numeric(9, 6)            | yes  |                     |                      |
-| `check_in_lng`  | numeric(9, 6)            | yes  |                     |                      |
-| `check_out_lat` | numeric(9, 6)            | yes  |                     |                      |
-| `check_out_lng` | numeric(9, 6)            | yes  |                     |                      |
-| `created_at`    | timestamp with time zone |      | `now()`             |                      |
+| Column                 | Type                     | Null | Default             | Notes                |
+| ---------------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`                   | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `employee_id`          | uuid                     |      |                     | → `org.employees.id` |
+| `date`                 | date                     |      |                     |                      |
+| `check_in_at`          | timestamp with time zone |      |                     |                      |
+| `check_out_at`         | timestamp with time zone | yes  |                     |                      |
+| `source`               | attendance_source        |      |                     |                      |
+| `check_in_ip`          | text                     | yes  |                     |                      |
+| `check_out_ip`         | text                     | yes  |                     |                      |
+| `check_in_lat`         | numeric(9, 6)            | yes  |                     |                      |
+| `check_in_lng`         | numeric(9, 6)            | yes  |                     |                      |
+| `check_out_lat`        | numeric(9, 6)            | yes  |                     |                      |
+| `check_out_lng`        | numeric(9, 6)            | yes  |                     |                      |
+| `check_in_accuracy_m`  | integer                  | yes  |                     |                      |
+| `check_out_accuracy_m` | integer                  | yes  |                     |                      |
+| `created_at`           | timestamp with time zone |      | `now()`             |                      |
 
 - Unique index `attendance_employee_date_uq` (`employee_id`, `date`)
 - Check `attendance_out_after_in_ck`: `… IS NULL OR … > …`
@@ -589,6 +591,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `salary_currency`          | text                     |      | `INR`   |                           |
 | `salary_mode`              | text                     | yes  |         |                           |
 | `pan_number`               | text                     | yes  |         |                           |
+| `uan_number`               | text                     | yes  |         |                           |
 | `provident_fund_account`   | text                     | yes  |         |                           |
 | `employee_advance_account` | text                     | yes  |         |                           |
 | `bank_name`                | text                     | yes  |         |                           |
