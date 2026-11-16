@@ -55,16 +55,22 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
     };
   };
 
-  const assign = async (
-    input: AssignSeatInput,
-    actor: ActorContext,
-  ): Promise<SeatDto> => {
-    await assertAdmin(actor);
+  /** Seat a holder — the shared rules behind both doors (Seats page, Departments page). */
+  const seat = async (input: AssignSeatInput, actor: ActorContext): Promise<SeatDto> => {
     const departmentId = input.departmentId ?? null;
-    if (departmentId && !(await repo.departmentExists(departmentId))) {
-      throw createError(422, 'Department does not exist', {
-        code: 'DEPARTMENT_NOT_FOUND',
-      });
+    if (departmentId) {
+      const kind = await repo.departmentKind(departmentId);
+      if (!kind) {
+        throw createError(422, 'Department does not exist', {
+          code: 'DEPARTMENT_NOT_FOUND',
+        });
+      }
+      // A chapter has a lead (a name, no powers), never a head seat.
+      if (kind === 'chapter') {
+        throw createError(422, 'A chapter has a lead, not a head', {
+          code: 'CHAPTER_HAS_NO_HEAD',
+        });
+      }
     }
     // Admin is the company account, not a person — it can't head or approve anything.
     if (input.employeeId === (await repo.ownerEmployeeId())) {
@@ -113,10 +119,60 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
     }
   };
 
+  const assign = async (input: AssignSeatInput, actor: ActorContext): Promise<SeatDto> => {
+    await assertAdmin(actor);
+    return seat(input, actor);
+  };
+
   const vacate = async (input: VacateSeatInput, actor: ActorContext): Promise<void> => {
     await assertAdmin(actor);
     if (!(await repo.vacate(input.seat, input.departmentId ?? null, actor))) {
       throw createError(404, 'Nobody holds this seat', { code: 'SEAT_EMPTY' });
+    }
+  };
+
+  /**
+   * The HR door (Departments page, learner 2026-11-16): HR sets department
+   * heads too, but the HR department's head — the HR approver on hiring lines
+   * and offers — stays Admin-only, and nobody seats themselves.
+   */
+  const assertHrMayHead = async (
+    departmentId: string,
+    employeeId: string | null,
+    actor: ActorContext,
+    hrDepartmentId: string | null,
+  ) => {
+    if (actor.actorEmployeeId === (await repo.ownerEmployeeId())) return;
+    if (departmentId === hrDepartmentId) {
+      throw createError(403, "Only the Admin account sets the HR department's head", {
+        code: 'HR_HEAD_ADMIN_ONLY',
+      });
+    }
+    if (employeeId && employeeId === actor.actorEmployeeId) {
+      throw createError(403, 'You cannot make yourself a department head', {
+        code: 'SELF_SEAT',
+      });
+    }
+  };
+
+  const assignHead = async (
+    departmentId: string,
+    input: { employeeId: string; acting: boolean },
+    actor: ActorContext,
+    hrDepartmentId: string | null,
+  ): Promise<SeatDto> => {
+    await assertHrMayHead(departmentId, input.employeeId, actor, hrDepartmentId);
+    return seat({ seat: 'dept_head', departmentId, ...input }, actor);
+  };
+
+  const vacateHead = async (
+    departmentId: string,
+    actor: ActorContext,
+    hrDepartmentId: string | null,
+  ): Promise<void> => {
+    await assertHrMayHead(departmentId, null, actor, hrDepartmentId);
+    if (!(await repo.vacate('dept_head', departmentId, actor))) {
+      throw createError(404, 'This department has no head', { code: 'SEAT_EMPTY' });
     }
   };
 
@@ -131,7 +187,7 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
     }));
   };
 
-  return { overview, assign, vacate, history };
+  return { overview, assign, vacate, history, assignHead, vacateHead };
 };
 
 export type SeatsService = ReturnType<typeof createSeatsService>;

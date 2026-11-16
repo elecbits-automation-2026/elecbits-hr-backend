@@ -302,12 +302,24 @@ export const createEmployeesRepository = (db: DbClient) => ({
   },
 
   /** Department name (lower-cased) -> id, for import's name matching. */
+  /** Home units by name — a chapter is never anyone's home, so it is left out. */
   departmentIdsByName: async (): Promise<Map<string, string>> => {
     const rows = await db.orm
-      .select({ id: departments.id, name: departments.name })
+      .select({ id: departments.id, name: departments.name, kind: departments.kind })
       .from(departments);
-    return new Map(rows.map((r) => [r.name.trim().toLowerCase(), r.id]));
+    return new Map(
+      rows.filter((r) => r.kind !== 'chapter').map((r) => [r.name.trim().toLowerCase(), r.id]),
+    );
   },
+
+  departmentKind: async (id: string): Promise<string | undefined> =>
+    (
+      await db.orm
+        .select({ kind: departments.kind })
+        .from(departments)
+        .where(eq(departments.id, id))
+        .limit(1)
+    )[0]?.kind,
 
   /**
    * Bulk import, ALL OR NOTHING: each row goes through the same invited insert

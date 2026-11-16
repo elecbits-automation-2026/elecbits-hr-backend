@@ -37,7 +37,7 @@ const BATCH_SEED: Array<{ name: string; description: string; grants: GrantSeed[]
     description: 'People records and org structure for HR business partners',
     grants: [
       { moduleKey: 'hrbp.people', actions: RIGHTS_LEVELS.editor, scope: 'org' },
-      { moduleKey: 'hrbp.org', actions: RIGHTS_LEVELS.contributor, scope: 'org' },
+      { moduleKey: 'hrbp.org', actions: RIGHTS_LEVELS.editor, scope: 'org' },
       // `update` on hrbp.leaves is what fills the HR approval slot.
       { moduleKey: 'hrbp.leaves', actions: RIGHTS_LEVELS.editor, scope: 'org' },
       { moduleKey: 'hrbp.attendance', actions: RIGHTS_LEVELS.editor, scope: 'org' },

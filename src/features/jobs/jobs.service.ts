@@ -16,6 +16,7 @@ import type { ExitsService } from '../exits/index.js';
 import type { OpenDoorService } from '../open-door/index.js';
 import type { ProbationService } from '../probation/index.js';
 import type { PipService } from '../pip/index.js';
+import type { TrainingsService } from '../trainings/index.js';
 import type { HiringJobsService } from '../hiring/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { JobRunRow, JobsRepository, ReminderToSend } from './jobs.repository.js';
@@ -61,8 +62,9 @@ export const createJobsService = (deps: {
   probation: ProbationService;
   pip: PipService;
   hiring: HiringJobsService;
+  trainings: Pick<TrainingsService, 'daily'>;
 }) => {
-  const { repo, authz, settings, concerns, openDoor, exits, probation, pip, hiring } =
+  const { repo, authz, settings, concerns, openDoor, exits, probation, pip, hiring, trainings } =
     deps;
 
   const approvalReminders = async (now: Date): Promise<Record<string, number>> => {
@@ -497,6 +499,12 @@ export const createJobsService = (deps: {
         'Rings the RM + HR once a PIP has ended without an outcome (every 2 working days until it is recorded).',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => pip.daily(now),
+    },
+    'training-reminders': {
+      description:
+        'Rings the person once 3 days before a training is due, and once when it is overdue (the overdue bell also tells whoever assigned it).',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => trainings.daily(now),
     },
     'return-reminders': {
       description:

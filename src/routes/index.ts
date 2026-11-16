@@ -31,6 +31,8 @@ import { onboardingRoutes } from '../features/onboarding/index.js';
 import { recognitionsRoutes } from '../features/recognitions/index.js';
 import { careerRoutes } from '../features/career/index.js';
 import { goalsRoutes, workUpdatesRoutes } from '../features/performance/index.js';
+import { dailyKpiRoutes } from '../features/daily-kpi/index.js';
+import { trainingsRoutes } from '../features/trainings/index.js';
 import { quarterReportsRoutes } from '../features/quarter-reports/index.js';
 import { settingsRoutes } from '../features/settings/index.js';
 import { notificationsRoutes } from '../features/notifications/index.js';
@@ -119,6 +121,8 @@ apiV1.use('/career', careerRoutes);
 // Performance layer: weighted quarterly goals + daily work updates.
 apiV1.use('/goals', goalsRoutes);
 apiV1.use('/work-updates', workUpdatesRoutes);
+apiV1.use('/daily-kpi', dailyKpiRoutes);
+apiV1.use('/trainings', trainingsRoutes);
 
 // Quarter reports: HR closes a quarter, reports freeze, managers set final scores.
 apiV1.use('/quarter-reports', quarterReportsRoutes);

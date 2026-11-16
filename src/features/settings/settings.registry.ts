@@ -281,6 +281,40 @@ const definitions = {
       cooldownDays: 90,
     },
   },
+  'performance.departmentTargets': {
+    area: 'people',
+    live: true,
+    label: 'Department KPI targets',
+    description:
+      'What the Daily KPI page holds each department to: the share of working days with a work update over the last 7 working days, and the goal attainment expected once half the quarter has passed. A department without its own row uses the company targets. The KPI line is shown on the page as a reminder of what the department is measured on.',
+    schema: z.object({
+      updatesOnTimePct: z.number().int().min(0).max(100),
+      attainmentPct: z.number().int().min(0).max(100),
+      departments: z
+        .array(
+          z.object({
+            departmentId: z.string().uuid(),
+            kpi: z.string().trim().max(300),
+            updatesOnTimePct: z.number().int().min(0).max(100).nullable(),
+            attainmentPct: z.number().int().min(0).max(100).nullable(),
+          }),
+        )
+        .max(100)
+        .refine((rows) => new Set(rows.map((r) => r.departmentId)).size === rows.length, {
+          message: 'Each department can have one row only',
+        }),
+    }),
+    default: {
+      updatesOnTimePct: 80,
+      attainmentPct: 70,
+      departments: [] as Array<{
+        departmentId: string;
+        kpi: string;
+        updatesOnTimePct: number | null;
+        attainmentPct: number | null;
+      }>,
+    },
+  },
   'concerns.timelines': {
     area: 'people',
     live: true,

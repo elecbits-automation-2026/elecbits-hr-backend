@@ -36,6 +36,8 @@ import { registerOnboardingDocs } from '../features/onboarding/index.js';
 import { registerRecognitionsDocs } from '../features/recognitions/index.js';
 import { registerCareerDocs } from '../features/career/index.js';
 import { registerPerformanceDocs } from '../features/performance/index.js';
+import { registerDailyKpiDocs } from '../features/daily-kpi/index.js';
+import { registerTrainingsDocs } from '../features/trainings/index.js';
 import { registerQuarterReportsDocs } from '../features/quarter-reports/index.js';
 import { registerSettingsDocs } from '../features/settings/index.js';
 import { registerNotificationsDocs } from '../features/notifications/index.js';
@@ -98,6 +100,8 @@ export const buildOpenApiDocument = () => {
   registerRecognitionsDocs(registry);
   registerCareerDocs(registry);
   registerPerformanceDocs(registry);
+  registerDailyKpiDocs(registry);
+  registerTrainingsDocs(registry);
   registerQuarterReportsDocs(registry);
   registerSettingsDocs(registry);
   registerNotificationsDocs(registry);

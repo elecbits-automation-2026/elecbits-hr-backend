@@ -1,4 +1,5 @@
 import { pipServiceFor } from '../features/pip/index.js';
+import { trainingsServiceFor } from '../features/trainings/index.js';
 import { probationServiceFor } from '../features/probation/index.js';
 import {
   createExitsFnf,
@@ -39,6 +40,7 @@ const service = () =>
     }),
     probation: probationServiceFor(db),
     pip: pipServiceFor(db),
+    trainings: trainingsServiceFor(db),
     hiring: hiringJobsFor(db),
     openDoor: openDoorServiceFor(db),
     concerns: createConcernsService({

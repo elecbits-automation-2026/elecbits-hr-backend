@@ -6,13 +6,13 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**89 tables · 67 enums.**
+**90 tables · 68 enums.**
 
 | Schema   | Tables | Holds                                                                                               |
 | -------- | ------ | --------------------------------------------------------------------------------------------------- |
 | `access` | 11     | Owner, modules, batches, grants, requests, audit log                                                |
 | `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
-| `org`    | 48     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `org`    | 49     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
 | `public` | 2      | Sign-in identities and refresh tokens                                                               |
 | `ta`     | 16     | Hiring: quarterly plans, requisitions, interview rounds, approvals                                  |
 
@@ -87,6 +87,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `ta_document_kind`          | `jd`, `scorecard`                                                                                                                                                                      |
 | `ta_document_status`        | `draft`, `in_review`, `returned`, `approved`                                                                                                                                           |
 | `termination_mode`          | `serve`, `pay_in_lieu`                                                                                                                                                                 |
+| `unit_kind`                 | `division`, `department`, `chapter`                                                                                                                                                    |
 
 ## `access`
 
@@ -572,14 +573,32 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 - Index `concerns_raised_by_idx` (`raised_by`)
 - Check `concerns_anonymous_ck`: `(… AND … IS NULL AND … IS NOT NULL) OR (NOT … AND … IS NOT NULL)`
 
+### department_memberships
+
+| Column          | Type                     | Null | Default             | Notes                  |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                     |
+| `department_id` | uuid                     |      |                     | → `org.departments.id` |
+| `employee_id`   | uuid                     |      |                     | → `org.employees.id`   |
+| `is_lead`       | boolean                  |      | `false`             |                        |
+| `added_by`      | uuid                     | yes  |                     | → `org.employees.id`   |
+| `created_at`    | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `department_memberships_uq` (`department_id`, `employee_id`)
+- Unique index `department_memberships_lead_uq` (`department_id`) where `…`
+- Index `department_memberships_employee_idx` (`employee_id`)
+
 ### departments
 
 | Column       | Type                     | Null | Default             | Notes                  |
 | ------------ | ------------------------ | ---- | ------------------- | ---------------------- |
 | `id`         | uuid                     |      | `gen_random_uuid()` | PK                     |
 | `name`       | text                     |      |                     |                        |
+| `kind`       | unit_kind                |      | `department`        |                        |
 | `parent_id`  | uuid                     | yes  |                     | → `org.departments.id` |
 | `created_at` | timestamp with time zone |      | `now()`             |                        |
+
+- Unique index `departments_name_uq` (expr)
 
 ### employee_salary
 
