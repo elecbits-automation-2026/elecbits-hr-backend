@@ -80,13 +80,19 @@ export const createSeatsRepository = (db: DbClient) => ({
       [limit],
     ),
 
+  /** Units that take a head — divisions and departments, never chapters. */
   departments: () =>
     db.query<{ id: string; name: string }>(
-      `SELECT id, name FROM org.departments ORDER BY name`,
+      `SELECT id, name FROM org.departments WHERE kind <> 'chapter' ORDER BY name`,
     ),
 
-  departmentExists: async (id: string): Promise<boolean> =>
-    (await db.query(`SELECT 1 FROM org.departments WHERE id = $1`, [id])).length > 0,
+  /** The unit's kind; undefined = no such department. */
+  departmentKind: async (id: string): Promise<string | undefined> =>
+    (
+      await db.query<{ kind: string }>(`SELECT kind FROM org.departments WHERE id = $1`, [
+        id,
+      ])
+    )[0]?.kind,
 
   employeeStatus: async (id: string): Promise<string | undefined> =>
     (

@@ -714,7 +714,46 @@ export const createPerformanceService = (deps: {
     }));
   };
 
+  /**
+   * The Daily KPI page's performance half for several people on one day:
+   * the update strip for the 14 days up to `date` (same classification as
+   * the miss count), that day's update score, and the current quarter's
+   * goals. The caller has already decided who may see whom.
+   */
+  const dailyKpiInputs = async (employeeIds: string[], date: string) => {
+    const from = localDate(new Date(Date.parse(`${date}T00:00:00Z`) - 13 * DAY_MS));
+    const [cycle, policy] = await Promise.all([currentCycle(), updatePolicy()]);
+    const [strips, goalRows, updates] = await Promise.all([
+      stripsFor(employeeIds, from, date, policy),
+      repo.goalsForEmployees(employeeIds, cycle.id),
+      repo.updatesForEmployees(employeeIds, date),
+    ]);
+    const today = localDate();
+    return {
+      cycle: { name: cycle.name, startDate: cycle.startDate, endDate: cycle.endDate },
+      people: new Map(
+        employeeIds.map((id) => {
+          const own = goalRows.filter((g) => g.employeeId === id);
+          const update = updates.find((u) => u.employeeId === id && u.date === date);
+          return [
+            id,
+            {
+              strip: strips.get(id) ?? [],
+              score: update?.score ?? null,
+              goals: {
+                count: own.length,
+                atRisk: own.filter((g) => isAtRisk(g, today)).length,
+                attainment: attainmentOf(own),
+              },
+            },
+          ];
+        }),
+      ),
+    };
+  };
+
   return {
+    dailyKpiInputs,
     myGoals,
     myGoalsFor,
     teamMemberGoals,

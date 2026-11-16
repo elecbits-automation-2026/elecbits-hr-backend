@@ -62,6 +62,15 @@ export const createEmployeesService = (deps: {
 }) => {
   const { repo, settings, authz, onboarding } = deps;
 
+  /** A home unit is a division or department — a chapter is joined by membership only. */
+  const assertHomeUnit = async (departmentId: string | null | undefined) => {
+    if (departmentId && (await repo.departmentKind(departmentId)) === 'chapter') {
+      throw createError(422, 'A chapter cannot be anyone’s home department', {
+        code: 'CHAPTER_NOT_HOME',
+      });
+    }
+  };
+
   /**
    * Start the joiner's onboarding (OPS + payroll hand-off bells). The record
    * is already committed, so a failure here is logged, never surfaced — the
@@ -127,6 +136,7 @@ export const createEmployeesService = (deps: {
     [first, middle, last].filter((p): p is string => Boolean(p && p.trim())).join(' ');
 
   const create = async (input: CreateEmployeeInput, actor: ActorContext) => {
+    await assertHomeUnit(input.departmentId);
     const rm = await repo.findById(input.reportsTo);
     if (!rm) {
       // Top-down creation (§5.3): a manager always exists before their reports.
@@ -178,6 +188,7 @@ export const createEmployeesService = (deps: {
 
   /** The Admin invite door (D1–D4): access-first counterpart to `create`. */
   const invite = async (input: InviteEmployeeInput, actor: ActorContext) => {
+    await assertHomeUnit(input.departmentId);
     const rm = await repo.findById(input.reportsTo);
     if (!rm) {
       throw createError(422, 'Reporting manager does not exist', {
@@ -258,6 +269,7 @@ export const createEmployeesService = (deps: {
   };
 
   const update = async (id: string, input: UpdateEmployeeInput, actor: ActorContext) => {
+    await assertHomeUnit(input.departmentId);
     // Recompute the full name whenever any part is in the patch, falling back
     // to the stored parts for the rest.
     let name: string | undefined;

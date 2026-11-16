@@ -41,6 +41,40 @@ const splitEqually = (total: number, n: number): number[] => {
 const nameOf = (row: RecognitionRow, catalog: Catalog): string =>
   row.awardName ?? catalog[row.type]?.name ?? row.type;
 
+/** YYYY-MM of an instant, in India time. */
+const monthIst = (d: Date): string =>
+  d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+
+/**
+ * The board's "Is it being used?" strip: approved awards in the last six
+ * months by approval month (IST), oldest first. A team award is ONE award
+ * but several people; value is what was paid out.
+ */
+const usageOf = (rows: RecognitionJoinedRow[], now = new Date()): BoardDto['usage'] => {
+  const [y, m] = monthIst(now).split('-').map(Number) as [number, number];
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(Date.UTC(y, m - 1 - (5 - i), 1));
+    return d.toISOString().slice(0, 7);
+  });
+  const usage = new Map(
+    months.map((month) => [
+      month,
+      { month, awards: 0, people: 0, valueInr: 0, byType: {} as Record<string, number> },
+    ]),
+  );
+  for (const r of rows) {
+    const bucket = r.decidedAt ? usage.get(monthIst(r.decidedAt)) : undefined;
+    if (!bucket) continue;
+    bucket.people += 1;
+    bucket.valueInr += r.valueInr;
+    if (r.groupLead) {
+      bucket.awards += 1;
+      bucket.byType[r.type] = (bucket.byType[r.type] ?? 0) + 1;
+    }
+  }
+  return months.map((month) => usage.get(month)!);
+};
+
 /**
  * R&R rules (refinement plan, Phase 2 — user-redesigned):
  *  - a manager nominates their OWN reports only (the nominator must be each
@@ -302,6 +336,7 @@ export const createRecognitionsService = (deps: {
         .filter((_, i) => rows[i]!.groupLead)
         .slice(0, 20),
       typeNames,
+      usage: usageOf(rows),
     };
   };
 

@@ -596,6 +596,27 @@
       "when": 1794650543162,
       "tag": "0084_punch-accuracy",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794807970300,
+      "tag": "0085_department-units",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1794807983263,
+      "tag": "0086_hrbp-org-update-grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794810603892,
+      "tag": "0087_trainings",
+      "breakpoints": true
     }
   ]
 }

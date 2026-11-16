@@ -84,6 +84,21 @@ export const boardSchema = z
     recent: z.array(recognitionSchema),
     /** Award key -> display name, for the per-type badges. */
     typeNames: z.record(z.string(), z.string()),
+    /**
+     * "Is it being used?" — the last six months by approval month (IST),
+     * oldest first, current month last. Awards count nominations (a team
+     * award is one); people counts recipients; value is the total paid.
+     */
+    usage: z.array(
+      z.object({
+        month: z.string(),
+        awards: z.number().int(),
+        people: z.number().int(),
+        valueInr: z.number().int(),
+        /** Award key -> nominations of that type. */
+        byType: z.record(z.string(), z.number().int()),
+      }),
+    ),
   })
   .openapi('RecognitionBoard');
 

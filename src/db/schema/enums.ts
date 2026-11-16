@@ -19,6 +19,10 @@ export const scopeEnum = pgEnum('scope', ['me', 'team_direct', 'team', 'dept', '
 // access by itself (§2.3 design rule).
 export const levelEnum = pgEnum('level', ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
 
+// Org units (learner, 2026-11-16): divisions and departments form the home
+// tree; a chapter is a cross-department group joined by membership only.
+export const unitKindEnum = pgEnum('unit_kind', ['division', 'department', 'chapter']);
+
 // Deactivate, never delete (§10): leavers become `inactive`, rows stay.
 export const employeeStatusEnum = pgEnum('employee_status', [
   'invited', // HRBP created the record; the person has not claimed it yet (§5.4)
@@ -463,3 +467,18 @@ export const interviewSlotStatusEnum = pgEnum('interview_slot_status', [
 ]);
 // Background verification with the previous employer (TA Step E), in parallel with the offer.
 export const bgvStatusEnum = pgEnum('bgv_status', ['not_started', 'in_progress', 'clear', 'failed']);
+
+// Trainings (learner, 2026-11-16).
+/** The four learning streams (carried over from the previous HR tool). */
+export const trainingStreamEnum = pgEnum('training_stream', [
+  'compliance',
+  'leadership', // Leadership & professional
+  'company', // Company knowledge
+  'functional', // Functional & technical
+]);
+
+export const trainingStatusEnum = pgEnum('training_status', [
+  'assigned',
+  'completed',
+  'cancelled', // withdrawn by whoever assigned it, or HR
+]);
