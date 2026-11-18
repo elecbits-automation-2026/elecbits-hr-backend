@@ -9,6 +9,7 @@ import {
   importResultSchema,
   incompleteRecordSchema,
   inviteEmployeeSchema,
+  nextEmployeeCodeSchema,
   updateEmployeeSchema,
   updateBankDetailsSchema,
   updateSalarySchema,
@@ -139,10 +140,21 @@ export const registerEmployeesDocs = (registry: OpenAPIRegistry): void => {
     path: '/api/v1/employees/incomplete',
     tags: ['Employees'],
     summary:
-      'Live records missing a joining date, department or designation — hrbp.people read',
+      'Live records missing a joining date, department, designation or a working manager — hrbp.people read',
     security: [{ bearerAuth: [] }],
     responses: {
       200: jsonResponse('Incomplete records', z.array(incompleteRecordSchema)),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/employees/next-code',
+    tags: ['Employees'],
+    summary: 'The next free employee code, to pre-fill Add employee — hrbp.people create',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: jsonResponse('Suggested code', nextEmployeeCodeSchema),
     },
   });
 

@@ -157,14 +157,22 @@ export const createConcernsService = (deps: {
     const related = c.relatedConcernId
       ? await repo.findById(c.relatedConcernId)
       : undefined;
-    const names = await repo.namesByIds(
-      [...notes.map((n) => n.authorId), c.raisedBy, c.subjectEmployeeId].filter(
-        (x): x is string => !!x,
-      ),
-    );
     const isHandler = view === 'handler';
     const live = !['closed', 'resolved', 'declined'].includes(c.status);
     const isRaiser = view === 'raiser';
+    // Owner + severity are HR-queue triage: handlers only, never the raiser.
+    const triage = isHandler && queueOf(c) === 'hr';
+    const canAssign = triage && live;
+    const assignable = canAssign ? await handlersOf(c) : [];
+    const names = await repo.namesByIds(
+      [
+        ...notes.map((n) => n.authorId),
+        c.raisedBy,
+        c.subjectEmployeeId,
+        triage ? c.ownerId : null,
+        ...assignable,
+      ].filter((x): x is string => !!x),
+    );
     return {
       id: c.id,
       code: c.code,
@@ -221,7 +229,14 @@ export const createConcernsService = (deps: {
           c.escalateBy !== null &&
           today() <= c.escalateBy,
         note: live || c.status === 'decided',
+        assign: canAssign,
       },
+      owner:
+        triage && c.ownerId ? { id: c.ownerId, name: names.get(c.ownerId) ?? '' } : null,
+      severity: triage ? c.severity : null,
+      assignable: assignable
+        .map((id) => ({ id, name: names.get(id) ?? '' }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
       notes: notes.map((n) => toNote(n, c, names)),
     };
   };
@@ -384,23 +399,59 @@ export const createConcernsService = (deps: {
   const people = async (actorId: string) =>
     (await repo.people()).filter((p) => p.id !== actorId);
 
-  /** Which queues the caller has, with open and overdue counts. */
+  /**
+   * Which queues the caller has, with open and overdue counts, plus the HR
+   * queue's triage stats: unassigned / by severity / mine, average days from
+   * raised to acknowledged and cases closed — both this calendar quarter.
+   */
   const queues = async (actorId: string): Promise<QueueSummaryDto[]> => {
     const t = today();
-    const counts = new Map<QueueName, { open: number; overdue: number }>();
+    const quarterStart = `${t.slice(0, 5)}${String(Math.floor((Number(t.slice(5, 7)) - 1) / 3) * 3 + 1).padStart(2, '0')}-01`;
+    const blank = () => ({
+      open: 0,
+      overdue: 0,
+      unassigned: 0,
+      mine: 0,
+      bySeverity: { low: 0, medium: 0, high: 0, unset: 0 },
+      ackDays: [] as number[],
+      closedThisQuarter: 0,
+    });
+    const counts = new Map<QueueName, ReturnType<typeof blank>>();
     for (const c of await repo.listActive()) {
       if (!(await handlersOf(c)).includes(actorId)) continue;
       const q = queueOf(c);
-      const e = counts.get(q) ?? { open: 0, overdue: 0 };
+      const e = counts.get(q) ?? blank();
       e.open += 1;
       const due = dueOf(c);
       if (due && due < t && c.status !== 'decided') e.overdue += 1;
+      if (!c.ownerId) e.unassigned += 1;
+      if (c.ownerId === actorId) e.mine += 1;
+      e.bySeverity[c.severity ?? 'unset'] += 1;
       counts.set(q, e);
+    }
+    // This quarter's cases (raised or closed since its start), for the two rates.
+    for (const c of await repo.listTouchedSince(new Date(`${quarterStart}T00:00:00`))) {
+      const q = queueOf(c);
+      const e = counts.get(q);
+      if (!e || !(await handlersOf(c)).includes(actorId)) continue;
+      if (c.ackAt && localDateOf(c.createdAt) >= quarterStart) {
+        e.ackDays.push((c.ackAt.getTime() - c.createdAt.getTime()) / 86_400_000);
+      }
+      if (c.closedAt && localDateOf(c.closedAt) >= quarterStart) e.closedThisQuarter += 1;
     }
     return [...counts.entries()].map(([queue, n]) => ({
       queue,
       label: QUEUE_LABEL[queue],
-      ...n,
+      open: n.open,
+      overdue: n.overdue,
+      unassigned: n.unassigned,
+      mine: n.mine,
+      bySeverity: n.bySeverity,
+      avgDaysToAck:
+        n.ackDays.length > 0
+          ? Math.round((n.ackDays.reduce((a, b) => a + b, 0) / n.ackDays.length) * 10) / 10
+          : null,
+      closedThisQuarter: n.closedThisQuarter,
     }));
   };
 
@@ -500,6 +551,64 @@ export const createConcernsService = (deps: {
       'acknowledged',
       raiserBell(c, `Your concern ${c.code} was acknowledged`),
     );
+    if (!row) throw conflict();
+    return get(id, actor.actorEmployeeId);
+  };
+
+  /** HR-queue triage is for handlers of an HR-level case that is still live. */
+  const asTriager = async (id: string, actorId: string) => {
+    const { c, handlers } = await asHandler(id, actorId);
+    if (queueOf(c) !== 'hr') {
+      throw createError(409, 'Only HR-level cases have an owner and severity', {
+        code: 'NOT_HR_QUEUE',
+      });
+    }
+    if (['closed', 'resolved', 'declined'].includes(c.status)) throw conflict();
+    return { c, handlers };
+  };
+
+  /**
+   * Hand the case to one of its handlers (or clear the owner). The owner must
+   * already be able to see the case, so assigning never widens access. The new
+   * owner hears by bell only — concern emails are never sent.
+   */
+  const assign = async (id: string, ownerId: string | null, actor: ActorContext) => {
+    const { c, handlers } = await asTriager(id, actor.actorEmployeeId);
+    if (ownerId !== null && !handlers.includes(ownerId)) {
+      throw createError(422, 'That person does not handle this case', { code: 'NOT_A_HANDLER' });
+    }
+    const row = await repo.transition(
+      id,
+      c.status,
+      { ownerId, ownerAssignedAt: ownerId ? new Date() : null },
+      [],
+      actor,
+      ownerId ? 'assigned' : 'unassigned',
+      ownerId && ownerId !== actor.actorEmployeeId
+        ? [
+            {
+              to: [ownerId],
+              event: {
+                type: 'concern.assigned',
+                title: `Concern ${c.code} is assigned to you`,
+                link: LINK,
+              },
+            },
+          ]
+        : [],
+    );
+    if (!row) throw conflict();
+    return get(id, actor.actorEmployeeId);
+  };
+
+  /** HR's internal severity (null clears it); never shown to the raiser. */
+  const setSeverity = async (
+    id: string,
+    severity: ConcernRow['severity'],
+    actor: ActorContext,
+  ) => {
+    const { c } = await asTriager(id, actor.actorEmployeeId);
+    const row = await repo.transition(id, c.status, { severity }, [], actor, 'severity_set', []);
     if (!row) throw conflict();
     return get(id, actor.actorEmployeeId);
   };
@@ -848,6 +957,8 @@ export const createConcernsService = (deps: {
     get,
     addNote,
     acknowledge,
+    assign,
+    setSeverity,
     decide,
     resolve,
     extend,

@@ -401,18 +401,31 @@ export const createCareerService = (deps: {
   const team = async (actor: ActorContext): Promise<TeamCareerRowDto[]> => {
     const chain = await repo.listChain(actor.actorEmployeeId);
     const ids = chain.map((p) => p.id);
-    const [recog, tracks] = await Promise.all([
+    const [recog, tracks, lastChanges, rules] = await Promise.all([
       repo.approvedRecognitionsFor(ids),
       repo.openTracksFor(ids),
+      repo.lastLevelChangesFor(ids),
+      settings.effective('career.selfRequest'),
     ]);
+    const today = new Date().toISOString().slice(0, 10);
     return Promise.all(
-      chain.map(async (p) => ({
-        employee: { id: p.id, name: p.name, employeeCode: p.employeeCode },
-        level: p.level,
-        recognitions: recog.get(p.id)?.count ?? 0,
-        lastRecognizedAt: recog.get(p.id)?.lastAt?.toISOString() ?? null,
-        track: await trackWithName(tracks.get(p.id)),
-      })),
+      chain.map(async (p) => {
+        // Same rule as the self-request check: last band change, else joining date.
+        const inBandSince =
+          lastChanges.get(p.id)?.toISOString().slice(0, 10) ?? p.dateOfJoining;
+        return {
+          employee: { id: p.id, name: p.name, employeeCode: p.employeeCode },
+          level: p.level,
+          recognitions: recog.get(p.id)?.count ?? 0,
+          lastRecognizedAt: recog.get(p.id)?.lastAt?.toISOString() ?? null,
+          track: await trackWithName(tracks.get(p.id)),
+          inBandSince,
+          bandTenureMet:
+            inBandSince && rules.minMonthsInBand > 0
+              ? addMonthsIso(inBandSince, rules.minMonthsInBand) <= today
+              : null,
+        };
+      }),
     );
   };
 

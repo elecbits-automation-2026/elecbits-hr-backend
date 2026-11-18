@@ -4,6 +4,8 @@ import { z } from '../../shared/zod.js';
 import {
   journeySchema,
   myJourneySchema,
+  nudgeResultSchema,
+  onboardingOverviewSchema,
   queueRowSchema,
   startJourneySchema,
   teamTaskSchema,
@@ -86,6 +88,32 @@ export const registerOnboardingDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: jsonResponse('Queue', z.array(queueRowSchema)),
       403: errorResponse('No hrbp.people grant'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/onboarding/overview',
+    tags: ['Onboarding'],
+    summary: 'Onboarding numbers + joiners with no journey (hrbp.people read)',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: jsonResponse('Overview', onboardingOverviewSchema),
+      403: errorResponse('No hrbp.people grant'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/onboarding/employee/{employeeId}/nudge',
+    tags: ['Onboarding'],
+    summary:
+      'Remind whoever owns an open step — joiner, manager, OPS, payroll — by bell and email; once a day (hrbp.people update)',
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: jsonResponse('Nudged', nudgeResultSchema),
+      404: errorResponse('No journey for this employee'),
+      409: errorResponse('JOURNEY_DONE | NUDGED_TODAY | NOTHING_TO_NUDGE'),
     },
   });
 

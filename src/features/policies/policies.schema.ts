@@ -95,6 +95,7 @@ export const trackerSchema = z
           id: z.string().uuid(),
           name: z.string(),
           employeeCode: z.string(),
+          department: z.string().nullable(),
         }),
         cells: z.array(
           z.object({

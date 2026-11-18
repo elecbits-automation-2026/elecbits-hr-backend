@@ -5,6 +5,7 @@ import { createAuthzRepository } from '../access/authz.repository.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createConcernsRepository } from './concerns.repository.js';
 import type {
+  AssignInput,
   CreateConcernInput,
   DecideInput,
   DeclineInput,
@@ -15,6 +16,7 @@ import type {
   NoteInput,
   QueueName,
   ResolveInput,
+  SeverityInput,
 } from './concerns.schema.js';
 import { createConcernsService } from './concerns.service.js';
 
@@ -77,6 +79,16 @@ export const concernsController = {
 
   acknowledge: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).acknowledge(requireId(req), actor(req)));
+  },
+
+  assign: async (req: Request, res: Response): Promise<void> => {
+    const input: AssignInput = req.body;
+    res.json(await service(req).assign(requireId(req), input.ownerId, actor(req)));
+  },
+
+  severity: async (req: Request, res: Response): Promise<void> => {
+    const input: SeverityInput = req.body;
+    res.json(await service(req).setSeverity(requireId(req), input.severity, actor(req)));
   },
 
   decide: async (req: Request, res: Response): Promise<void> => {

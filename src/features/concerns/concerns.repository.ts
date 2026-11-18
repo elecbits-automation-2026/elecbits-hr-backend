@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import { auditLog, concernNotes, concerns, employees } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
@@ -114,6 +114,13 @@ export const createConcernsRepository = (db: DbClient) => {
         .from(concerns)
         .where(notInArray(concerns.status, ['closed', 'resolved', 'declined']))
         .orderBy(asc(concerns.createdAt)),
+
+    /** Cases raised or closed since a moment — the queue's quarter stats. */
+    listTouchedSince: (since: Date): Promise<ConcernRow[]> =>
+      db.orm
+        .select()
+        .from(concerns)
+        .where(or(gte(concerns.createdAt, since), gte(concerns.closedAt, since))),
 
     listNotes: (concernId: string): Promise<ConcernNoteRow[]> =>
       db.orm

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
+  departments,
   employees,
   orgOwner,
   policies,
@@ -241,9 +242,11 @@ export const createPoliciesRepository = (db: DbClient) => ({
         id: employees.id,
         name: employees.name,
         employeeCode: employees.employeeCode,
+        department: departments.name,
       })
       .from(employees)
       .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
+      .leftJoin(departments, eq(departments.id, employees.departmentId))
       .where(
         and(
           inArray(employees.status, ['active', 'exiting']),

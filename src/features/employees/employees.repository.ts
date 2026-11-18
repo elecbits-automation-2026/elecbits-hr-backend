@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
@@ -59,6 +60,16 @@ export type InvitedInsertInput = InviteEmployeeInput & {
   claimTokenExpiresAt: Date;
 };
 
+/** The next free EB-NNNN code (highest existing number + 1). */
+const nextEmployeeCode = async (db: DbClient): Promise<string> => {
+  const maxRows = await db.query<{ max: number }>(
+    `SELECT COALESCE(MAX(SUBSTRING(employee_code FROM 4)::int), 0) AS max
+       FROM org.employees
+      WHERE employee_code ~ '^EB-[0-9]+$'`,
+  );
+  return `EB-${String((maxRows[0]?.max ?? 0) + 1).padStart(4, '0')}`;
+};
+
 /**
  * Insert one invited record: next free employee code, the Employee batch plus
  * any pre-attached batches, the audit row and optional bell rows — one
@@ -72,12 +83,7 @@ const insertInvitedRow = async (
   return db.transaction(async (tx) => {
     // Next free code. The unique index still backstops a concurrent race —
     // callers surface that as the same 409 a duplicate email produces.
-    const maxRows = await tx.query<{ max: number }>(
-      `SELECT COALESCE(MAX(SUBSTRING(employee_code FROM 4)::int), 0) AS max
-         FROM org.employees
-        WHERE employee_code ~ '^EB-[0-9]+$'`,
-    );
-    const employeeCode = `EB-${String((maxRows[0]?.max ?? 0) + 1).padStart(4, '0')}`;
+    const employeeCode = await nextEmployeeCode(tx);
 
     const rows = await tx.orm
       .insert(employees)
@@ -157,15 +163,23 @@ export const createEmployeesRepository = (db: DbClient) => ({
     return new Map(rows.map((r) => [r.id, r.name]));
   },
 
+  /** Suggestion for HR's Add employee form — the insert itself still decides. */
+  nextEmployeeCode: () => nextEmployeeCode(db),
+
   /**
    * Live records (not inactive, not the administration account) missing any
-   * intake detail HR owes: joining date, department or designation.
+   * intake detail HR owes — joining date, department or designation — or with
+   * no working manager: none set, or the one on record has left.
    */
-  listIncomplete: async (): Promise<EmployeeRow[]> => {
+  listIncomplete: async (): Promise<
+    Array<{ employee: EmployeeRow; managerStatus: EmployeeRow['status'] | null }>
+  > => {
+    const manager = alias(employees, 'manager');
     return db.orm
-      .select({ employee: employees })
+      .select({ employee: employees, managerStatus: manager.status })
       .from(employees)
       .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
+      .leftJoin(manager, eq(manager.id, employees.reportsTo))
       .where(
         and(
           ne(employees.status, 'inactive'),
@@ -174,11 +188,12 @@ export const createEmployeesRepository = (db: DbClient) => ({
             isNull(employees.dateOfJoining),
             isNull(employees.departmentId),
             isNull(employees.designation),
+            isNull(employees.reportsTo),
+            eq(manager.status, 'inactive'),
           ),
         ),
       )
-      .orderBy(employees.name)
-      .then((rows) => rows.map((r) => r.employee));
+      .orderBy(employees.name);
   },
 
   /** The Owner-linked record — the administration account, never deactivated. */

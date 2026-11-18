@@ -102,10 +102,40 @@ export const queueRowSchema = z
     progress: z.object({ done: z.number().int(), total: z.number().int() }),
     /** Days until dueOn; negative = overdue. */
     daysLeft: z.number().int(),
+    /** HR already nudged this journey today (one nudge a day). */
+    nudgedToday: z.boolean(),
   })
   .openapi('OnboardingQueueRow');
+
+/** HR overview: the numbers + joiners in the 90-day window with no journey. */
+export const onboardingOverviewSchema = z
+  .object({
+    stats: z.object({
+      joinedLast90Days: z.number().int(),
+      inProgress: z.number().int(),
+      pastDay30: z.number().int(),
+      done: z.number().int(),
+    }),
+    noJourney: z.array(
+      z.object({
+        employee: z.object({
+          id: z.string().uuid(),
+          name: z.string(),
+          employeeCode: z.string(),
+        }),
+        status: z.enum(['active', 'invited']),
+        dateOfJoining: z.string(),
+      }),
+    ),
+  })
+  .openapi('OnboardingOverview');
+
+export const nudgeResultSchema = z
+  .object({ recipients: z.number().int() })
+  .openapi('OnboardingNudgeResult');
 
 export type StartJourneyInput = z.infer<typeof startJourneySchema>;
 export type OnboardingTaskDto = z.infer<typeof onboardingTaskSchema>;
 export type JourneyDto = z.infer<typeof journeySchema>;
 export type QueueRowDto = z.infer<typeof queueRowSchema>;
+export type OnboardingOverviewDto = z.infer<typeof onboardingOverviewSchema>;

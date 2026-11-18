@@ -55,6 +55,12 @@ employeesRoutes.get(
   requireAccess('hrbp.people', 'read'),
   employeesController.incomplete,
 );
+// Suggested code for the Add employee form (before /:id).
+employeesRoutes.get(
+  '/next-code',
+  requireAccess('hrbp.people', 'create'),
+  employeesController.nextCode,
+);
 employeesRoutes.get(
   '/:id',
   requireAccess('hrbp.people', 'read'),

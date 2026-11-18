@@ -332,7 +332,8 @@ export const remindersSent = opsSchema.table(
     // nomination | concern_overdue | return_due | return_due_ops | return_escalated |
     // hiring_plan:<quarter> (per department) | hiring_plan_due:<quarter> (per recipient) |
     // next_action_due:<date> (per application) | interview_soon:<starts_at UTC> (per slot) |
-    // reimbursement_digest:<YYYY-MM> (subject = the recipient)
+    // reimbursement_digest:<YYYY-MM> (subject = the recipient) |
+    // onboarding_nudge (subject = the journey; HR's manual nudge, once a day)
     kind: text('kind').notNull(),
     subjectId: uuid('subject_id').notNull(),
     recipientId: uuid('recipient_id')

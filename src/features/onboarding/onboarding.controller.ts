@@ -86,4 +86,21 @@ export const onboardingController = {
   queue: async (req: Request, res: Response): Promise<void> => {
     res.json(await keepReachable(req, await service(req).queue(), (r) => r.employee.id));
   },
+
+  overview: async (req: Request, res: Response): Promise<void> => {
+    const result = await service(req).overview();
+    res.json({
+      ...result,
+      noJourney: await keepReachable(req, result.noJourney, (r) => r.employee.id),
+    });
+  },
+
+  nudge: async (req: Request, res: Response): Promise<void> => {
+    const { employeeId } = req.params;
+    if (!isUuid(employeeId)) throw createError(400, 'Invalid employee id');
+    await assertReaches(req, employeeId);
+    const result = await service(req).nudge(employeeId, actor(req));
+    req.log.info({ employeeId, recipients: result.recipients }, 'onboarding nudged');
+    res.json(result);
+  },
 };

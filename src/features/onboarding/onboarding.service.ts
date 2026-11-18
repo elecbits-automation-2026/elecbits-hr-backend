@@ -12,6 +12,7 @@ import type {
 } from './onboarding.repository.js';
 import type {
   JourneyDto,
+  OnboardingOverviewDto,
   OnboardingTaskDto,
   QueueRowDto,
   StartJourneyInput,
@@ -422,7 +423,10 @@ export const createOnboardingService = (deps: {
   /** HR queue: progress + days-left per journey, open and overdue first. */
   const queue = async (): Promise<QueueRowDto[]> => {
     const rows = await repo.listJourneys();
-    const tasks = await repo.tasksForJourneys(rows.map((r) => r.row.id));
+    const [tasks, nudges] = await Promise.all([
+      repo.tasksForJourneys(rows.map((r) => r.row.id)),
+      repo.lastNudgesFor(rows.map((r) => r.row.id)),
+    ]);
     const byJourney = new Map<string, TaskRow[]>();
     for (const t of tasks) {
       const list = byJourney.get(t.journeyId) ?? [];
@@ -446,9 +450,113 @@ export const createOnboardingService = (deps: {
           status: r.row.status,
           progress: { done: built.filter((t) => t.done).length, total: built.length },
           daysLeft: daysBetween(today, r.row.dueOn),
+          nudgedToday: localDate(nudges.get(r.row.id) ?? new Date(0)) === today,
         };
       }),
     );
+  };
+
+  /**
+   * HR overview numbers + joiners the 90-day window should cover but who have
+   * no journey (a missing joining date, or added before auto-start existed).
+   */
+  const overview = async (): Promise<OnboardingOverviewDto> => {
+    const today = localDate();
+    const windowStart = plusDays(today, -ONBOARDING_AUTO_CREATE_WINDOW_DAYS);
+    const [journeys, joined, missing] = await Promise.all([
+      repo.listJourneys(),
+      repo.joinedBetween(windowStart, today),
+      repo.listJoinersWithoutJourney(windowStart),
+    ]);
+    const open = journeys.filter((j) => j.row.status === 'open');
+    return {
+      stats: {
+        joinedLast90Days: joined.length,
+        inProgress: open.length,
+        pastDay30: open.filter((j) => j.row.dueOn < today).length,
+        done: journeys.length - open.length,
+      },
+      noJourney: missing.map((p) => ({
+        employee: { id: p.id, name: p.name, employeeCode: p.employeeCode },
+        status: p.status as 'active' | 'invited',
+        dateOfJoining: p.dateOfJoining!,
+      })),
+    };
+  };
+
+  /**
+   * HR's Nudge: a bell + email to whoever still owns an open step — the
+   * joiner, their manager, OPS, payroll. HR's own steps are the sender's to
+   * do, so HR and Admin are not nudged. Once a day per journey.
+   */
+  const nudge = async (employeeId: string, actor: ActorContext): Promise<{ recipients: number }> => {
+    const journey = await repo.findJourneyByEmployee(employeeId);
+    if (!journey) throw createError(404, 'No onboarding journey', { code: 'JOURNEY_NOT_FOUND' });
+    if (journey.status === 'done') {
+      throw createError(409, 'This onboarding is already complete', { code: 'JOURNEY_DONE' });
+    }
+    const today = localDate();
+    const last = (await repo.lastNudgesFor([journey.id])).get(journey.id);
+    if (last && localDate(last) === today) {
+      throw createError(409, 'Already nudged today — try again tomorrow', { code: 'NUDGED_TODAY' });
+    }
+    const [employee, rows] = await Promise.all([
+      repo.findEmployee(employeeId),
+      repo.listTasks(journey.id),
+    ]);
+    const open = (await buildTasks(employeeId, rows)).filter((t) => !t.done);
+    const countOf = (owner: TaskRow['owner']) => open.filter((t) => t.owner === owner).length;
+    const name = employee?.name ?? 'A new joiner';
+    const steps = (n: number) => `${n} ${n === 1 ? 'step' : 'steps'}`;
+    const due = journey.dueOn;
+    const [ops, payroll] = await Promise.all([
+      countOf('ops') > 0 ? authz.listBroadHolders('ops.assets', 'update') : Promise.resolve([]),
+      countOf('payroll') > 0 ? authz.listBroadHolders('pr.payroll', 'update') : Promise.resolve([]),
+    ]);
+    const manager = employee?.reportsTo ?? null;
+    const candidates: Array<{ to: string[]; title: string; link: string } | null> = [
+      countOf('employee') > 0 && employee?.status === 'active'
+        ? {
+            to: [employeeId],
+            title: `Your onboarding: ${steps(countOf('employee'))} still open — due ${due}`,
+            link: '/onboarding',
+          }
+        : null,
+      countOf('manager') > 0 && manager
+        ? {
+            to: [manager],
+            title: `${name}'s onboarding: ${steps(countOf('manager'))} waiting on you — due ${due}`,
+            link: '/onboarding',
+          }
+        : null,
+      ops.length > 0
+        ? {
+            to: ops,
+            title: `${name}'s onboarding: ${steps(countOf('ops'))} waiting on OPS — due ${due}`,
+            link: '/hr/assets',
+          }
+        : null,
+      payroll.length > 0
+        ? {
+            to: payroll,
+            title: `${name}'s onboarding: ${steps(countOf('payroll'))} waiting on payroll — due ${due}`,
+            link: '/hr/payroll',
+          }
+        : null,
+    ];
+    const sends = candidates
+      .filter((c): c is NonNullable<typeof c> => c !== null)
+      // Never nudge the sender about their own steps.
+      .map((c) => ({
+        to: c.to.filter((id) => id !== actor.actorEmployeeId),
+        event: { type: 'onboarding.nudge', title: c.title, link: c.link },
+      }))
+      .filter((s) => s.to.length > 0);
+    if (sends.length === 0) {
+      throw createError(409, 'Nothing open for anyone but HR', { code: 'NOTHING_TO_NUDGE' });
+    }
+    await repo.nudge(journey.id, employeeId, today, sends, actor);
+    return { recipients: new Set(sends.flatMap((s) => s.to)).size };
   };
 
   /** OPS / payroll: the joiner tasks waiting on their team (org grant). */
@@ -491,6 +599,8 @@ export const createOnboardingService = (deps: {
     uploadTaskFile,
     taskFile,
     queue,
+    overview,
+    nudge,
     teamTasks,
   };
 };
