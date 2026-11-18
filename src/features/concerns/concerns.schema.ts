@@ -28,6 +28,7 @@ export const POSH_CATEGORY = 'sexual_harassment';
 // `whistleblower` is history only: the section was removed (learner,
 // 2026-11-05) — nothing new is raised on it; old rows read as complaints.
 const TRACK = z.enum(['dispute', 'complaint', 'whistleblower']);
+const SEVERITY = z.enum(['low', 'medium', 'high']);
 const RAISE_TRACK = z.enum(['dispute', 'complaint']);
 const STATUS = z.enum([
   'open',
@@ -163,10 +164,27 @@ export const concernSchema = z
       accept: z.boolean(),
       escalate: z.boolean(),
       note: z.boolean(),
+      /** Set the owner / severity (HR-level live cases, handlers only). */
+      assign: z.boolean(),
     }),
+    /** HR-queue triage — handlers only; always null in the raiser's view. */
+    owner: z.object({ id: z.string().uuid(), name: z.string() }).nullable(),
+    severity: SEVERITY.nullable(),
+    /** Who the case may be assigned to (its handlers); empty unless can.assign. */
+    assignable: z.array(z.object({ id: z.string().uuid(), name: z.string() })),
     notes: z.array(concernNoteSchema),
   })
   .openapi('Concern');
+
+export const assignSchema = z
+  .object({ ownerId: z.string().uuid().nullable() })
+  .strict()
+  .openapi('AssignConcern');
+
+export const severitySchema = z
+  .object({ severity: SEVERITY.nullable() })
+  .strict()
+  .openapi('ConcernSeverityInput');
 
 export const createdConcernSchema = z
   .object({
@@ -182,6 +200,18 @@ export const queueSummarySchema = z
     label: z.string(),
     open: z.number().int(),
     overdue: z.number().int(),
+    /** Open cases with no owner / owned by the caller. */
+    unassigned: z.number().int(),
+    mine: z.number().int(),
+    bySeverity: z.object({
+      low: z.number().int(),
+      medium: z.number().int(),
+      high: z.number().int(),
+      unset: z.number().int(),
+    }),
+    /** Raised → acknowledged, cases raised this quarter; null when none yet. */
+    avgDaysToAck: z.number().nullable(),
+    closedThisQuarter: z.number().int(),
   })
   .openapi('ConcernQueue');
 
@@ -204,6 +234,8 @@ export type DeclineInput = z.infer<typeof declineSchema>;
 export type FollowUpInput = z.infer<typeof followUpSchema>;
 export type FollowUpNoteInput = z.infer<typeof followUpNoteSchema>;
 export type ConcernDto = z.infer<typeof concernSchema>;
+export type AssignInput = z.infer<typeof assignSchema>;
+export type SeverityInput = z.infer<typeof severitySchema>;
 export type ConcernNoteDto = z.infer<typeof concernNoteSchema>;
 export type QueueSummaryDto = z.infer<typeof queueSummarySchema>;
 export type QueueName = QueueSummaryDto['queue'];

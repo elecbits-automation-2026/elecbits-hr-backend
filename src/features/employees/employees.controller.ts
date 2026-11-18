@@ -66,6 +66,10 @@ export const employeesController = {
     );
   },
 
+  nextCode: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).nextEmployeeCode());
+  },
+
   getById: async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid employee id');

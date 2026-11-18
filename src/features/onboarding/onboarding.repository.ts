@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
@@ -6,11 +6,16 @@ import {
   onboardingJourneys,
   onboardingTaskFiles,
   onboardingTasks,
+  orgOwner,
   policies,
   policyAcks,
+  remindersSent,
 } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import type { TemplateTask } from './onboarding.template.js';
+
+/** reminders_sent kind for HR's manual onboarding nudge (subject = the journey). */
+const NUDGE_KIND = 'onboarding_nudge';
 
 export type JourneyRow = typeof onboardingJourneys.$inferSelect;
 export type TaskRow = typeof onboardingTasks.$inferSelect;
@@ -254,6 +259,97 @@ export const createOnboardingRepository = (db: DbClient) => ({
       .update(onboardingJourneys)
       .set({ status, updatedAt: new Date() })
       .where(eq(onboardingJourneys.id, journeyId));
+  },
+
+  /**
+   * Joiners (active or still invited) with a joining date on or after `from`
+   * and no journey yet — the HR overview's "no journey" list.
+   */
+  listJoinersWithoutJourney: async (from: string) => {
+    return db.orm
+      .select({
+        id: employees.id,
+        name: employees.name,
+        employeeCode: employees.employeeCode,
+        status: employees.status,
+        dateOfJoining: employees.dateOfJoining,
+      })
+      .from(employees)
+      .leftJoin(onboardingJourneys, eq(onboardingJourneys.employeeId, employees.id))
+      .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
+      .where(
+        and(
+          inArray(employees.status, ['active', 'invited']),
+          gte(employees.dateOfJoining, from),
+          isNull(onboardingJourneys.id),
+          isNull(orgOwner.employeeId),
+        ),
+      )
+      .orderBy(asc(employees.dateOfJoining), asc(employees.name));
+  },
+
+  /** People (active or exiting) whose joining date falls in [from, to]. */
+  joinedBetween: async (from: string, to: string): Promise<string[]> => {
+    const rows = await db.orm
+      .select({ id: employees.id })
+      .from(employees)
+      .where(
+        and(
+          inArray(employees.status, ['active', 'exiting']),
+          gte(employees.dateOfJoining, from),
+          lte(employees.dateOfJoining, to),
+        ),
+      );
+    return rows.map((r) => r.id);
+  },
+
+  /** When each journey was last nudged (reminders_sent, kind onboarding_nudge). */
+  lastNudgesFor: async (journeyIds: string[]): Promise<Map<string, Date>> => {
+    if (journeyIds.length === 0) return new Map();
+    const rows = await db.orm
+      .select({
+        journeyId: remindersSent.subjectId,
+        lastAt: sql<Date>`max(${remindersSent.sentAt})`.mapWith(
+          (v: string | Date) => new Date(v),
+        ),
+      })
+      .from(remindersSent)
+      .where(
+        and(
+          eq(remindersSent.kind, NUDGE_KIND),
+          inArray(remindersSent.subjectId, journeyIds),
+        ),
+      )
+      .groupBy(remindersSent.subjectId);
+    return new Map(rows.map((r) => [r.journeyId, r.lastAt]));
+  },
+
+  /** HR's nudge: one reminders_sent row + bell (and email) per recipient, plus the audit row. */
+  nudge: async (
+    journeyId: string,
+    employeeId: string,
+    today: string,
+    sends: Array<{ to: string[]; event: NotificationEvent }>,
+    actor: ActorContext,
+  ): Promise<void> => {
+    await db.transaction(async (tx) => {
+      const recipients = [...new Set(sends.flatMap((s) => s.to))];
+      await tx.orm
+        .insert(remindersSent)
+        .values(recipients.map((recipientId) => ({ kind: NUDGE_KIND, subjectId: journeyId, recipientId })));
+      for (const s of sends) {
+        await insertNotifications(tx, s.to, s.event, {
+          email: true,
+          dedupeKey: `${NUDGE_KIND}:${journeyId}:${today}`,
+        });
+      }
+      await tx.orm.insert(auditLog).values({
+        actorUserId: actor.actorUserId,
+        action: 'onboarding.nudged',
+        subject: `employees:${employeeId}`,
+        detail: JSON.stringify({ recipients: recipients.length }),
+      });
+    });
   },
 
   /** HR queue: every journey with its person. TODO(skeleton): scope filter. */

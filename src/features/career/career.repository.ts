@@ -196,6 +196,7 @@ export const createCareerRepository = (db: DbClient) => ({
         name: employees.name,
         employeeCode: employees.employeeCode,
         level: employees.level,
+        dateOfJoining: employees.dateOfJoining,
       })
       .from(employees)
       .where(
@@ -205,6 +206,22 @@ export const createCareerRepository = (db: DbClient) => ({
         ),
       )
       .orderBy(sql`${employees.level} desc`, employees.name);
+  },
+
+  /** Each person's latest band change — "in band since" for the team view. */
+  lastLevelChangesFor: async (employeeIds: string[]): Promise<Map<string, Date>> => {
+    if (employeeIds.length === 0) return new Map();
+    const rows = await db.orm
+      .select({
+        employeeId: careerLevelChanges.employeeId,
+        lastAt: sql<Date>`max(${careerLevelChanges.createdAt})`.mapWith(
+          (v: string | Date) => new Date(v),
+        ),
+      })
+      .from(careerLevelChanges)
+      .where(inArray(careerLevelChanges.employeeId, employeeIds))
+      .groupBy(careerLevelChanges.employeeId);
+    return new Map(rows.map((r) => [r.employeeId, r.lastAt]));
   },
 
   openTracksFor: async (employeeIds: string[]): Promise<Map<string, CareerTrackRow>> => {

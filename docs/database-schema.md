@@ -6,7 +6,7 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**94 tables · 70 enums.**
+**94 tables · 71 enums.**
 
 | Schema   | Tables | Holds                                                                                               |
 | -------- | ------ | --------------------------------------------------------------------------------------------------- |
@@ -38,6 +38,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `candidate_source`          | `naukri`, `linkedin`, `internshala`, `careers_page`, `agency`, `campus`, `social`, `referral`, `internal`, `other`                                                                     |
 | `career_track_status`       | `open`, `met`, `closed`                                                                                                                                                                |
 | `concern_note_kind`         | `note`, `reply`, `decision`, `system`                                                                                                                                                  |
+| `concern_severity`          | `low`, `medium`, `high`                                                                                                                                                                |
 | `concern_status`            | `open`, `acknowledged`, `investigating`, `decided`, `resolved`, `closed`, `declined`                                                                                                   |
 | `concern_track`             | `dispute`, `complaint`, `whistleblower`                                                                                                                                                |
 | `employee_status`           | `invited`, `active`, `exiting`, `inactive`                                                                                                                                             |
@@ -591,6 +592,9 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `outcome`             | text                     | yes  |                     |                      |
 | `resolution`          | text                     | yes  |                     |                      |
 | `closed_at`           | timestamp with time zone | yes  |                     |                      |
+| `owner_id`            | uuid                     | yes  |                     | → `org.employees.id` |
+| `owner_assigned_at`   | timestamp with time zone | yes  |                     |                      |
+| `severity`            | concern_severity         | yes  |                     |                      |
 | `created_at`          | timestamp with time zone |      | `now()`             |                      |
 | `updated_at`          | timestamp with time zone |      | `now()`             |                      |
 

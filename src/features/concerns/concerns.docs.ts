@@ -2,6 +2,7 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
 import { z } from '../../shared/zod.js';
 import {
+  assignSchema,
   concernPersonSchema,
   concernSchema,
   createConcernSchema,
@@ -15,6 +16,7 @@ import {
   noteSchema,
   queueSummarySchema,
   resolveSchema,
+  severitySchema,
 } from './concerns.schema.js';
 
 const bearer = [{ bearerAuth: [] }];
@@ -127,6 +129,16 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
       '/api/v1/concerns/{id}/escalate',
       'Raiser escalates a decided dispute within the escalation window',
       escalateSchema as unknown as typeof decideSchema,
+    ],
+    [
+      '/api/v1/concerns/{id}/assign',
+      'HR-level case: set the owner (one of its handlers) or clear it — bell to the owner, never email',
+      assignSchema as unknown as typeof decideSchema,
+    ],
+    [
+      '/api/v1/concerns/{id}/severity',
+      "HR-level case: internal severity (low / medium / high, null clears) — never shown to the raiser",
+      severitySchema as unknown as typeof decideSchema,
     ],
     [
       '/api/v1/concerns/follow-up',

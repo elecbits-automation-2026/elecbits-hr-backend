@@ -16,6 +16,7 @@ import { orgSchema } from './departments.js';
 import { employees } from './employees.js';
 import {
   concernNoteKindEnum,
+  concernSeverityEnum,
   concernStatusEnum,
   concernTrackEnum,
   openDoorBookingStatusEnum,
@@ -65,6 +66,11 @@ export const concerns = orgSchema.table(
     outcome: text('outcome'),
     resolution: text('resolution'),
     closedAt: timestamp('closed_at', { withTimezone: true }),
+    // HR queue triage (internal, never shown to the raiser): who is handling
+    // it — always one of the case's handlers — and how serious it is.
+    ownerId: uuid('owner_id').references(() => employees.id),
+    ownerAssignedAt: timestamp('owner_assigned_at', { withTimezone: true }),
+    severity: concernSeverityEnum('severity'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

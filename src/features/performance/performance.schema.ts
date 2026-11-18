@@ -53,6 +53,8 @@ export const myGoalsSchema = z
     atRisk: z.number().int(),
     /** Weights should sum to 100 — the UI warns, nothing blocks. */
     weightTotal: z.number(),
+    /** The department's KPI text (performance.departmentTargets); null when none is set. */
+    departmentKpi: z.string().nullable(),
   })
   .openapi('MyGoals');
 

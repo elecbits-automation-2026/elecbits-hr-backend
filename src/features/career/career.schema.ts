@@ -122,6 +122,10 @@ export const teamCareerRowSchema = z
     /** Last approved recognition, if any — feeds "due a conversation". */
     lastRecognizedAt: z.string().datetime().nullable(),
     track: careerTrackSchema.nullable(),
+    /** Last band change, else the joining date; null when neither is on record. */
+    inBandSince: z.string().nullable(),
+    /** Past career.selfRequest.minMonthsInBand; null when unknown or the rule is off. */
+    bandTenureMet: z.boolean().nullable(),
   })
   .openapi('TeamCareerRow');
 

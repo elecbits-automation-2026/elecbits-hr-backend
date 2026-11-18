@@ -120,11 +120,21 @@ export const createEmployeesService = (deps: {
   const incomplete = async (): Promise<IncompleteRecordDto[]> => {
     const rows = await repo.listIncomplete();
     const dept = await withDepartment();
-    return rows.map((row) => ({
+    return rows.map(({ employee: row, managerStatus }) => ({
       employee: { ...toEmployee(row), departmentName: dept(row) },
       missing: missingIntake(row),
+      managerIssue: !row.reportsTo
+        ? ('none' as const)
+        : managerStatus === 'inactive'
+          ? ('left' as const)
+          : null,
     }));
   };
+
+  /** The code the Add employee form pre-fills; HR may still type their own. */
+  const nextEmployeeCode = async (): Promise<{ employeeCode: string }> => ({
+    employeeCode: await repo.nextEmployeeCode(),
+  });
 
   const newHirePolicy = () =>
     settings.effectiveMany(['people.newHireDefaults'] as const);
@@ -703,6 +713,7 @@ export const createEmployeesService = (deps: {
   return {
     list,
     incomplete,
+    nextEmployeeCode,
     importEmployees,
     getById,
     create,

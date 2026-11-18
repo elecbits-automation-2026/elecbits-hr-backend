@@ -199,8 +199,14 @@ export const incompleteRecordSchema = z
   .object({
     employee: employeeSchema,
     missing: z.array(z.enum(INTAKE_FIELDS)),
+    /** No manager set, or the manager on record has left. */
+    managerIssue: z.enum(['none', 'left']).nullable(),
   })
   .openapi('IncompleteRecord');
+
+export const nextEmployeeCodeSchema = z
+  .object({ employeeCode: z.string() })
+  .openapi('NextEmployeeCode');
 
 /**
  * Bulk import (refinement plan, Phase 1): rows as parsed from HR's CSV, all

@@ -192,6 +192,8 @@ export const concernStatusEnum = pgEnum('concern_status', [
   'declined',
 ]);
 export const concernNoteKindEnum = pgEnum('concern_note_kind', ['note', 'reply', 'decision', 'system']);
+/** HR's internal triage of a case — never shown to the raiser. */
+export const concernSeverityEnum = pgEnum('concern_severity', ['low', 'medium', 'high']);
 export const openDoorBookingStatusEnum = pgEnum('open_door_booking_status', [
   'booked',
   'done',

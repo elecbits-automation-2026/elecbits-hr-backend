@@ -179,9 +179,21 @@ export const createPerformanceService = (deps: {
     return repo.ensureCycle(q.name, q.startDate, q.endDate);
   };
 
+  /** The department's KPI text from performance.departmentTargets (null = none set). */
+  const departmentKpiOf = async (employeeId: string): Promise<string | null> => {
+    const [[line], targets] = await Promise.all([
+      repo.findLines([employeeId]),
+      settings.effective('performance.departmentTargets'),
+    ]);
+    return targets.departments.find((t) => t.departmentId === line?.departmentId)?.kpi || null;
+  };
+
   const myGoalsFor = async (employeeId: string): Promise<MyGoalsDto> => {
     const cycle = await currentCycle();
-    const rows = await repo.listGoals(employeeId, cycle.id);
+    const [rows, departmentKpi] = await Promise.all([
+      repo.listGoals(employeeId, cycle.id),
+      departmentKpiOf(employeeId),
+    ]);
     const names = await repo.namesByIds(rows.map((g) => g.createdBy));
     const today = localDate();
     return {
@@ -196,6 +208,7 @@ export const createPerformanceService = (deps: {
       byCategory: categoryAttainment(rows),
       atRisk: rows.filter((g) => isAtRisk(g, today)).length,
       weightTotal: round1(rows.reduce((acc, g) => acc + Number(g.weight), 0)),
+      departmentKpi,
     };
   };
 
@@ -592,14 +605,11 @@ export const createPerformanceService = (deps: {
     const goalIds = await checkGoalTags(actor.actorEmployeeId, input.goalIds);
     // Score against the person's OWN goals; null = unscored, by design.
     const cycle = await currentCycle();
-    const [ownGoals, [line], targets] = await Promise.all([
+    const [ownGoals, departmentKpi] = await Promise.all([
       repo.listGoals(actor.actorEmployeeId, cycle.id),
-      repo.findLines([actor.actorEmployeeId]),
-      settings.effective('performance.departmentTargets'),
+      // The department's KPI text, the same lookup Daily KPI shows on the page.
+      departmentKpiOf(actor.actorEmployeeId),
     ]);
-    // The department's KPI text, the same lookup Daily KPI shows on the page.
-    const departmentKpi =
-      targets.departments.find((t) => t.departmentId === line?.departmentId)?.kpi || null;
     const scored = await scoreUpdate(
       input.note,
       ownGoals.map((g) => ({
