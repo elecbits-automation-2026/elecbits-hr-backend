@@ -592,7 +592,14 @@ export const createPerformanceService = (deps: {
     const goalIds = await checkGoalTags(actor.actorEmployeeId, input.goalIds);
     // Score against the person's OWN goals; null = unscored, by design.
     const cycle = await currentCycle();
-    const ownGoals = await repo.listGoals(actor.actorEmployeeId, cycle.id);
+    const [ownGoals, [line], targets] = await Promise.all([
+      repo.listGoals(actor.actorEmployeeId, cycle.id),
+      repo.findLines([actor.actorEmployeeId]),
+      settings.effective('performance.departmentTargets'),
+    ]);
+    // The department's KPI text, the same lookup Daily KPI shows on the page.
+    const departmentKpi =
+      targets.departments.find((t) => t.departmentId === line?.departmentId)?.kpi || null;
     const scored = await scoreUpdate(
       input.note,
       ownGoals.map((g) => ({
@@ -600,7 +607,9 @@ export const createPerformanceService = (deps: {
         metric: g.metric,
         target: g.target,
         progress: g.progress,
+        weight: Number(g.weight),
       })),
+      { departmentKpi },
     );
     const row = await repo.upsertUpdate(
       actor.actorEmployeeId,
@@ -697,18 +706,24 @@ export const createPerformanceService = (deps: {
     days: number,
   ): Promise<TeamUpdatesRowDto[]> => {
     const chain = await repo.listChain(actor.actorEmployeeId);
-    const from = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+    // The last `days` days INCLUDING today, in the company's local calendar
+    // (the same window the strip below and the rest of the app use).
+    const today = localDate();
+    const from = localDate(new Date(Date.now() - (days - 1) * DAY_MS));
     const ids = chain.map((p) => p.id);
     const policy = await updatePolicy();
-    const [rows, misses] = await Promise.all([
+    const [rows, misses, strips] = await Promise.all([
       repo.updatesForEmployees(ids, from),
       missesThisMonth(ids, policy),
+      stripsFor(ids, from, today, policy),
     ]);
     const allowance = WORK_UPDATE_MISS_ALLOWANCE;
     await checkAllowance(ids, misses, allowance);
     return chain.map((p) => ({
       employee: p,
       updates: rows.filter((u) => u.employeeId === p.id).map(toUpdate),
+      // One status per day — the manager's people × days grid.
+      strip: strips.get(p.id) ?? [],
       missesThisMonth: misses.get(p.id) ?? 0,
       overAllowance: (misses.get(p.id) ?? 0) > allowance,
     }));
@@ -722,7 +737,13 @@ export const createPerformanceService = (deps: {
    */
   const dailyKpiInputs = async (employeeIds: string[], date: string) => {
     const from = localDate(new Date(Date.parse(`${date}T00:00:00Z`) - 13 * DAY_MS));
-    const [cycle, policy] = await Promise.all([currentCycle(), updatePolicy()]);
+    // The quarter of the DAY being looked at — browsing back across a quarter
+    // line shows that quarter's goals and cycle, not today's.
+    const q = quarterOf(new Date(`${date}T12:00:00`));
+    const [cycle, policy] = await Promise.all([
+      repo.ensureCycle(q.name, q.startDate, q.endDate),
+      updatePolicy(),
+    ]);
     const [strips, goalRows, updates] = await Promise.all([
       stripsFor(employeeIds, from, date, policy),
       repo.goalsForEmployees(employeeIds, cycle.id),

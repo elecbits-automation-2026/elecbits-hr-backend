@@ -164,6 +164,56 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
   }
 
   registry.registerPath({
+    method: 'post',
+    path: '/api/v1/hiring/applications/{id}/move-back',
+    tags,
+    summary:
+      'One stage back (reason required): interviewing → sourced, interviewed → last round reopened, offer stages → interviewed (offer returned)',
+    security,
+    request: { params: idParam, body: jsonBody(endApplicationSchema) },
+    responses: {
+      200: jsonResponse('Moved back', applicationSchema),
+      409: errorResponse('Hired / joined, or no earlier stage'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/v1/hiring/applications/{id}/restore',
+    tags,
+    summary:
+      'Bring a rejected / withdrawn candidate back to the stage they ended from (reason required)',
+    security,
+    request: { params: idParam, body: jsonBody(endApplicationSchema) },
+    responses: {
+      200: jsonResponse('Restored', applicationSchema),
+      409: errorResponse('Not ended, position closed or on hold, or candidate anonymised'),
+    },
+  });
+
+  for (const action of ['hold', 'resume'] as const) {
+    registry.registerPath({
+      method: 'post',
+      path: `/api/v1/hiring/positions/{id}/${action}`,
+      tags,
+      summary:
+        action === 'hold'
+          ? "Put a position on hold (reason) — the line's TA RM or an HRBP; blocks adding, interviews, offers and hiring"
+          : 'Resume a held position',
+      security,
+      request:
+        action === 'hold'
+          ? { params: idParam, body: jsonBody(endApplicationSchema) }
+          : { params: idParam },
+      responses: {
+        204: { description: action === 'hold' ? 'On hold' : 'Resumed' },
+        403: errorResponse("Not the line's TA RM or an HRBP"),
+        409: errorResponse('Already in that state'),
+      },
+    });
+  }
+
+  registry.registerPath({
     method: 'put',
     path: '/api/v1/hiring/requisitions/{id}/rounds/{round}/interviewer',
     tags,

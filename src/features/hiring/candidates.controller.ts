@@ -122,6 +122,24 @@ export const candidatesController = {
     );
   },
 
+  moveBack: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).moveBack(req.params.id!, req.body.reason, actor(req)));
+  },
+
+  restore: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).restore(req.params.id!, req.body.reason, actor(req)));
+  },
+
+  hold: async (req: Request, res: Response): Promise<void> => {
+    await service(req).setHold(req.params.id!, { reason: req.body.reason }, actor(req));
+    res.status(204).end();
+  },
+
+  resume: async (req: Request, res: Response): Promise<void> => {
+    await service(req).setHold(req.params.id!, null, actor(req));
+    res.status(204).end();
+  },
+
   swapInterviewer: async (req: Request, res: Response): Promise<void> => {
     await service(req).swapInterviewer(
       req.params.id!,

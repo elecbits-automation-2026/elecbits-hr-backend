@@ -42,6 +42,7 @@ import { registerQuarterReportsDocs } from '../features/quarter-reports/index.js
 import { registerSettingsDocs } from '../features/settings/index.js';
 import { registerNotificationsDocs } from '../features/notifications/index.js';
 import { registerJobsDocs } from '../features/jobs/index.js';
+import { registerEmailDocs } from '../features/email/index.js';
 import { registerConcernsDocs } from '../features/concerns/index.js';
 import { registerOpenDoorDocs } from '../features/open-door/index.js';
 import { apiErrorSchema } from './helpers.js';
@@ -106,6 +107,7 @@ export const buildOpenApiDocument = () => {
   registerSettingsDocs(registry);
   registerNotificationsDocs(registry);
   registerJobsDocs(registry);
+  registerEmailDocs(registry);
   registerConcernsDocs(registry);
   registerOpenDoorDocs(registry);
 

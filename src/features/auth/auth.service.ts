@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
 import { hashClaimToken, isCompanyEmail } from '../../shared/helpers/helpers.js';
 import type { ClaimOrgInput, ClaimRecordInput, LoginInput } from './auth.schema.js';
+import { pkcePair, type GoogleOAuth } from './google.js';
 import type { AuthRepository } from './auth.repository.js';
 import type { IssuedSession, SessionDto, UserRow } from './auth.types.js';
 
@@ -36,8 +37,14 @@ const sessionEnded = (message = 'Your session has ended — sign in again') =>
  *    renewal, a replayed old token revokes its whole family (theft), and
  *    logout / deactivation revoke families outright.
  */
-export const createAuthService = (deps: { repo: AuthRepository }) => {
+export const createAuthService = (deps: {
+  repo: AuthRepository;
+  google?: GoogleOAuth | null;
+}) => {
   const { repo } = deps;
+
+  /** How long a started Google sign-in stays completable. */
+  const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
   const accessSession = (user: UserRow): SessionDto => ({
     accessToken: jwt.sign(
@@ -199,10 +206,105 @@ export const createAuthService = (deps: { repo: AuthRepository }) => {
     if (row) await repo.revokeFamily(row.familyId, 'logout');
   };
 
+  const requireGoogle = (): GoogleOAuth => {
+    if (!deps.google) {
+      throw createError(503, 'Google sign-in is not configured', {
+        code: 'SSO_DISABLED',
+      });
+    }
+    return deps.google;
+  };
+
+  /**
+   * Begin Google sign-in: mint a `state` + PKCE challenge, store them
+   * server-side (single-use, short-lived), and return the Google URL to send
+   * the browser to. The verifier never leaves the server.
+   */
+  const googleStart = async (): Promise<string> => {
+    const google = requireGoogle();
+    const state = randomBytes(16).toString('base64url');
+    const { verifier, challenge } = pkcePair();
+    await repo.saveOauthState({
+      state,
+      codeVerifier: verifier,
+      expiresAt: new Date(Date.now() + OAUTH_STATE_TTL_MS),
+    });
+    return google.authUrl({ state, codeChallenge: challenge });
+  };
+
+  /**
+   * Finish Google sign-in: match the `state`, trade the code for an ID token,
+   * verify it, and only then look up the HR account. Google proves WHO; the
+   * HRMS still decides IF — the address must be a verified company Google
+   * account with a claimed, active employee record (§5.4/§10). On success it
+   * issues the normal session, so the rest of the app can't tell Google from
+   * password sign-in.
+   */
+  const googleCallback = async (input: {
+    state?: string;
+    code?: string;
+  }): Promise<IssuedSession> => {
+    const google = requireGoogle();
+    if (!input.state || !input.code) {
+      throw createError(400, 'Missing code or state', { code: 'OAUTH_BAD_REQUEST' });
+    }
+    const saved = await repo.consumeOauthState(input.state);
+    if (!saved || saved.expiresAt < new Date()) {
+      throw createError(400, 'This sign-in attempt expired — please try again', {
+        code: 'OAUTH_STATE_INVALID',
+      });
+    }
+
+    let identity;
+    try {
+      const idToken = await google.exchangeCode(input.code, saved.codeVerifier);
+      identity = await google.verifyIdToken(idToken);
+    } catch {
+      // Google's own detail is logged by the controller; the user sees a clean message.
+      throw createError(401, 'Google sign-in could not be verified', {
+        code: 'OAUTH_VERIFY_FAILED',
+      });
+    }
+
+    // Company-account gate: a verified address, the hosted-domain claim, and
+    // the domain itself must all agree — this is what blocks personal Gmail.
+    if (!identity.emailVerified) {
+      throw createError(403, 'Your Google email is not verified', {
+        code: 'EMAIL_UNVERIFIED',
+      });
+    }
+    if (
+      identity.hd !== env.auth.companyEmailDomain ||
+      !isCompanyEmail(identity.email, env.auth.companyEmailDomain)
+    ) {
+      throw createError(403, 'Sign-in is restricted to company Google accounts', {
+        code: 'NOT_COMPANY_ACCOUNT',
+      });
+    }
+
+    const user = await repo.findUserByEmail(identity.email);
+    if (!user || !(await canAct(user.id))) {
+      // A real Elecbits person who hasn't claimed their record yet lands here.
+      throw createError(403, 'No active HR account for this Google address', {
+        code: 'NO_HR_ACCOUNT',
+      });
+    }
+    return issueSession(user);
+  };
+
   /** The per-request check `authenticate` runs after verifying the JWT. */
   const isSessionLive = canAct;
 
-  return { login, claimRecord, claimOrg, refresh, logout, isSessionLive };
+  return {
+    login,
+    claimRecord,
+    claimOrg,
+    refresh,
+    logout,
+    isSessionLive,
+    googleStart,
+    googleCallback,
+  };
 };
 
 export type AuthService = ReturnType<typeof createAuthService>;

@@ -12,6 +12,7 @@ import { ROUND_ORDER } from './candidates.repository.js';
 import type {
   ActivityDto,
   ApplicationDto,
+  ApplicationStage,
   CandidateDto,
   CandidateMatchDto,
   CreateCandidateInput,
@@ -61,7 +62,11 @@ const whenText = (iso: string) =>
     minute: '2-digit',
   });
 
-export const MODE_TEXT = { in_person: 'in person', video: 'video call', phone: 'phone call' } as const;
+export const MODE_TEXT = {
+  in_person: 'in person',
+  video: 'video call',
+  phone: 'phone call',
+} as const;
 
 export const ROUND_TEXT: Record<InterviewRound, string> = {
   hr: 'HR',
@@ -126,7 +131,9 @@ export const createCandidatesService = (deps: {
         .filter((r) => r.application_id === a.id)
         .map((r) => {
           const s = scores.find((x) => x.application_id === a.id && x.round === r.round);
-          const slot = slots.find((x) => x.application_id === a.id && x.round === r.round);
+          const slot = slots.find(
+            (x) => x.application_id === a.id && x.round === r.round,
+          );
           return {
             round: r.round,
             weight: r.weight,
@@ -138,64 +145,74 @@ export const createCandidatesService = (deps: {
         });
       const scored = mine.filter((r) => r.score && r.weight !== null);
       return {
-      id: a.id,
-      candidateId: a.candidate_id,
-      candidateName: a.candidate_name,
-      candidateCode: a.candidate_code,
-      candidateSource: a.candidate_source,
-      candidateNoticeDays: a.candidate_notice_days,
-      nextAction: a.next_action
-        ? {
-            text: a.next_action,
-            ownerId: a.next_action_owner_id,
-            ownerName: a.next_action_owner_name,
-            due: a.next_action_due,
-          }
-        : null,
-      contactCount: a.contact_count,
-      lastContactAt: a.last_contact_at ? new Date(a.last_contact_at).toISOString() : null,
-      positionId: a.position_id,
-      positionNumber: a.position_number,
-      requisitionId: a.requisition_id,
-      taRmId: a.ta_rm_id,
-      recruiterId: a.recruiter_id,
-      roleTitle: a.role_title,
-      departmentName: a.department_name,
-      stage: a.stage,
-      currentRound: a.current_round,
-      rejectedRound: a.rejected_round,
-      rejectedByName: a.rejected_by_name,
-      informedAt: a.informed_at ? new Date(a.informed_at).toISOString() : null,
-      shortlistedByName: a.shortlisted_by_name,
-      outcomeReason: a.outcome_reason,
-      rounds: mine,
-      scoreTotal: scored.length
-        ? one1(scored.reduce((t, r) => t + (r.score!.roundScore * r.weight!) / 100, 0))
-        : null,
-      candidateEducation: a.education,
-      candidateExperienceYears: a.experience_years === null ? null : Number(a.experience_years),
-      createdAt: new Date(a.created_at).toISOString(),
-      updatedAt: new Date(a.updated_at).toISOString(),
-      lineApproved: a.requisition_status === 'approved',
-      offer: a.offer_status
-        ? {
-            status: a.offer_status,
-            ctc: a.offered_ctc === null ? null : Number(a.offered_ctc),
-            joiningDate: a.joining_date,
-            terms: a.offer_terms,
-            returnReason: a.offer_return_reason,
-            approvedByName: a.offer_approved_by_name,
-            approvedAt: a.offer_approved_at ? new Date(a.offer_approved_at).toISOString() : null,
-          }
-        : null,
-      offeredCtc: a.offered_ctc === null ? null : Number(a.offered_ctc),
-      joiningDate: a.joining_date,
-      hasOfferLetter: a.has_offer_letter,
-      hasSignedLetter: a.has_signed_letter,
-      documents: { received: a.docs_received, pending: a.docs_pending, total: a.docs_total },
-      folderLink: a.folder_link,
-      employeeId: a.employee_id,
-      joinedAt: a.joined_at ? new Date(a.joined_at).toISOString() : null,
+        id: a.id,
+        candidateId: a.candidate_id,
+        candidateName: a.candidate_name,
+        candidateCode: a.candidate_code,
+        candidateSource: a.candidate_source,
+        candidateNoticeDays: a.candidate_notice_days,
+        nextAction: a.next_action
+          ? {
+              text: a.next_action,
+              ownerId: a.next_action_owner_id,
+              ownerName: a.next_action_owner_name,
+              due: a.next_action_due,
+            }
+          : null,
+        contactCount: a.contact_count,
+        lastContactAt: a.last_contact_at
+          ? new Date(a.last_contact_at).toISOString()
+          : null,
+        positionId: a.position_id,
+        positionNumber: a.position_number,
+        requisitionId: a.requisition_id,
+        taRmId: a.ta_rm_id,
+        recruiterId: a.recruiter_id,
+        roleTitle: a.role_title,
+        departmentName: a.department_name,
+        stage: a.stage,
+        currentRound: a.current_round,
+        rejectedRound: a.rejected_round,
+        preEndStage: a.pre_end_stage,
+        rejectedByName: a.rejected_by_name,
+        informedAt: a.informed_at ? new Date(a.informed_at).toISOString() : null,
+        shortlistedByName: a.shortlisted_by_name,
+        outcomeReason: a.outcome_reason,
+        rounds: mine,
+        scoreTotal: scored.length
+          ? one1(scored.reduce((t, r) => t + (r.score!.roundScore * r.weight!) / 100, 0))
+          : null,
+        candidateEducation: a.education,
+        candidateExperienceYears:
+          a.experience_years === null ? null : Number(a.experience_years),
+        createdAt: new Date(a.created_at).toISOString(),
+        updatedAt: new Date(a.updated_at).toISOString(),
+        lineApproved: a.requisition_status === 'approved',
+        offer: a.offer_status
+          ? {
+              status: a.offer_status,
+              ctc: a.offered_ctc === null ? null : Number(a.offered_ctc),
+              joiningDate: a.joining_date,
+              terms: a.offer_terms,
+              returnReason: a.offer_return_reason,
+              approvedByName: a.offer_approved_by_name,
+              approvedAt: a.offer_approved_at
+                ? new Date(a.offer_approved_at).toISOString()
+                : null,
+            }
+          : null,
+        offeredCtc: a.offered_ctc === null ? null : Number(a.offered_ctc),
+        joiningDate: a.joining_date,
+        hasOfferLetter: a.has_offer_letter,
+        hasSignedLetter: a.has_signed_letter,
+        documents: {
+          received: a.docs_received,
+          pending: a.docs_pending,
+          total: a.docs_total,
+        },
+        folderLink: a.folder_link,
+        employeeId: a.employee_id,
+        joinedAt: a.joined_at ? new Date(a.joined_at).toISOString() : null,
       };
     });
   };
@@ -382,8 +399,21 @@ export const createCandidatesService = (deps: {
       actor.actorEmployeeId !== p.recruiter_id &&
       actor.actorEmployeeId !== p.ta_rm_id
     ) {
-      throw createError(403, "Only this position's recruiter or the line's TA RM can do this", {
-        code: 'NOT_POSITION_OWNER',
+      throw createError(
+        403,
+        "Only this position's recruiter or the line's TA RM can do this",
+        {
+          code: 'NOT_POSITION_OWNER',
+        },
+      );
+    }
+  };
+
+  /** Nothing moves a held seat forward: no new candidates, interviews or offers. */
+  const assertNotOnHold = (onHoldAt: Date | null) => {
+    if (onHoldAt) {
+      throw createError(409, 'This position is on hold — resume it first', {
+        code: 'POSITION_ON_HOLD',
       });
     }
   };
@@ -393,6 +423,7 @@ export const createCandidatesService = (deps: {
     const p = await repo.positionForApplying(positionId);
     if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
     assertWorks(p, actor);
+    assertNotOnHold(p.on_hold_at);
     if (p.status !== 'open' && p.status !== 'interviewing') {
       throw createError(409, 'Candidates are added once the position is open', {
         code: 'POSITION_NOT_OPEN',
@@ -434,6 +465,7 @@ export const createCandidatesService = (deps: {
   const startInterviews = async (id: string, actor: ActorContext) => {
     const a = await findApplication(id);
     assertWorks(a, actor);
+    assertNotOnHold(a.position_on_hold_at);
     const rounds = (await repo.roundsOfApplications([id])).filter((r) => r.round);
     const missing = rounds.filter((r) => !r.interviewer_id);
     if (missing.length) {
@@ -446,16 +478,26 @@ export const createCandidatesService = (deps: {
     const first = [...rounds].sort(
       (x, y) => ROUND_ORDER.indexOf(x.round) - ROUND_ORDER.indexOf(y.round),
     )[0]!;
-    const ok = await repo.startInterviews(id, first.round, POSITION_PROGRESS.interviewing, actor, [
-      {
-        to: first.interviewer_id && first.interviewer_id !== actor.actorEmployeeId ? [first.interviewer_id] : [],
-        event: {
-          type: 'hiring.interview',
-          title: `${ROUND_TEXT[first.round]} round to conduct: ${a.candidate_name} for ${a.role_title} (${a.department_name})`,
-          link: LINK_INTERVIEWS,
+    const ok = await repo.startInterviews(
+      id,
+      first.round,
+      POSITION_PROGRESS.interviewing,
+      actor,
+      [
+        {
+          to:
+            first.interviewer_id && first.interviewer_id !== actor.actorEmployeeId
+              ? [first.interviewer_id]
+              : [],
+          event: {
+            type: 'hiring.interview',
+            title: `${ROUND_TEXT[first.round]} round to conduct: ${a.candidate_name} for ${a.role_title} (${a.department_name})`,
+            link: LINK_INTERVIEWS,
+          },
+          email: true,
         },
-      },
-    ]);
+      ],
+    );
     if (!ok) {
       throw createError(409, 'Interviews start once, from a newly added candidate', {
         code: 'WRONG_STAGE',
@@ -485,6 +527,117 @@ export const createCandidatesService = (deps: {
       });
     }
     return one(id);
+  };
+
+  /** Stages a step back is allowed from, and where each lands. */
+  const BACK_FROM: ApplicationStage[] = [
+    'interviewing',
+    'interviewed',
+    'decision',
+    'selected',
+    'offered',
+  ];
+
+  /**
+   * One step back, with a reason (TA correcting a move). Hired / joined never
+   * go back — an employee record exists; No-show is how a hire is undone.
+   * Allowed while the seat is on hold (it is a correction, not progress).
+   */
+  const moveBack = async (id: string, reason: string, actor: ActorContext) => {
+    const a = await findApplication(id);
+    assertWorks(a, actor);
+    // `joined` is the HRBP's confirmation after hired (not in the TA stage type).
+    if (['hired', 'joined'].includes(a.stage as string)) {
+      throw createError(409, 'A hire is undone with No-show, not by moving back', {
+        code: 'ALREADY_HIRED',
+      });
+    }
+    if (!BACK_FROM.includes(a.stage)) {
+      throw createError(409, 'There is no earlier stage to move back to', {
+        code: 'WRONG_STAGE',
+      });
+    }
+    const to = await repo.moveBack(id, a.stage, reason, POSITION_PROGRESS, actor);
+    if (!to) {
+      throw createError(409, 'This candidate moved meanwhile — refresh and try again', {
+        code: 'WRONG_STAGE',
+      });
+    }
+    return one(id);
+  };
+
+  /**
+   * Bring a rejected / withdrawn candidate back to where they ended, with a
+   * reason. The seat must still be taking candidates (the same rule as
+   * adding one), not on hold, and the candidate's data not yet anonymised.
+   */
+  const restore = async (id: string, reason: string, actor: ActorContext) => {
+    const a = await findApplication(id);
+    assertWorks(a, actor);
+    if (a.stage !== 'rejected' && a.stage !== 'withdrawn') {
+      throw createError(409, 'Only a rejected or withdrawn candidate can be restored', {
+        code: 'WRONG_STAGE',
+      });
+    }
+    assertNotOnHold(a.position_on_hold_at);
+    if (a.position_status !== 'open' && a.position_status !== 'interviewing') {
+      throw createError(409, 'This position is no longer taking candidates', {
+        code: 'POSITION_NOT_OPEN',
+      });
+    }
+    if ((await findCandidate(a.candidate_id)).anonymised_at) {
+      throw createError(409, "This candidate's data was already anonymised", {
+        code: 'CANDIDATE_ANONYMISED',
+      });
+    }
+    const to = await repo.restore(id, reason, retainUntil(), POSITION_PROGRESS, actor);
+    if (!to) {
+      throw createError(409, 'This candidate changed meanwhile — refresh and try again', {
+        code: 'WRONG_STAGE',
+      });
+    }
+    return one(id);
+  };
+
+  /**
+   * Put a seat on hold / resume it — the line's TA RM or an HRBP (user
+   * decision, 2026-11-18). The recruiter and the department head hear of it.
+   */
+  const setHold = async (
+    positionId: string,
+    hold: { reason: string } | null,
+    actor: ActorContext,
+  ) => {
+    const p = await repo.positionHold(positionId);
+    if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
+    const hrbps = await hiring.hrbpHolders();
+    if (p.ta_rm_id !== actor.actorEmployeeId && !hrbps.includes(actor.actorEmployeeId)) {
+      throw createError(403, "Only the line's TA RM or HRBP can put a position on hold", {
+        code: 'NOT_HOLD_OWNER',
+      });
+    }
+    const head = await hiring.departmentHead(p.department_id);
+    const to = [p.recruiter_id, head].filter(
+      (x): x is string => !!x && x !== actor.actorEmployeeId,
+    );
+    const seat = `${p.role_title} #${p.number}`;
+    const ok = await repo.setHold(positionId, hold, actor, [
+      {
+        to: [...new Set(to)],
+        event: {
+          type: 'hiring.position_hold',
+          title: hold
+            ? `${seat} is on hold: ${hold.reason}`
+            : `${seat} is back on — hiring resumes`,
+          link: LINK_TA,
+        },
+      },
+    ]);
+    if (!ok) {
+      throw createError(409, hold ? 'Already on hold' : 'This position is not on hold', {
+        code: 'HOLD_UNCHANGED',
+      });
+    }
   };
 
   /** TA swaps a round's interviewer on the line; the department head is told. */
@@ -555,7 +708,7 @@ export const createCandidatesService = (deps: {
       attributes.some((c) => !given.includes(c)) ||
       new Set(given).size !== given.length
     ) {
-      throw createError(422, 'Score every attribute on this round\'s sheet, once', {
+      throw createError(422, "Score every attribute on this round's sheet, once", {
         code: 'ATTRIBUTES_MISMATCH',
       });
     }
@@ -599,12 +752,16 @@ export const createCandidatesService = (deps: {
                   },
                 },
                 {
-                  to: next.interviewerId && !owners.includes(next.interviewerId) ? [next.interviewerId] : [],
+                  to:
+                    next.interviewerId && !owners.includes(next.interviewerId)
+                      ? [next.interviewerId]
+                      : [],
                   event: {
                     type: 'hiring.interview',
                     title: `${ROUND_TEXT[next.round]} round to conduct: ${a.candidate_name} for ${a.role_title}`,
                     link: LINK_INTERVIEWS,
                   },
+                  email: true,
                 },
               ]
             : [
@@ -619,9 +776,13 @@ export const createCandidatesService = (deps: {
               ],
     );
     if (res === 'not_open') {
-      throw createError(409, 'This round is not open yet — the round before it must pass first', {
-        code: 'ROUND_NOT_OPEN',
-      });
+      throw createError(
+        409,
+        'This round is not open yet — the round before it must pass first',
+        {
+          code: 'ROUND_NOT_OPEN',
+        },
+      );
     }
     if (res === 'not_interviewing') {
       throw createError(409, 'This candidate is not in interviews', {
@@ -648,7 +809,11 @@ export const createCandidatesService = (deps: {
   };
 
   /** Fill or correct a candidate's profile (TA). */
-  const updateCandidate = async (id: string, input: UpdateCandidateInput, actor: ActorContext) => {
+  const updateCandidate = async (
+    id: string,
+    input: UpdateCandidateInput,
+    actor: ActorContext,
+  ) => {
     await findCandidate(id);
     if (!(await repo.updateCandidate(id, input, actor))) {
       throw createError(409, 'This candidate was anonymised', { code: 'ANONYMISED' });
@@ -657,9 +822,16 @@ export const createCandidatesService = (deps: {
   };
 
   /** What happens next on an application — the recruiter or the line's TA RM sets it. */
-  const setNextAction = async (id: string, input: NextActionInput, actor: ActorContext) => {
+  const setNextAction = async (
+    id: string,
+    input: NextActionInput,
+    actor: ActorContext,
+  ) => {
     assertWorks(await findApplication(id), actor);
-    if (input.ownerId && !(await hiring.eligiblePeople([input.ownerId])).has(input.ownerId)) {
+    if (
+      input.ownerId &&
+      !(await hiring.eligiblePeople([input.ownerId])).has(input.ownerId)
+    ) {
       throw createError(422, 'The owner must be an active employee', {
         code: 'OWNER_NOT_ELIGIBLE',
       });
@@ -675,10 +847,16 @@ export const createCandidatesService = (deps: {
   };
 
   /** Log a call / email / message / meeting with the candidate (recruiter or TA RM). */
-  const logActivity = async (id: string, input: LogActivityInput, actor: ActorContext) => {
+  const logActivity = async (
+    id: string,
+    input: LogActivityInput,
+    actor: ActorContext,
+  ) => {
     assertWorks(await findApplication(id), actor);
     if (input.happenedAt && new Date(input.happenedAt).getTime() > Date.now() + 60_000) {
-      throw createError(422, 'A contact is logged after it happens', { code: 'IN_THE_FUTURE' });
+      throw createError(422, 'A contact is logged after it happens', {
+        code: 'IN_THE_FUTURE',
+      });
     }
     await repo.logActivity(
       {
@@ -717,6 +895,7 @@ export const createCandidatesService = (deps: {
   ) => {
     const a = await findApplication(id);
     assertWorks(a, actor);
+    assertNotOnHold(a.position_on_hold_at);
     const who = await repo.interviewerOf(id, round);
     if (!who)
       throw createError(404, 'This application has no such round', { code: 'NO_ROUND' });
@@ -754,6 +933,8 @@ export const createCandidatesService = (deps: {
             title: `${label} interview: ${a.candidate_name} (${a.role_title}) on ${whenText(input.startsAt)}, ${MODE_TEXT[input.mode]}${where}`,
             link: LINK_INTERVIEWS,
           },
+          email: true,
+          dedupeKey: `hiring.interview_scheduled:${a.id}:${input.startsAt}`,
         },
       ],
     );
@@ -777,6 +958,7 @@ export const createCandidatesService = (deps: {
   ) => {
     const a = await findApplication(id);
     assertWorks(a, actor);
+    assertNotOnHold(a.position_on_hold_at);
     const who = await repo.interviewerOf(id, round);
     const what = input.noShow ? 'did not show up for' : 'is called off:';
     const ok = await repo.endSlot(
@@ -812,7 +994,9 @@ export const createCandidatesService = (deps: {
     const rows = await repo.myInterviews(employeeId);
     if (rows.length === 0) return [];
     const appIds = [...new Set(rows.map((r) => r.application_id))];
-    const mine = (await repo.scoresOf(appIds)).filter((s) => s.interviewer_id === employeeId);
+    const mine = (await repo.scoresOf(appIds)).filter(
+      (s) => s.interviewer_id === employeeId,
+    );
     const slots = await repo.slotsOf(appIds);
     return rows.map((r) => {
       const s = mine.find(
@@ -858,6 +1042,9 @@ export const createCandidatesService = (deps: {
     apply,
     startInterviews,
     end,
+    moveBack,
+    restore,
+    setHold,
     swapInterviewer,
     score,
     myInterviews,

@@ -12,12 +12,22 @@ interface GoalContext {
   metric: string | null;
   target: string | null;
   progress: number;
+  /** Its share of the quarter (weights sum to 100). */
+  weight: number;
+}
+
+/** What the person's function is measured on (Settings → Department KPI targets). */
+export interface ScoreContext {
+  departmentKpi: string | null;
 }
 
 const PROMPT_RULES = `You score one day's work update against the person's own quarterly goals.
 Be fair but not generous. An honest account of a mistake, a blocker or a hard
 debugging day should score WELL — honesty is the point, theater is not.
-Vague filler ("worked on stuff") scores low. Reply with ONLY a JSON object:
+Vague filler ("worked on stuff") scores low. Weight says how much each goal counts:
+moving a heavy goal matters more than a light one. Work that serves what the
+function is measured on counts even when no single goal names it.
+Reply with ONLY a JSON object:
 {"score": <0-100 integer>, "feedback": "<one or two plain sentences, speaking to the person>", "kpiHits": ["<goal titles this day moved, if any>"]}`;
 
 /**
@@ -29,6 +39,7 @@ Vague filler ("worked on stuff") scores low. Reply with ONLY a JSON object:
 export const scoreUpdate = async (
   note: string,
   goals: GoalContext[],
+  context: ScoreContext = { departmentKpi: null },
 ): Promise<ScoreResult | null> => {
   if (!env.ai.anthropicApiKey) return null;
   try {
@@ -37,7 +48,7 @@ export const scoreUpdate = async (
         ? goals
             .map(
               (g) =>
-                `- ${g.title}${g.metric ? ` (metric: ${g.metric})` : ''}${g.target ? ` (target: ${g.target})` : ''} — currently ${g.progress}%`,
+                `- ${g.title} (weight ${g.weight}%)${g.metric ? ` (metric: ${g.metric})` : ''}${g.target ? ` (target: ${g.target})` : ''} — currently ${g.progress}%`,
             )
             .join('\n')
         : '(no goals set yet — score general usefulness and clarity)';
@@ -54,7 +65,7 @@ export const scoreUpdate = async (
         messages: [
           {
             role: 'user',
-            content: `${PROMPT_RULES}\n\nTheir goals this quarter:\n${goalLines}\n\nToday's update:\n${note}`,
+            content: `${PROMPT_RULES}${context.departmentKpi ? `\n\nTheir function is measured on: ${context.departmentKpi}` : ''}\n\nTheir goals this quarter:\n${goalLines}\n\nToday's update:\n${note}`,
           },
         ],
       }),

@@ -62,6 +62,22 @@ export const createEmployeesService = (deps: {
 }) => {
   const { repo, settings, authz, onboarding } = deps;
 
+  /**
+   * Email the claim link to the new person (HR still gets it to copy, as a
+   * fallback). A queue failure is logged, never fatal — the record exists and
+   * HR can share the link by hand.
+   */
+  const sendInvite = async (
+    person: { id: string; name: string; email: string },
+    claim: { token: string; expiresAt: Date },
+  ) => {
+    try {
+      await repo.queueInviteEmail(person, claim.token, claim.expiresAt);
+    } catch (err) {
+      logger.warn({ err, employeeId: person.id }, 'invite email not queued');
+    }
+  };
+
   /** A home unit is a division or department — a chapter is joined by membership only. */
   const assertHomeUnit = async (departmentId: string | null | undefined) => {
     if (departmentId && (await repo.departmentKind(departmentId)) === 'chapter') {
@@ -167,6 +183,7 @@ export const createEmployeesService = (deps: {
         actor,
       );
       await startOnboarding(row.id, actor);
+      await sendInvite(row, claim);
       return {
         employee: toEmployee(row),
         employeeBatchAttached,
@@ -248,6 +265,7 @@ export const createEmployeesService = (deps: {
         actor,
       );
       await startOnboarding(row.id, actor);
+      await sendInvite(row, claim);
       return {
         employee: toEmployee(row),
         employeeBatchAttached,
@@ -405,6 +423,7 @@ export const createEmployeesService = (deps: {
     salaryMode: row?.salaryMode ?? null,
     panNumber: row?.panNumber ?? null,
     uanNumber: row?.uanNumber ?? null,
+    esicIpNumber: row?.esicIpNumber ?? null,
     providentFundAccount: row?.providentFundAccount ?? null,
     employeeAdvanceAccount: row?.employeeAdvanceAccount ?? null,
     bankName: row?.bankName ?? null,
@@ -515,7 +534,8 @@ export const createEmployeesService = (deps: {
    * password flow, never by re-claiming.
    */
   const issueClaimLink = async (id: string, actor: ActorContext) => {
-    if (!(await repo.findById(id))) {
+    const person = await repo.findById(id);
+    if (!person) {
       throw createError(404, 'Employee not found', { code: 'EMPLOYEE_NOT_FOUND' });
     }
     if (await repo.isClaimed(id)) {
@@ -529,6 +549,7 @@ export const createEmployeesService = (deps: {
     }
     const claim = newClaimToken(INVITE_LINK_DAYS);
     await repo.setClaimToken(id, claim.hash, claim.expiresAt, actor);
+    await sendInvite(person, claim);
     return { token: claim.token, expiresAt: claim.expiresAt.toISOString() };
   };
 

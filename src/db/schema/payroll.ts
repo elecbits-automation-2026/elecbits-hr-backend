@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  date,
   index,
   integer,
   numeric,
@@ -110,6 +111,14 @@ export const payslips = orgSchema.table(
     // The PT state (payroll.ptStates) the slip was taxed under, snapshotted
     // with eligibility; its slab amounts are applied when the slip is computed.
     ptState: text('pt_state'),
+    // ESIC (payroll.esic): employee 0.75% / employer 3.25% of wages paid, the
+    // employer share inside CTC like employer PF. Eligibility is fixed per
+    // contribution period (Apr–Sep, Oct–Mar), so it is SNAPSHOTTED here and
+    // inherited by every later slip in the same period; null = ESIC was off.
+    esicEmployee: numeric('esic_employee', { precision: 12, scale: 2 }).notNull().default('0'),
+    esicEmployer: numeric('esic_employer', { precision: 12, scale: 2 }).notNull().default('0'),
+    esicEligible: boolean('esic_eligible'),
+    esicPeriodStart: date('esic_period_start'),
     // Loan EMI / recovery / other deductions (sheet column AA).
     otherDeduction: numeric('other_deduction', { precision: 12, scale: 2 })
       .notNull()

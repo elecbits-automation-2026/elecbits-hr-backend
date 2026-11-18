@@ -72,6 +72,15 @@ export const createHireService = (deps: {
 
   const wrongStage = (what: string) => createError(409, what, { code: 'WRONG_STAGE' });
 
+  /** A held seat makes no offer and no hire until it is resumed. */
+  const assertNotOnHold = (a: { position_on_hold_at: Date | null }) => {
+    if (a.position_on_hold_at) {
+      throw createError(409, 'This position is on hold — resume it first', {
+        code: 'POSITION_ON_HOLD',
+      });
+    }
+  };
+
   /** The position's recruiter or the line's TA RM works the offer. */
   const assertTa = (
     a: { recruiter_id: string | null; ta_rm_id: string | null },
@@ -191,6 +200,8 @@ export const createHireService = (deps: {
             title: `Offer terms changed — approve again: ${a.candidate_name} for ${a.role_title}`,
             link: LINK_APPROVALS,
           },
+          // An approval waiting on the HR Head — worth an email.
+          email: true,
         },
       ],
     );
@@ -219,6 +230,7 @@ export const createHireService = (deps: {
           title: `Offer to approve and sign: ${a.candidate_name} for ${a.role_title} (${a.department_name})`,
           link: LINK_APPROVALS,
         },
+        email: true,
       },
     ]);
     if (!ok) throw wrongStage('Draft the CTC and joining date after every round has passed');
@@ -286,6 +298,7 @@ export const createHireService = (deps: {
   const shareOffer = async (id: string, actor: ActorContext) => {
     const a = await find(id);
     assertTa(a, actor);
+    assertNotOnHold(a);
     if (a.requisition_status !== 'approved') {
       // Safety net: positions only exist on approved lines.
       throw createError(409, 'The line is not approved', { code: 'LINE_NOT_APPROVED' });
@@ -345,6 +358,7 @@ export const createHireService = (deps: {
   const markHired = async (id: string, input: MarkHiredInput, actor: ActorContext) => {
     const a = await find(id);
     assertTa(a, actor);
+    assertNotOnHold(a);
     if (a.stage !== 'offered')
       throw wrongStage('Mark hired once the candidate accepts the offer');
     if (!input.email.endsWith(`@${COMPANY_DOMAIN}`)) {

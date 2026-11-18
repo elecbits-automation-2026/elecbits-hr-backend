@@ -148,7 +148,12 @@ export const createPayrollRepository = (db: DbClient) => ({
   /** The published slip that settled an exit (the F&F statement). */
   settledSlipForExit: async (exitId: string) =>
     (
-      await db.query<{ id: string; run_id: string; month: string; status: PayrollRunRow['status'] }>(
+      await db.query<{
+        id: string;
+        run_id: string;
+        month: string;
+        status: PayrollRunRow['status'];
+      }>(
         `SELECT p.id, p.run_id, r.month, r.status FROM org.payslips p
            JOIN org.payroll_runs r ON r.id = p.run_id
           WHERE p.exit_id = $1 AND r.status <> 'draft'`,
@@ -205,7 +210,10 @@ export const createPayrollRepository = (db: DbClient) => ({
           // In notice (exiting) is still on payroll (exit module); leavers
           // come in by id for their last month / F&F.
           ids
-            ? inArray(employees.id, ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
+            ? inArray(
+                employees.id,
+                ids.length ? ids : ['00000000-0000-0000-0000-000000000000'],
+              )
             : inArray(employees.status, ['active', 'exiting']),
           isNull(orgOwner.employeeId),
         ),
@@ -251,7 +259,10 @@ export const createPayrollRepository = (db: DbClient) => ({
       .innerJoin(employeeSalary, eq(employeeSalary.employeeId, employees.id))
       .leftJoin(orgOwner, eq(orgOwner.employeeId, employees.id))
       .where(
-        and(inArray(employees.status, ['active', 'exiting']), isNull(orgOwner.employeeId)),
+        and(
+          inArray(employees.status, ['active', 'exiting']),
+          isNull(orgOwner.employeeId),
+        ),
       )
       .orderBy(employees.name);
   },
@@ -270,6 +281,27 @@ export const createPayrollRepository = (db: DbClient) => ({
       [fromMonth, toMonth],
     );
     return new Map(rows.map((r) => [r.employee_id, Number(r.total ?? 0)]));
+  },
+
+  /**
+   * ESIC coverage already decided this contribution period: per employee, the
+   * eligibility snapshotted on their EARLIEST slip of the period before
+   * `month` (an earlier month's run). Coverage holds for the whole period, so
+   * a raise mid-period never drops someone out (and a cut never adds them).
+   */
+  esicEligibilityInPeriod: async (
+    periodStart: string,
+    month: string,
+  ): Promise<Map<string, boolean>> => {
+    const rows = await db.query<{ employee_id: string; esic_eligible: boolean }>(
+      `SELECT DISTINCT ON (p.employee_id) p.employee_id, p.esic_eligible
+         FROM org.payslips p
+         JOIN org.payroll_runs r ON r.id = p.run_id
+        WHERE p.esic_period_start = $1 AND r.month < $2 AND p.esic_eligible IS NOT NULL
+        ORDER BY p.employee_id, r.month`,
+      [periodStart, month],
+    );
+    return new Map(rows.map((r) => [r.employee_id, r.esic_eligible]));
   },
 
   /** Write the calculator's outcome onto the salary row + audit (§10). */
@@ -651,6 +683,23 @@ export const createPayrollRepository = (db: DbClient) => ({
           totalAutoDays,
         }),
       });
+      // Payslip ready: a bell + email to everyone on the run, in the same
+      // transaction as the lock. Never a figure — the email is only a link.
+      const monthName = new Date(`${run.month}-01T00:00:00`).toLocaleDateString('en-IN', {
+        month: 'long',
+        year: 'numeric',
+      });
+      await insertNotifications(
+        tx,
+        updates.map((u) => u.employeeId),
+        {
+          type: 'payroll.payslip_ready',
+          title: `Your ${monthName} payslip is ready`,
+          body: 'Sign in to view it or download the PDF.',
+          link: '/my-payslips',
+        },
+        { email: true, dedupeKey: `payslip_ready:${run.id}` },
+      );
       return locked[0];
     });
   },
@@ -669,6 +718,7 @@ export const createPayrollRepository = (db: DbClient) => ({
         dateOfJoining: employees.dateOfJoining,
         panLast4: sql<string | null>`right(${employeeSalary.panNumber}, 4)`,
         uan: employeeSalary.uanNumber,
+        esicIp: employeeSalary.esicIpNumber,
         bankName: employeeSalary.bankName,
         accountLast4: sql<string | null>`right(${employeeSalary.bankAccountNo}, 4)`,
       })
@@ -723,13 +773,20 @@ export const createPayrollRepository = (db: DbClient) => ({
   /** Per employee, pending corrections from months before `month` (draft build). */
   pendingCorrectionsBefore: async (month: string): Promise<Map<string, number>> => {
     const rows = await db.orm
-      .select({ employeeId: payslipCorrections.employeeId, amount: payslipCorrections.amount })
+      .select({
+        employeeId: payslipCorrections.employeeId,
+        amount: payslipCorrections.amount,
+      })
       .from(payslipCorrections)
       .where(
-        and(eq(payslipCorrections.status, 'pending'), lt(payslipCorrections.sourceMonth, month)),
+        and(
+          eq(payslipCorrections.status, 'pending'),
+          lt(payslipCorrections.sourceMonth, month),
+        ),
       );
     const map = new Map<string, number>();
-    for (const r of rows) map.set(r.employeeId, (map.get(r.employeeId) ?? 0) + Number(r.amount));
+    for (const r of rows)
+      map.set(r.employeeId, (map.get(r.employeeId) ?? 0) + Number(r.amount));
     return map;
   },
 
@@ -770,7 +827,11 @@ export const createPayrollRepository = (db: DbClient) => ({
     db.transaction(async (tx) => {
       const rows = await tx.orm
         .insert(payslipCorrections)
-        .values({ ...input, amount: String(input.amount), createdBy: actor.actorEmployeeId })
+        .values({
+          ...input,
+          amount: String(input.amount),
+          createdBy: actor.actorEmployeeId,
+        })
         .returning();
       await shiftDraftCorrections(tx, input.employeeId, input.sourceMonth, input.amount);
       await tx.orm.insert(auditLog).values({
@@ -778,14 +839,22 @@ export const createPayrollRepository = (db: DbClient) => ({
         action: 'payroll.correction_added',
         subject: `payslips:${input.sourcePayslipId}`,
         // No amount in the org-readable audit log — pay stays out of it.
-        detail: JSON.stringify({ sourceMonth: input.sourceMonth, correctionId: rows[0]!.id }),
+        detail: JSON.stringify({
+          sourceMonth: input.sourceMonth,
+          correctionId: rows[0]!.id,
+        }),
       });
-      await insertNotifications(tx, [input.employeeId], {
-        type: 'payroll.correction',
-        title: `A correction to your ${input.sourceMonth} payslip`,
-        body: 'It will show as its own line on your next payslip.',
-        link: '/my-payslips',
-      });
+      await insertNotifications(
+        tx,
+        [input.employeeId],
+        {
+          type: 'payroll.correction',
+          title: `A correction to your ${input.sourceMonth} payslip`,
+          body: 'It will show as its own line on your next payslip.',
+          link: '/my-payslips',
+        },
+        { email: true, dedupeKey: `payroll.correction:${rows[0]!.id}` },
+      );
       return rows[0]!;
     }),
 
@@ -797,12 +866,23 @@ export const createPayrollRepository = (db: DbClient) => ({
     db.transaction(async (tx) => {
       const rows = await tx.orm
         .update(payslipCorrections)
-        .set({ status: 'cancelled', cancelledBy: actor.actorEmployeeId, cancelledAt: new Date() })
-        .where(and(eq(payslipCorrections.id, id), eq(payslipCorrections.status, 'pending')))
+        .set({
+          status: 'cancelled',
+          cancelledBy: actor.actorEmployeeId,
+          cancelledAt: new Date(),
+        })
+        .where(
+          and(eq(payslipCorrections.id, id), eq(payslipCorrections.status, 'pending')),
+        )
         .returning();
       const row = rows[0];
       if (!row) return undefined;
-      await shiftDraftCorrections(tx, row.employeeId, row.sourceMonth, -Number(row.amount));
+      await shiftDraftCorrections(
+        tx,
+        row.employeeId,
+        row.sourceMonth,
+        -Number(row.amount),
+      );
       await tx.orm.insert(auditLog).values({
         actorUserId: actor.actorUserId,
         action: 'payroll.correction_cancelled',

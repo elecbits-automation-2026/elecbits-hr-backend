@@ -37,6 +37,7 @@ import { quarterReportsRoutes } from '../features/quarter-reports/index.js';
 import { settingsRoutes } from '../features/settings/index.js';
 import { notificationsRoutes } from '../features/notifications/index.js';
 import { jobsRoutes } from '../features/jobs/index.js';
+import { emailRoutes } from '../features/email/index.js';
 import { concernsRoutes } from '../features/concerns/index.js';
 import { openDoorRoutes } from '../features/open-door/index.js';
 
@@ -133,6 +134,8 @@ apiV1.use('/notifications', notificationsRoutes);
 
 // Background jobs (Admin): scheduler state, recent runs, run now.
 apiV1.use('/admin/jobs', jobsRoutes);
+// Email delivery (Admin): switch state, outbox counts, retry, test email.
+apiV1.use('/admin/email', emailRoutes);
 
 // Concerns (Batch 4): disputes and complaints.
 apiV1.use('/concerns', concernsRoutes);

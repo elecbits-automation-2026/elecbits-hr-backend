@@ -49,9 +49,11 @@ export const payslipSchema = z
     autoSlDays: z.number(),
     autoClDays: z.number(),
     lopOverridden: z.boolean(),
-    // PF (both sides) and PT are computed by the engine, never typed in.
+    // PF and ESIC (both sides) and PT are computed by the engine, never typed in.
     pf: z.number(),
     pfEmployer: z.number(),
+    esicEmployee: z.number(),
+    esicEmployer: z.number(),
     tds: z.number(),
     professionalTax: z.number(),
     otherDeduction: z.number(),
@@ -249,10 +251,13 @@ export const salaryAnnexureSchema = z
     lta: z.number(),
     /** Balancing figure — Basic+HRA+LTA+Special+PF(ER) always sums to CTC. */
     specialAllowance: z.number(),
-    /** CTC monthly − employer PF. */
+    /** CTC monthly − employer PF − employer ESIC. */
     grossSalary: z.number(),
     pfEmployee: z.number(),
     pfEmployer: z.number(),
+    /** Zero when the CTC is above the ESIC ceiling or ESIC is off. */
+    esicEmployee: z.number(),
+    esicEmployer: z.number(),
     professionalTax: z.number(),
     healthInsurance: z.number(),
     cnpsEmployer: z.number(),

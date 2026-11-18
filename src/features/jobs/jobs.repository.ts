@@ -250,11 +250,14 @@ export const createJobsRepository = (db: DbClient) => ({
           })),
         );
       for (const i of items) {
-        await insertNotifications(tx, [i.recipientId], {
-          type: 'reminder.approval',
-          title: i.title,
-          link: i.link,
-        });
+        // The 2-day approval nudge goes by email too; reminders_sent already
+        // makes each one fire once, the key keeps a retried run from doubling it.
+        await insertNotifications(
+          tx,
+          [i.recipientId],
+          { type: 'reminder.approval', title: i.title, link: i.link },
+          { email: true, dedupeKey: `${i.kind}:${i.subjectId}` },
+        );
       }
     });
   },

@@ -109,7 +109,20 @@ export const leaveBalanceSchema = z
   })
   .openapi('LeaveBalance');
 
+/** The leave form's preview: who the request will go to (same rule as raising it). */
+export const leaveApprovalRouteSchema = z
+  .object({
+    /** At the top of the org chart: approved as raised, nobody to ask. */
+    selfApproved: z.boolean(),
+    /** The RM slot (leave approver, else reporting manager), if any. */
+    rm: z.object({ id: z.string().uuid(), name: z.string() }).nullable(),
+    /** Whether HR must also approve. */
+    hr: z.boolean(),
+  })
+  .openapi('LeaveApprovalRoute');
+
 export type CreateLeaveRequestInput = z.infer<typeof createLeaveRequestSchema>;
 export type DecideLeaveInput = z.infer<typeof decideLeaveSchema>;
 export type LeaveRequestDto = z.infer<typeof leaveRequestSchema>;
 export type LeaveBalanceDto = z.infer<typeof leaveBalanceSchema>;
+export type LeaveApprovalRouteDto = z.infer<typeof leaveApprovalRouteSchema>;

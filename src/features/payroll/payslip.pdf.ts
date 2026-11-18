@@ -17,6 +17,8 @@ export interface PayslipPdfInput {
     panLast4: string | null;
     /** EPFO UAN — shown in full, as on a standard payslip. */
     uan: string | null;
+    /** ESIC Insurance (IP) number — shown only when set. */
+    esicIp: string | null;
     bankName: string | null;
     accountLast4: string | null;
   };
@@ -121,6 +123,7 @@ export const payslipLines = (slip: PayslipDto) => {
     ['Leave travel allowance', slip.lta],
     ['Special allowance', slip.specialAllowance],
     ['Employer PF (part of CTC)', slip.pf],
+    ['Employer ESIC (part of CTC)', slip.esicEmployer],
     ['Performance bonus', slip.performanceBonus],
     ['Recognition awards (last month)', slip.recognitionBonus],
     ['Other bonus', slip.otherBonus],
@@ -144,6 +147,8 @@ export const payslipLines = (slip: PayslipDto) => {
     ['Provident fund (employer)', slip.pfEmployer],
     ['Professional tax', slip.professionalTax],
     ['Income tax (TDS)', slip.tds],
+    ['ESIC (employee)', slip.esicEmployee],
+    ['ESIC (employer)', slip.esicEmployer],
     ['Health insurance', slip.healthInsurance],
     ['CNPS', slip.cnpsEmployer],
     ['Other deduction', slip.otherDeduction],
@@ -256,6 +261,7 @@ export const renderPayslipPdf = (input: PayslipPdfInput): Promise<Buffer> =>
       ['Date of joining', employee.dateOfJoining ?? '—'],
       ['PAN', employee.panLast4 ? `XXXXXX${employee.panLast4}` : '—'],
       ['UAN', employee.uan ?? '—'],
+      ...(employee.esicIp ? [['ESIC IP no.', employee.esicIp] as [string, string]] : []),
       [
         'Bank account',
         employee.accountLast4

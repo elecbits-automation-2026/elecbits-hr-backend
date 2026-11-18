@@ -6,14 +6,14 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**90 tables · 68 enums.**
+**94 tables · 70 enums.**
 
 | Schema   | Tables | Holds                                                                                               |
 | -------- | ------ | --------------------------------------------------------------------------------------------------- |
 | `access` | 11     | Owner, modules, batches, grants, requests, audit log                                                |
-| `ops`    | 12     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
-| `org`    | 49     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
-| `public` | 2      | Sign-in identities and refresh tokens                                                               |
+| `ops`    | 13     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
+| `org`    | 51     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `public` | 3      | Sign-in identities and refresh tokens                                                               |
 | `ta`     | 16     | Hiring: quarterly plans, requisitions, interview rounds, approvals                                  |
 
 ## Enums
@@ -87,6 +87,8 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `ta_document_kind`          | `jd`, `scorecard`                                                                                                                                                                      |
 | `ta_document_status`        | `draft`, `in_review`, `returned`, `approved`                                                                                                                                           |
 | `termination_mode`          | `serve`, `pay_in_lieu`                                                                                                                                                                 |
+| `training_status`           | `assigned`, `completed`, `cancelled`                                                                                                                                                   |
+| `training_stream`           | `compliance`, `leadership`, `company`, `functional`                                                                                                                                    |
 | `unit_kind`                 | `division`, `department`, `chapter`                                                                                                                                                    |
 
 ## `access`
@@ -323,6 +325,29 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 - Index `assets_holder_idx` (`holder_id`)
 - Index `assets_zone_idx` (`zone_id`)
 - Check `assets_holder_matches_status`: `(… = 'assigned') = (… IS NOT NULL)`
+
+### email_outbox
+
+| Column            | Type                     | Null | Default             | Notes                |
+| ----------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`              | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `recipient_id`    | uuid                     | yes  |                     | → `org.employees.id` |
+| `to_address`      | text                     |      |                     |                      |
+| `type`            | text                     |      |                     |                      |
+| `subject`         | text                     |      |                     |                      |
+| `body`            | text                     | yes  |                     |                      |
+| `link`            | text                     | yes  |                     |                      |
+| `status`          | text                     |      | `pending`           |                      |
+| `attempts`        | integer                  |      | `0`                 |                      |
+| `next_attempt_at` | timestamp with time zone |      | `now()`             |                      |
+| `last_error`      | text                     | yes  |                     |                      |
+| `dedupe_key`      | text                     | yes  |                     |                      |
+| `created_at`      | timestamp with time zone |      | `now()`             |                      |
+| `sent_at`         | timestamp with time zone | yes  |                     |                      |
+
+- Unique index `email_outbox_dedupe_uq` (`dedupe_key`)
+- Index `email_outbox_due_idx` (`status`, `next_attempt_at`)
+- Check `email_outbox_status_chk`: `… IN ('pending', 'sent', 'failed')`
 
 ### gate_passes
 
@@ -611,6 +636,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `salary_mode`              | text                     | yes  |         |                           |
 | `pan_number`               | text                     | yes  |         |                           |
 | `uan_number`               | text                     | yes  |         |                           |
+| `esic_ip_number`           | text                     | yes  |         |                           |
 | `provident_fund_account`   | text                     | yes  |         |                           |
 | `employee_advance_account` | text                     | yes  |         |                           |
 | `bank_name`                | text                     | yes  |         |                           |
@@ -1064,6 +1090,10 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `professional_tax`   | numeric(12, 2)           |      | `0`                 |                                             |
 | `pt_eligible`        | boolean                  |      | `false`             |                                             |
 | `pt_state`           | text                     | yes  |                     |                                             |
+| `esic_employee`      | numeric(12, 2)           |      | `0`                 |                                             |
+| `esic_employer`      | numeric(12, 2)           |      | `0`                 |                                             |
+| `esic_eligible`      | boolean                  | yes  |                     |                                             |
+| `esic_period_start`  | date                     | yes  |                     |                                             |
 | `other_deduction`    | numeric(12, 2)           |      | `0`                 |                                             |
 | `health_insurance`   | numeric(12, 2)           |      | `0`                 |                                             |
 | `cnps_employer`      | numeric(12, 2)           |      | `0`                 |                                             |
@@ -1335,6 +1365,42 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 - Index `seats_employee_idx` (`employee_id`)
 - Check `seats_department_ck`: `(… = 'dept_head') = (… IS NOT NULL)`
 
+### training_certificates
+
+| Column         | Type                     | Null | Default             | Notes                         |
+| -------------- | ------------------------ | ---- | ------------------- | ----------------------------- |
+| `id`           | uuid                     |      | `gen_random_uuid()` | PK                            |
+| `training_id`  | uuid                     |      |                     | unique · → `org.trainings.id` |
+| `file_name`    | text                     |      |                     |                               |
+| `content_type` | text                     |      |                     |                               |
+| `size_bytes`   | integer                  |      |                     |                               |
+| `data`         | bytea                    |      |                     |                               |
+| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`          |
+| `uploaded_at`  | timestamp with time zone |      | `now()`             |                               |
+
+### trainings
+
+| Column            | Type                     | Null | Default             | Notes                |
+| ----------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`              | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `employee_id`     | uuid                     |      |                     | → `org.employees.id` |
+| `title`           | text                     |      |                     |                      |
+| `stream`          | training_stream          |      |                     |                      |
+| `description`     | text                     | yes  |                     |                      |
+| `link`            | text                     | yes  |                     |                      |
+| `due_on`          | date                     | yes  |                     |                      |
+| `status`          | training_status          |      | `assigned`          |                      |
+| `batch_id`        | uuid                     | yes  |                     |                      |
+| `assigned_by`     | uuid                     |      |                     | → `org.employees.id` |
+| `assigned_at`     | timestamp with time zone |      | `now()`             |                      |
+| `completed_at`    | timestamp with time zone | yes  |                     |                      |
+| `completion_note` | text                     | yes  |                     |                      |
+| `cancelled_by`    | uuid                     | yes  |                     | → `org.employees.id` |
+| `cancelled_at`    | timestamp with time zone | yes  |                     |                      |
+
+- Index `trainings_employee_idx` (`employee_id`)
+- Index `trainings_status_due_idx` (`status`, `due_on`)
+
 ### wfh_requests
 
 | Column            | Type                     | Null | Default             | Notes                |
@@ -1392,6 +1458,17 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 - Unique index `work_updates_employee_date_uq` (`employee_id`, `date`)
 
 ## `public`
+
+### oauth_login_states
+
+| Column          | Type                     | Null | Default | Notes |
+| --------------- | ------------------------ | ---- | ------- | ----- |
+| `state`         | text                     |      |         | PK    |
+| `code_verifier` | text                     |      |         |       |
+| `expires_at`    | timestamp with time zone |      |         |       |
+| `created_at`    | timestamp with time zone |      | `now()` |       |
+
+- Index `oauth_login_states_expires_idx` (`expires_at`)
 
 ### refresh_tokens
 
@@ -1472,6 +1549,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `shortlisted_at`        | timestamp with time zone | yes  |                     |                      |
 | `interviews_started_at` | timestamp with time zone | yes  |                     |                      |
 | `outcome_reason`        | text                     | yes  |                     |                      |
+| `pre_end_stage`         | application_stage        | yes  |                     |                      |
 | `decision_started_at`   | timestamp with time zone | yes  |                     |                      |
 | `selected_at`           | timestamp with time zone | yes  |                     |                      |
 | `offered_ctc`           | numeric(12, 2)           | yes  |                     |                      |
@@ -1650,6 +1728,9 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `opened_at`         | timestamp with time zone | yes  |                     |                        |
 | `priority`          | hiring_priority          |      | `normal`            |                        |
 | `expected_close_on` | date                     | yes  |                     |                        |
+| `on_hold_at`        | timestamp with time zone | yes  |                     |                        |
+| `on_hold_by`        | uuid                     | yes  |                     | → `org.employees.id`   |
+| `on_hold_reason`    | text                     | yes  |                     |                        |
 | `created_at`        | timestamp with time zone |      | `now()`             |                        |
 | `updated_at`        | timestamp with time zone |      | `now()`             |                        |
 

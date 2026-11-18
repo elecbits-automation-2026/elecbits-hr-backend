@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { keepReachable } from '../../middleware/authorize.js';
 import createError from 'http-errors';
+import { LEAVE_TYPES } from '../../shared/constants/constants.js';
 import { isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
 import { createSettingsRepository } from '../settings/index.js';
@@ -69,6 +70,14 @@ export const leavesController = {
     const parsed = Number.parseInt(String(req.query.year ?? ''), 10);
     const year = Number.isInteger(parsed) ? parsed : new Date().getFullYear();
     res.json(await service(req).balances(req.auth!.employeeId, year));
+  },
+
+  approvalRoute: async (req: Request, res: Response): Promise<void> => {
+    const type = String(req.query.type ?? '') as CreateLeaveRequestInput['type'];
+    if (!(LEAVE_TYPES as readonly string[]).includes(type)) {
+      throw createError(400, 'Unknown leave type', { code: 'BAD_TYPE' });
+    }
+    res.json(await service(req).approvalRoute(req.auth!.employeeId, type));
   },
 
   listTeam: async (req: Request, res: Response): Promise<void> => {

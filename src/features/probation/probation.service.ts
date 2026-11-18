@@ -92,7 +92,9 @@ export const createProbationService = (deps: {
       can: {
         // One recommendation per review: once sent it waits on HR.
         recommend:
-          r.status === 'pending' && viewer.id !== r.employeeId && (isRm || (!p?.rm_id && hr)),
+          r.status === 'pending' &&
+          viewer.id !== r.employeeId &&
+          (isRm || (!p?.rm_id && hr)),
         decide: open && viewer.id !== r.employeeId && hr,
         letter:
           r.status === 'confirmed' && (viewer.id === r.employeeId || isRm || hrRead),
@@ -222,6 +224,8 @@ export const createProbationService = (deps: {
               title: 'Your probation is confirmed — your confirmation letter is ready',
               link: '/my-profile',
             },
+            email: true,
+            dedupeKey: `probation.confirmed:${id}`,
           },
           ...(dto.rm && dto.rm.id !== actor.actorEmployeeId
             ? [
@@ -319,6 +323,8 @@ export const createProbationService = (deps: {
             title: `${p.name}'s probation ends on ${p.due_on} — recommend confirm or end`,
             link: p.rm_id ? LINK_TEAM : LINK_HR,
           },
+          email: true,
+          dedupeKey: `probation.review:${p.id}:${p.due_on}`,
         },
       ]);
       if (id) opened += 1;

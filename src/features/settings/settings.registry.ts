@@ -227,6 +227,29 @@ const definitions = {
     schema: z.object({ leaves: z.boolean(), remote: z.boolean() }),
     default: { leaves: true, remote: true },
   },
+  'payroll.esic': {
+    area: 'payroll',
+    live: true,
+    label: 'ESIC',
+    description:
+      "Employees' State Insurance on payslips. Covers people whose monthly gross wages are within the ceiling in ESIC rates; coverage is fixed for each contribution period (Apr–Sep, Oct–Mar). The employer share sits inside CTC, like employer PF. Switch on, then re-pull the month's draft run.",
+    schema: z.object({ onPayslips: z.boolean() }),
+    default: { onPayslips: false },
+  },
+  'payroll.esicRates': {
+    area: 'payroll',
+    live: true,
+    label: 'ESIC rates',
+    description:
+      'Employee and employer contribution (% of wages paid), the monthly gross ceiling for coverage (₹), and the average daily wage (₹) at or under which the employee share is nil. Statutory today: 0.75%, 3.25%, ₹21,000, ₹176.',
+    schema: z.object({
+      employeePct: z.number().min(0).max(10),
+      employerPct: z.number().min(0).max(20),
+      wageCeiling: z.number().int().min(0),
+      lowWageDaily: z.number().min(0),
+    }),
+    default: { employeePct: 0.75, employerPct: 3.25, wageCeiling: 21000, lowWageDaily: 176 },
+  },
   'payroll.reimbursementDigestDay': {
     area: 'payroll',
     live: true,
@@ -385,6 +408,15 @@ const definitions = {
       'The people who decide level-3 disputes (Dispute Resolution Framework). A member who is the subject of a case or decided it at level 2 is skipped for that case.',
     schema: z.object({ employeeIds: z.array(z.string().uuid()).max(20) }),
     default: { employeeIds: [] as string[] },
+  },
+  'email.delivery': {
+    area: 'access',
+    live: true,
+    label: 'Email delivery',
+    description:
+      'The master switch for HR emails (leave decisions, payslip ready, invites …). While off, no email is queued or sent (switching on later does not send a backlog); switch it on once the sender is set up and the test email on Admin → Jobs arrives. Bells in the app are not affected.',
+    schema: z.object({ enabled: z.boolean() }),
+    default: { enabled: false },
   },
 } as const;
 

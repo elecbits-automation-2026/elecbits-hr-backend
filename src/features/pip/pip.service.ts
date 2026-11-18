@@ -9,7 +9,12 @@ import { reachesIn, type PeopleScope } from '../access/index.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { ActorContext, PersonRow, PipRepository, PipRow } from './pip.repository.js';
-import type { CancelPipInput, CreatePipInput, PipDto, PipOutcomeInput } from './pip.schema.js';
+import type {
+  CancelPipInput,
+  CreatePipInput,
+  PipDto,
+  PipOutcomeInput,
+} from './pip.schema.js';
 
 const LENGTH_DAYS = 60;
 const EXTENSION_DAYS = 30;
@@ -143,7 +148,8 @@ export const createPipService = (deps: {
 
   /** For the person sheet: may the viewer start a PIP now (none running)? */
   const canStart = async (employeeId: string, viewerId: string) => {
-    const emp = (await repo.people([employeeId])).get(employeeId) as PersonRow | undefined;
+    const emp = (await repo.people([employeeId])).get(employeeId) as
+      PersonRow | undefined;
     if (!emp || emp.status !== 'active' || !(await mayStart(emp, viewerId))) return false;
     const live = (await repo.list({ employeeId })).some((p) =>
       ['pending_hr', 'active'].includes(p.status),
@@ -193,6 +199,8 @@ export const createPipService = (deps: {
             title: `A performance improvement plan starts on ${start} and runs to ${addDaysIso(start, LENGTH_DAYS)}`,
             link: LINK_ME,
           },
+          email: true,
+          dedupeKey: `pip.started:${emp.id}:${start}`,
         },
         {
           to: await hrAudience(emp.id, [actor.actorEmployeeId]),
@@ -204,7 +212,6 @@ export const createPipService = (deps: {
         },
       ],
     );
-    // TODO(email): also email the employee the plan once email is integrated.
     return get(id, actor.actorEmployeeId);
   };
 
@@ -277,6 +284,8 @@ export const createPipService = (deps: {
               : 'Your performance improvement plan was not met — HR will be in touch',
             link: LINK_ME,
           },
+          email: true,
+          dedupeKey: `pip.closed:${id}`,
         },
         {
           to: await hrAudience(p.employeeId, [actor.actorEmployeeId]),

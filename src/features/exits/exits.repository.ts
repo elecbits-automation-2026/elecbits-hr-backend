@@ -24,6 +24,10 @@ export interface ActorContext {
 export interface Bell {
   to: string[];
   event: NotificationEvent;
+  /** Also send this bell as an email (email service) — decided where the bell is built. */
+  email?: boolean;
+  /** Queue the email at most once per key + recipient (retries, double clicks). */
+  dedupeKey?: string;
 }
 
 /** The person an exit is about, with what the exit rules need. */
@@ -58,7 +62,11 @@ const audit = (
   });
 
 const ring = async (tx: DbClient, bells: Bell[] = []) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
 };
 
 /** The only place the exits feature touches the database. */
@@ -186,14 +194,12 @@ export const createExitsRepository = (db: DbClient) => ({
     db.transaction(async (tx) => {
       const rows = await tx.orm.insert(exits).values(values).returning();
       const id = rows[0]!.id;
-      await tx.orm
-        .insert(exitClearances)
-        .values(
-          (['hr', 'manager', 'ops', 'payroll'] as const).map((kind) => ({
-            exitId: id,
-            kind,
-          })),
-        );
+      await tx.orm.insert(exitClearances).values(
+        (['hr', 'manager', 'ops', 'payroll'] as const).map((kind) => ({
+          exitId: id,
+          kind,
+        })),
+      );
       if (employeeStatus) {
         await tx.orm
           .update(employees)

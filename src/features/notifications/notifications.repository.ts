@@ -1,6 +1,7 @@
 import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import { notifications } from '../../db/schema/index.js';
+import { enqueueEmails } from '../email/email.repository.js';
 
 export type NotificationRow = typeof notifications.$inferSelect;
 
@@ -12,6 +13,17 @@ export interface NotificationEvent {
   link?: string | null;
 }
 
+export interface NotificationOptions {
+  /**
+   * Also email it (email service): the bell's title is the subject, its body
+   * the message, its link the button. Important events only — concerns and
+   * open-door are refused. Nothing is queued while Email delivery is off.
+   */
+  email?: boolean;
+  /** Queue the email once per key + recipient (re-runs, double clicks). */
+  dedupeKey?: string;
+}
+
 /**
  * The WRITE side other features use: call it with the transaction that makes
  * the change, so the bell rows land (or roll back) with the event itself —
@@ -21,6 +33,7 @@ export const insertNotifications = async (
   db: DbClient,
   recipientIds: string[],
   event: NotificationEvent,
+  opts: NotificationOptions = {},
 ): Promise<number> => {
   const unique = [...new Set(recipientIds)];
   if (unique.length === 0) return 0;
@@ -33,6 +46,26 @@ export const insertNotifications = async (
       link: event.link ?? null,
     })),
   );
+  if (opts.email) {
+    // The same message by email, to everyone still with us (never a leaver's old box).
+    const people = await db.query<{ id: string; email: string }>(
+      `SELECT id, email FROM org.employees
+        WHERE id = ANY($1::uuid[]) AND status IN ('active', 'exiting')`,
+      [unique],
+    );
+    await enqueueEmails(
+      db,
+      people.map((p) => ({
+        recipientId: p.id,
+        toAddress: p.email,
+        type: event.type,
+        subject: event.title,
+        body: event.body ?? null,
+        link: event.link ?? null,
+        dedupeKey: opts.dedupeKey ? `${opts.dedupeKey}:${p.id}` : null,
+      })),
+    );
+  }
   return unique.length;
 };
 

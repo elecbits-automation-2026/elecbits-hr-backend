@@ -21,6 +21,9 @@ export interface PositionRow {
   goal_id: string | null;
   goal_weight: number | null;
   goal_progress: number | null;
+  on_hold_at: Date | null;
+  on_hold_reason: string | null;
+  on_hold_by_name: string | null;
 }
 
 export interface SourceRow {
@@ -61,6 +64,10 @@ export interface ActorContext {
 export interface Bell {
   to: string[];
   event: NotificationEvent;
+  /** Also send this bell as an email (email service) — decided where the bell is built. */
+  email?: boolean;
+  /** Queue the email at most once per key + recipient (retries, double clicks). */
+  dedupeKey?: string;
 }
 
 export type RequisitionStatus =
@@ -89,6 +96,8 @@ export interface RequisitionRow {
   urgent: boolean;
   created_by: string;
   created_by_name: string;
+  /** Who asked for an urgent line (raised on their behalf). */
+  urgent_requested_by_name: string | null;
   submitted_by: string | null;
   submitted_at: Date | null;
   return_reason: string | null;
@@ -122,7 +131,8 @@ const SELECT_REQ = `
          r.target_joining_on::text, r.location, r.reporting_manager_id,
          m.name AS reporting_manager_name, r.priority, r.employment_type,
          r.version, r.status, r.urgent,
-         r.created_by, c.name AS created_by_name, r.submitted_by, r.submitted_at,
+         r.created_by, c.name AS created_by_name, ur.name AS urgent_requested_by_name,
+         r.submitted_by, r.submitted_at,
          r.return_reason, r.approved_at, r.ta_rm_id, t.name AS ta_rm_name,
          r.ta_rm_assigned_at, r.created_at
     FROM ta.requisitions r
@@ -130,6 +140,7 @@ const SELECT_REQ = `
     JOIN org.employees c ON c.id = r.created_by
     LEFT JOIN org.employees t ON t.id = r.ta_rm_id
     LEFT JOIN org.employees m ON m.id = r.reporting_manager_id
+    LEFT JOIN org.employees ur ON ur.id = r.urgent_requested_by
     LEFT JOIN ta.hiring_plans p ON p.id = r.plan_id`;
 
 const audit = (
@@ -147,7 +158,11 @@ const audit = (
   });
 
 const ring = async (tx: DbClient, bells: Bell[] = []) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
 };
 
 const writeRounds = async (
@@ -600,9 +615,11 @@ export const createHiringRepository = (db: DbClient) => ({
     db.query<PositionRow>(
       `SELECT p.id, p.requisition_id, p.number, p.status, p.recruiter_id,
               e.name AS recruiter_name, p.opened_at, p.priority, p.expected_close_on::text,
-              g.id AS goal_id, g.weight::float8 AS goal_weight, g.progress AS goal_progress
+              g.id AS goal_id, g.weight::float8 AS goal_weight, g.progress AS goal_progress,
+              p.on_hold_at, p.on_hold_reason, hb.name AS on_hold_by_name
          FROM ta.positions p
          LEFT JOIN org.employees e ON e.id = p.recruiter_id
+         LEFT JOIN org.employees hb ON hb.id = p.on_hold_by
          LEFT JOIN LATERAL (
            SELECT g.* FROM org.goals g JOIN org.review_cycles c ON c.id = g.cycle_id
             WHERE g.position_id = p.id ORDER BY c.start_date DESC LIMIT 1) g ON true
@@ -622,7 +639,12 @@ export const createHiringRepository = (db: DbClient) => ({
     ),
 
   addSource: (
-    input: { positionId: string; channel: string; activatedOn: string; notes: string | null },
+    input: {
+      positionId: string;
+      channel: string;
+      activatedOn: string;
+      notes: string | null;
+    },
     actor: ActorContext,
   ): Promise<void> =>
     db.transaction(async (tx) => {
@@ -630,7 +652,13 @@ export const createHiringRepository = (db: DbClient) => ({
         await tx.query<{ id: string }>(
           `INSERT INTO ta.source_activations (position_id, channel, activated_on, spoc_id, notes)
            VALUES ($1, $2::candidate_source, $3::date, $4, $5) RETURNING id`,
-          [input.positionId, input.channel, input.activatedOn, actor.actorEmployeeId, input.notes],
+          [
+            input.positionId,
+            input.channel,
+            input.activatedOn,
+            actor.actorEmployeeId,
+            input.notes,
+          ],
         )
       )[0]!;
       await tx.orm.insert(auditLog).values({
@@ -730,7 +758,13 @@ export const createHiringRepository = (db: DbClient) => ({
            updated_at = now()
          WHERE ta.documents.status IN ('draft', 'returned')
          RETURNING id, version`,
-        [position.requisition_id, kind, JSON.stringify(content), actor.actorEmployeeId, position.id],
+        [
+          position.requisition_id,
+          kind,
+          JSON.stringify(content),
+          actor.actorEmployeeId,
+          position.id,
+        ],
       );
       if (!rows[0]) return false;
       await tx.orm.insert(auditLog).values({

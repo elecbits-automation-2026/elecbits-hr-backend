@@ -27,10 +27,18 @@ export interface ActorContext {
 export interface LeaveBell {
   to: string[];
   event: NotificationEvent;
+  /** Also send this bell as an email (email service) — decided where the bell is built. */
+  email?: boolean;
+  /** Queue the email at most once per key + recipient (retries, double clicks). */
+  dedupeKey?: string;
 }
 
 const ring = async (tx: DbClient, bells: LeaveBell[]) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
 };
 
 export type LeaveRequestRow = typeof leaveRequests.$inferSelect;
@@ -177,6 +185,16 @@ export const createLeavesRepository = (db: DbClient) => ({
     return rows[0];
   },
 
+  /** One person's name (the RM named in the approval-route preview). */
+  nameOf: async (employeeId: string): Promise<string | null> =>
+    (
+      await db.orm
+        .select({ name: employees.name })
+        .from(employees)
+        .where(eq(employees.id, employeeId))
+        .limit(1)
+    )[0]?.name ?? null,
+
   listByEmployee: async (employeeId: string): Promise<LeaveRequestJoinedRow[]> => {
     const rows = await db.orm
       .select(joinedSelection)
@@ -225,7 +243,10 @@ export const createLeavesRepository = (db: DbClient) => ({
    */
   certificateInfo: async (ids: string[]) => {
     if (ids.length === 0) {
-      return new Map<string, { needed: boolean; fileName: string | null; uploadedAt: Date | null }>();
+      return new Map<
+        string,
+        { needed: boolean; fileName: string | null; uploadedAt: Date | null }
+      >();
     }
     const rows = await db.query<{
       id: string;

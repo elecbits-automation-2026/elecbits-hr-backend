@@ -198,6 +198,10 @@ export const positionSchema = z
       .object({ id: z.string().uuid(), weight: z.number(), progress: z.number().int() })
       .nullable(),
     openedAt: z.string().datetime().nullable(),
+    /** On hold (TA RM / HRBP): nothing moves the seat forward until resumed. */
+    onHold: z
+      .object({ at: z.string().datetime(), reason: z.string().nullable(), byName: z.string().nullable() })
+      .nullable(),
     /** Its own JD + scorecard, written by its recruiter (learner, 2026-10-27). */
     documents: z.object({
       jd: taDocumentSchema.nullable(),
@@ -315,6 +319,8 @@ export const requisitionSchema = z
     waitingOn: z.array(approverRoleSchema),
     returnReason: z.string().nullable(),
     createdByName: z.string(),
+    /** For an urgent line: who asked for it (it was raised on their behalf). */
+    urgentRequestedByName: z.string().nullable(),
     submittedAt: z.string().datetime().nullable(),
     approvedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),

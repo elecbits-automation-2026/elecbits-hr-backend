@@ -56,11 +56,13 @@ export const createDailyKpiService = (deps: {
   const build = async (people: KpiPerson[], date: string): Promise<DailyKpiDto> => {
     const today = localDate();
     const ids = people.map((p) => p.id);
-    const [months, perf, targets, rules] = await Promise.all([
-      attendance.peopleMonth(
-        people.map((p) => ({ id: p.id, name: p.name, employeeCode: p.employeeCode })),
-        date.slice(0, 7),
-      ),
+    const who = people.map((p) => ({ id: p.id, name: p.name, employeeCode: p.employeeCode }));
+    // The 7-day hours window can start in the previous month.
+    const weekStart = localDate(new Date(Date.parse(`${date}T12:00:00`) - 6 * DAY_MS));
+    const crosses = weekStart.slice(0, 7) !== date.slice(0, 7);
+    const [months, before, perf, targets, rules] = await Promise.all([
+      attendance.peopleMonth(who, date.slice(0, 7)),
+      crosses ? attendance.peopleMonth(who, weekStart.slice(0, 7)) : Promise.resolve([]),
       performance.dailyKpiInputs(ids, date),
       settings.effective('performance.departmentTargets'),
       settings.effective('attendance.hourRules'),
@@ -93,6 +95,18 @@ export const createDailyKpiService = (deps: {
         workingDays: recent.length,
       };
       const goals = inputs?.goals ?? { count: 0, atRisk: 0, attainment: null };
+      // Average hours over the 7 days up to the date (days with hours only).
+      const week = [...before, ...months]
+        .filter((m) => m.employee.id === p.id)
+        .flatMap((m) => m.days)
+        .filter((d) => d.date >= weekStart && d.date <= date && d.workedHours !== null)
+        .map((d) => d.workedHours as number);
+      const recentHours = {
+        avg: week.length
+          ? Math.round((week.reduce((n, h) => n + h, 0) / week.length) * 10) / 10
+          : null,
+        days: week.length,
+      };
       const status = day?.status ?? 'none';
       const worked = day?.workedHours ?? null;
 
@@ -160,6 +174,7 @@ export const createDailyKpiService = (deps: {
         update: { status: update, score: inputs?.score ?? null },
         strip: strip.slice(-7),
         recentUpdates,
+        recentHours,
         goals,
         targets: target,
         alerts,

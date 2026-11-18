@@ -117,6 +117,8 @@ export const applicationSchema = z
     currentRound: roundSchema.nullable(),
     /** The rejection record: the round, who rejected, when the candidate was told. */
     rejectedRound: roundSchema.nullable(),
+    /** For a rejected / withdrawn one: the stage it ended from (where Restore returns it). */
+    preEndStage: stageSchema.nullable(),
     rejectedByName: z.string().nullable(),
     informedAt: z.string().datetime().nullable(),
     shortlistedByName: z.string().nullable(),

@@ -19,7 +19,11 @@ const audit = (
   });
 
 const ring = async (tx: DbClient, bells: Bell[] = []) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
 };
 
 /** Stages in which a candidate still holds a position's attention. */
@@ -107,13 +111,15 @@ export const createHireRepository = (db: DbClient) => ({
         offered_at: Date | null;
         employee_id: string | null;
         next_action: string | null;
+        position_on_hold_at: Date | null;
       }>(
         `SELECT a.id, a.stage::text, a.candidate_id, c.name AS candidate_name,
                 c.candidate_code, c.phone AS candidate_phone,
                 a.position_id, p.number AS position_number, p.recruiter_id, p.requisition_id,
                 q.ta_rm_id, q.status::text AS requisition_status, q.role_title, q.department_id,
                 d.name AS department_name, a.offered_ctc::text, a.joining_date::text,
-                a.offer_terms, a.offer_status, a.offered_at, a.employee_id, a.next_action
+                a.offer_terms, a.offer_status, a.offered_at, a.employee_id, a.next_action,
+                p.on_hold_at AS position_on_hold_at
            FROM ta.applications a
            JOIN ta.candidates c ON c.id = a.candidate_id
            JOIN ta.positions p ON p.id = a.position_id
@@ -183,7 +189,14 @@ export const createHireRepository = (db: DbClient) => ({
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
-        [id, file.fileName, file.contentType, file.data.length, file.data, actor.actorEmployeeId],
+        [
+          id,
+          file.fileName,
+          file.contentType,
+          file.data.length,
+          file.data,
+          actor.actorEmployeeId,
+        ],
       );
       await audit(tx, actor, 'application.offer_letter', id, { bytes: file.data.length });
     }),
@@ -197,7 +210,8 @@ export const createHireRepository = (db: DbClient) => ({
     )[0],
 
   hasOfferLetter: async (id: string): Promise<boolean> =>
-    (await db.query(`SELECT 1 FROM ta.offer_letters WHERE application_id = $1`, [id])).length > 0,
+    (await db.query(`SELECT 1 FROM ta.offer_letters WHERE application_id = $1`, [id]))
+      .length > 0,
 
   saveSignedLetter: (id: string, file: LetterFile, actor: ActorContext): Promise<void> =>
     db.transaction(async (tx) => {
@@ -208,9 +222,18 @@ export const createHireRepository = (db: DbClient) => ({
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
-        [id, file.fileName, file.contentType, file.data.length, file.data, actor.actorEmployeeId],
+        [
+          id,
+          file.fileName,
+          file.contentType,
+          file.data.length,
+          file.data,
+          actor.actorEmployeeId,
+        ],
       );
-      await audit(tx, actor, 'application.signed_offer_letter', id, { bytes: file.data.length });
+      await audit(tx, actor, 'application.signed_offer_letter', id, {
+        bytes: file.data.length,
+      });
     }),
 
   signedLetter: async (id: string) =>
@@ -222,8 +245,11 @@ export const createHireRepository = (db: DbClient) => ({
     )[0],
 
   hasSignedLetter: async (id: string): Promise<boolean> =>
-    (await db.query(`SELECT 1 FROM ta.signed_offer_letters WHERE application_id = $1`, [id]))
-      .length > 0,
+    (
+      await db.query(`SELECT 1 FROM ta.signed_offer_letters WHERE application_id = $1`, [
+        id,
+      ])
+    ).length > 0,
 
   /**
    * Save the negotiated terms. While interviewed (draft / returned) or waiting
@@ -244,7 +270,8 @@ export const createHireRepository = (db: DbClient) => ({
           [id],
         )
       )[0];
-      if (!cur || !['interviewed', 'decision', 'selected'].includes(cur.stage)) return false;
+      if (!cur || !['interviewed', 'decision', 'selected'].includes(cur.stage))
+        return false;
       const reopen = cur.stage === 'selected';
       await tx.query(
         `UPDATE ta.applications SET offered_ctc = $2, joining_date = $3::date, offer_terms = $4,
@@ -259,11 +286,19 @@ export const createHireRepository = (db: DbClient) => ({
         [id, input.ctc, input.joiningDate, input.terms, reopen],
       );
       if (reopen) {
-        await tx.query(`DELETE FROM ta.signed_offer_letters WHERE application_id = $1`, [id]);
+        await tx.query(`DELETE FROM ta.signed_offer_letters WHERE application_id = $1`, [
+          id,
+        ]);
       }
-      await audit(tx, actor, reopen ? 'application.offer_reopened' : 'application.offer_draft', id, {
-        joiningDate: input.joiningDate,
-      });
+      await audit(
+        tx,
+        actor,
+        reopen ? 'application.offer_reopened' : 'application.offer_draft',
+        id,
+        {
+          joiningDate: input.joiningDate,
+        },
+      );
       if (reopen) await ring(tx, bellsIfReopened);
       return reopen ? 'reopened' : 'saved';
     }),
@@ -322,7 +357,12 @@ export const createHireRepository = (db: DbClient) => ({
     }),
 
   /** The HR Head sends it back to TA with what to change: decision → interviewed. */
-  returnOffer: (id: string, reason: string, actor: ActorContext, bells: Bell[]): Promise<boolean> =>
+  returnOffer: (
+    id: string,
+    reason: string,
+    actor: ActorContext,
+    bells: Bell[],
+  ): Promise<boolean> =>
     db.transaction(async (tx) => {
       const moved = await tx.query(
         `UPDATE ta.applications SET stage = 'interviewed', offer_status = 'returned',
@@ -400,7 +440,13 @@ export const createHireRepository = (db: DbClient) => ({
       [id, employeeId],
     );
     if (!moved[0]) return false;
-    await movePosition(tx, positionId, ['offer', 'interviewing', 'open'], 'filled', progress);
+    await movePosition(
+      tx,
+      positionId,
+      ['offer', 'interviewing', 'open'],
+      'filled',
+      progress,
+    );
     await audit(tx, actor, 'application.hired', id, { employeeId });
     await ring(tx, bells);
     return true;

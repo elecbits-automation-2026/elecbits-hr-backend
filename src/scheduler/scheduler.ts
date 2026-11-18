@@ -8,6 +8,7 @@ import {
 } from '../features/exits/index.js';
 import { createOpsCustodyReader } from '../features/ops/index.js';
 import { openDoorServiceFor } from '../features/open-door/index.js';
+import { emailServiceFor } from '../features/email/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/index.js';
@@ -22,9 +23,13 @@ import { createSettingsRepository } from '../features/settings/index.js';
 
 /** How often the scheduler asks the jobs whether they are due. */
 const TICK_MS = 5 * 60_000;
+/** How often the email outbox is drained — mail should not wait for a job tick. */
+const EMAIL_TICK_MS = 60_000;
 
 let timer: NodeJS.Timeout | null = null;
+let emailTimer: NodeJS.Timeout | null = null;
 let busy = false;
+let emailBusy = false;
 
 const service = () =>
   createJobsService({
@@ -64,6 +69,21 @@ const tick = async (): Promise<void> => {
   }
 };
 
+/** One outbox pass; never overlaps itself and never throws into the timer. */
+const emailTick = async (): Promise<void> => {
+  if (emailBusy) return;
+  emailBusy = true;
+  try {
+    const tally = await emailServiceFor(db).drain();
+    if (tally.sent + tally.retry + tally.failed > 0)
+      logger.info(tally, 'email outbox drained');
+  } catch (err) {
+    logger.error({ err }, 'email outbox drain failed');
+  } finally {
+    emailBusy = false;
+  }
+};
+
 /**
  * In-process scheduler (end-of-pass). It lives in the API process: no extra
  * service to deploy. Every tick asks the jobs whether they are due; the
@@ -78,15 +98,24 @@ export const startScheduler = (): void => {
   if (timer) return;
   timer = setInterval(() => void tick(), TICK_MS);
   timer.unref();
+  // The email outbox: SKIP LOCKED claims keep several instances from double-sending.
+  emailTimer = setInterval(() => void emailTick(), EMAIL_TICK_MS);
+  emailTimer.unref();
   // A first look shortly after boot, so a run missed while down happens now.
   setTimeout(() => void tick(), 15_000).unref();
   logger.info(
-    { dailyAt: env.scheduler.dailyAt, tickMinutes: TICK_MS / 60_000 },
+    {
+      dailyAt: env.scheduler.dailyAt,
+      tickMinutes: TICK_MS / 60_000,
+      emailDriver: env.email.driver,
+    },
     'scheduler started',
   );
 };
 
 export const stopScheduler = (): void => {
   if (timer) clearInterval(timer);
+  if (emailTimer) clearInterval(emailTimer);
   timer = null;
+  emailTimer = null;
 };

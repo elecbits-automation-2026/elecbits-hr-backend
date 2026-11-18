@@ -1,7 +1,7 @@
 import type { DbClient } from '../../db/client.js';
 import { auditLog } from '../../db/schema/index.js';
 import { insertNotifications } from '../notifications/index.js';
-import type { ActorContext, Bell } from './hiring.repository.js';
+import type { ActorContext, Bell, PositionStatus } from './hiring.repository.js';
 import type { ApplicationStage, CandidateSource } from './candidates.schema.js';
 import type { InterviewRound } from './hiring.schema.js';
 
@@ -47,6 +47,8 @@ export interface ApplicationRow {
   position_id: string;
   position_number: number;
   position_status: string;
+  /** Set while the seat is on hold — forward moves are blocked. */
+  position_on_hold_at: Date | null;
   recruiter_id: string | null;
   requisition_id: string;
   /** The line's TA RM (Admin gave them the line). */
@@ -59,6 +61,8 @@ export interface ApplicationRow {
   rejected_round: InterviewRound | null;
   rejected_by_name: string | null;
   informed_at: Date | null;
+  /** The stage a rejected / withdrawn application ended from (restore target). */
+  pre_end_stage: ApplicationStage | null;
   shortlisted_by_name: string | null;
   outcome_reason: string | null;
   created_at: Date;
@@ -126,8 +130,10 @@ const SELECT_APPLICATION = `
          c.education, c.experience_years::text,
          a.position_id,
          p.number AS position_number, p.status::text AS position_status, p.recruiter_id,
+         p.on_hold_at AS position_on_hold_at,
          p.requisition_id, q.ta_rm_id, q.role_title, q.department_id, d.name AS department_name,
          a.stage, a.current_round, a.rejected_round, rj.name AS rejected_by_name, a.informed_at,
+         a.pre_end_stage,
          s.name AS shortlisted_by_name, a.outcome_reason, a.created_at, a.updated_at,
          q.status::text AS requisition_status, q.urgent, a.offered_ctc::text,
          a.joining_date::text,
@@ -169,7 +175,13 @@ export const DEFAULT_CANDIDATE_DOCUMENTS = [
   'Passport-size photo',
 ] as const;
 
-export const ROUND_ORDER: InterviewRound[] = ['hr', 'technical', 'practical', 'managerial', 'hr_final'];
+export const ROUND_ORDER: InterviewRound[] = [
+  'hr',
+  'technical',
+  'practical',
+  'managerial',
+  'hr_final',
+];
 
 /** An interviewer sees a round while it is open, and afterwards once they scored it. */
 const ROUND_VISIBLE = `((a.stage = 'interviewing' AND rr.round = a.current_round)
@@ -191,7 +203,71 @@ const audit = (
   });
 
 const ring = async (tx: DbClient, bells: Bell[] = []) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
+};
+
+/** The interview rounds in running order, for SQL ordering. */
+const ROUND_ARRAY = `ARRAY['hr','technical','practical','managerial','hr_final']::interview_round[]`;
+
+/**
+ * Re-derive a position's stage from its candidates after a step back or a
+ * restore: anyone offered → `offer`, anyone else in play → `interviewing`,
+ * else `open`. A filled or not-yet-open seat is left alone. The hiring goal
+ * follows (set, not raised).
+ */
+const settlePosition = async (
+  tx: DbClient,
+  positionId: string,
+  progress: Record<PositionStatus, number>,
+) => {
+  const row = (
+    await tx.query<{ status: PositionStatus }>(
+      `UPDATE ta.positions p SET
+          status = CASE
+            WHEN EXISTS (SELECT 1 FROM ta.applications a
+                          WHERE a.position_id = p.id AND a.stage = 'offered')
+              THEN 'offer'::position_status
+            WHEN EXISTS (SELECT 1 FROM ta.applications a
+                          WHERE a.position_id = p.id
+                            AND a.stage IN ('interviewing', 'interviewed', 'decision', 'selected'))
+              THEN 'interviewing'::position_status
+            ELSE 'open'::position_status END,
+          updated_at = now()
+        WHERE p.id = $1 AND p.status IN ('open', 'interviewing', 'offer') RETURNING status`,
+      [positionId],
+    )
+  )[0];
+  if (!row) return;
+  await tx.query(
+    `UPDATE org.goals g SET progress = $2, updated_at = now()
+       FROM org.review_cycles c
+      WHERE c.id = g.cycle_id AND c.closed_at IS NULL AND g.position_id = $1`,
+    [positionId, progress[row.status]],
+  );
+};
+
+/**
+ * Back to interviewed with the offer returned to TA (like the HR Head's
+ * Return): approval cleared, the signed letter discarded; the draft terms
+ * and the draft letter stay for the next submit.
+ */
+const returnOfferIn = async (tx: DbClient, id: string, reason: string) => {
+  await tx.query(
+    `UPDATE ta.applications SET stage = 'interviewed',
+            offer_status = CASE WHEN offer_status IS NULL THEN NULL
+                                ELSE 'returned'::offer_status END,
+            offer_return_reason = CASE WHEN offer_status IS NULL THEN offer_return_reason
+                                       ELSE $2 END,
+            offer_approved_by = NULL, offer_approved_at = NULL, offered_at = NULL,
+            updated_at = now()
+      WHERE id = $1`,
+    [id, reason],
+  );
+  await tx.query(`DELETE FROM ta.signed_offer_letters WHERE application_id = $1`, [id]);
 };
 
 /** DB access for candidates, applications and interview scores (TA Step D). */
@@ -390,8 +466,9 @@ export const createCandidatesRepository = (db: DbClient) => ({
         status: string;
         recruiter_id: string | null;
         ta_rm_id: string | null;
+        on_hold_at: Date | null;
       }>(
-        `SELECT p.id, p.status::text, p.recruiter_id, q.ta_rm_id
+        `SELECT p.id, p.status::text, p.recruiter_id, q.ta_rm_id, p.on_hold_at
            FROM ta.positions p JOIN ta.requisitions q ON q.id = p.requisition_id
           WHERE p.id = $1`,
         [positionId],
@@ -434,30 +511,251 @@ export const createCandidatesRepository = (db: DbClient) => ({
     bells: Bell[] = [],
   ): Promise<boolean> =>
     db.transaction(async (tx) => {
-      // A rejection keeps the round it happened in and who made it; the round closes.
+      // A rejection keeps the round it happened in and who made it; the round
+      // closes. Ending (reject / withdraw) remembers the stage it ended from,
+      // so a restore can put the candidate back where they were.
       const moved = await tx.query(
         `UPDATE ta.applications SET stage = $3::application_stage,
             outcome_reason = coalesce($4, outcome_reason),
             rejected_round = CASE WHEN $3 = 'rejected' THEN current_round ELSE rejected_round END,
             rejected_by = CASE WHEN $3 = 'rejected' THEN $5::uuid ELSE rejected_by END,
+            pre_end_stage = CASE WHEN $3 IN ('rejected', 'withdrawn') THEN stage ELSE pre_end_stage END,
             current_round = NULL,
             updated_at = now()
           WHERE id = $1 AND stage = ANY($2::application_stage[]) RETURNING id`,
         [id, from, to, patch.outcomeReason ?? null, patch.rejectedBy ?? null],
       );
+      // Only once the move really happened: a lost race must not cancel slots.
+      if (!moved[0]) return false;
       await tx.query(
         `UPDATE ta.interview_slots SET status = 'cancelled', end_reason = 'Candidacy ended',
                 updated_at = now()
           WHERE application_id = $1 AND status = 'scheduled'`,
         [id],
       );
-      if (!moved[0]) return false;
       await audit(tx, actor, `application.${to}`, `applications:${id}`, {
         reason: patch.outcomeReason ?? null,
       });
       await ring(tx, bells);
       return true;
     }),
+
+  /**
+   * One step back (TA correcting a move), all in one transaction:
+   *   interviewing → sourced: scores deleted (copied into the audit row),
+   *     live slots cancelled, the position re-settled;
+   *   interviewed → interviewing: the LAST scored round reopens (its score
+   *     deleted, copied into the audit row);
+   *   decision / selected / offered → interviewed: the offer is returned —
+   *     approval cleared, the signed letter discarded, the draft kept.
+   * Returns the new stage, or false when the application moved meanwhile.
+   */
+  moveBack: (
+    id: string,
+    from: ApplicationStage,
+    reason: string,
+    progress: Record<PositionStatus, number>,
+    actor: ActorContext,
+  ): Promise<ApplicationStage | false> =>
+    db.transaction(async (tx) => {
+      const cur = (
+        await tx.query<{ stage: ApplicationStage; position_id: string }>(
+          `SELECT stage, position_id FROM ta.applications WHERE id = $1 FOR UPDATE`,
+          [id],
+        )
+      )[0];
+      if (!cur || cur.stage !== from) return false;
+      let to: ApplicationStage;
+      let removed: unknown[] = [];
+      if (from === 'interviewing') {
+        removed = await tx.query(
+          `DELETE FROM ta.interview_scores WHERE application_id = $1
+            RETURNING round, interviewer_id, recommendation, scores, notes`,
+          [id],
+        );
+        await tx.query(
+          `UPDATE ta.interview_slots SET status = 'cancelled', end_reason = 'Moved back',
+                  updated_at = now()
+            WHERE application_id = $1 AND status = 'scheduled'`,
+          [id],
+        );
+        await tx.query(
+          `UPDATE ta.applications SET stage = 'sourced', current_round = NULL,
+                  interviews_started_at = NULL, updated_at = now()
+            WHERE id = $1`,
+          [id],
+        );
+        to = 'sourced';
+        await settlePosition(tx, cur.position_id, progress);
+      } else if (from === 'interviewed') {
+        removed = await tx.query<{ round: InterviewRound }>(
+          `DELETE FROM ta.interview_scores s WHERE s.application_id = $1 AND s.round = (
+              SELECT round FROM ta.interview_scores WHERE application_id = $1
+               ORDER BY array_position(${ROUND_ARRAY}, round) DESC LIMIT 1)
+            RETURNING round, interviewer_id, recommendation, scores, notes`,
+          [id],
+        );
+        const round = (removed[0] as { round?: InterviewRound } | undefined)?.round ?? null;
+        await tx.query(
+          `UPDATE ta.applications SET stage = 'interviewing', current_round = $2::interview_round,
+                  updated_at = now()
+            WHERE id = $1`,
+          [id, round],
+        );
+        to = 'interviewing';
+      } else {
+        await returnOfferIn(tx, id, reason);
+        to = 'interviewed';
+        if (from === 'offered') await settlePosition(tx, cur.position_id, progress);
+      }
+      await audit(tx, actor, 'application.moved_back', `applications:${id}`, {
+        from,
+        to,
+        reason,
+        removedScores: removed,
+      });
+      return to;
+    }),
+
+  /**
+   * Bring a rejected / withdrawn candidate back to the stage they ended from:
+   * a rejected interview round reopens (a "do not hire" score for it is
+   * deleted, copied into the audit row); an offer-stage one comes back as
+   * interviewed with the offer returned; unknown (ended before this was
+   * recorded) → sourced. The rejection record clears; the 6-month clock restarts.
+   */
+  restore: (
+    id: string,
+    reason: string,
+    retainUntil: string,
+    progress: Record<PositionStatus, number>,
+    actor: ActorContext,
+  ): Promise<ApplicationStage | false> =>
+    db.transaction(async (tx) => {
+      const cur = (
+        await tx.query<{
+          stage: ApplicationStage;
+          pre_end_stage: ApplicationStage | null;
+          rejected_round: InterviewRound | null;
+          candidate_id: string;
+          position_id: string;
+        }>(
+          `SELECT stage, pre_end_stage, rejected_round, candidate_id, position_id
+             FROM ta.applications WHERE id = $1 FOR UPDATE`,
+          [id],
+        )
+      )[0];
+      if (!cur || (cur.stage !== 'rejected' && cur.stage !== 'withdrawn')) return false;
+      const was = cur.pre_end_stage;
+      let to: ApplicationStage =
+        was === 'interviewing'
+          ? 'interviewing'
+          : was === 'interviewed' || was === 'decision' || was === 'selected'
+            ? 'interviewed'
+            : 'sourced';
+      let removed: unknown[] = [];
+      let round: InterviewRound | null = null;
+      if (to === 'interviewing') {
+        if (cur.rejected_round) {
+          removed = await tx.query(
+            `DELETE FROM ta.interview_scores
+              WHERE application_id = $1 AND round = $2::interview_round
+                AND recommendation = 'no_hire'
+              RETURNING round, interviewer_id, recommendation, scores, notes`,
+            [id, cur.rejected_round],
+          );
+        }
+        // The first of the line's rounds still without a score reopens.
+        round =
+          (
+            await tx.query<{ round: InterviewRound }>(
+              `SELECT rr.round FROM ta.positions p
+                 JOIN ta.requisition_rounds rr ON rr.requisition_id = p.requisition_id
+                WHERE p.id = $1 AND NOT EXISTS (
+                  SELECT 1 FROM ta.interview_scores s
+                   WHERE s.application_id = $2 AND s.round = rr.round)
+                ORDER BY array_position(${ROUND_ARRAY}, rr.round) LIMIT 1`,
+              [cur.position_id, id],
+            )
+          )[0]?.round ?? null;
+        if (!round) to = 'interviewed';
+      }
+      if (to === 'interviewed') await returnOfferIn(tx, id, reason);
+      await tx.query(
+        `UPDATE ta.applications SET stage = $2::application_stage,
+                current_round = $3::interview_round, rejected_round = NULL, rejected_by = NULL,
+                informed_at = NULL, outcome_reason = NULL, pre_end_stage = NULL, updated_at = now()
+          WHERE id = $1`,
+        [id, to, round],
+      );
+      await tx.query(
+        `UPDATE ta.candidates SET retain_until = greatest(retain_until, $2::date), updated_at = now()
+          WHERE id = $1`,
+        [cur.candidate_id, retainUntil],
+      );
+      if (to !== 'sourced') await settlePosition(tx, cur.position_id, progress);
+      await audit(tx, actor, 'application.restored', `applications:${id}`, {
+        from: cur.stage,
+        endedFrom: was,
+        to,
+        reason,
+        removedScores: removed,
+      });
+      return to;
+    }),
+
+  /** Put a position on hold / take it off (TA RM or HRBP); false = already so. */
+  setHold: (
+    positionId: string,
+    hold: { reason: string } | null,
+    actor: ActorContext,
+    bells: Bell[],
+  ): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const moved = hold
+        ? await tx.query(
+            `UPDATE ta.positions SET on_hold_at = now(), on_hold_by = $2, on_hold_reason = $3,
+                    updated_at = now()
+              WHERE id = $1 AND on_hold_at IS NULL RETURNING id`,
+            [positionId, actor.actorEmployeeId, hold.reason],
+          )
+        : await tx.query(
+            `UPDATE ta.positions SET on_hold_at = NULL, on_hold_by = NULL, on_hold_reason = NULL,
+                    updated_at = now()
+              WHERE id = $1 AND on_hold_at IS NOT NULL RETURNING id`,
+            [positionId],
+          );
+      if (!moved[0]) return false;
+      await audit(
+        tx,
+        actor,
+        hold ? 'position.on_hold' : 'position.resumed',
+        `positions:${positionId}`,
+        hold ? { reason: hold.reason } : {},
+      );
+      await ring(tx, bells);
+      return true;
+    }),
+
+  /** A position's hold state and who may lift it (for the service's checks). */
+  positionHold: async (positionId: string) =>
+    (
+      await db.query<{
+        id: string;
+        on_hold_at: Date | null;
+        recruiter_id: string | null;
+        ta_rm_id: string | null;
+        role_title: string;
+        number: number;
+        department_id: string;
+      }>(
+        `SELECT p.id, p.on_hold_at, p.recruiter_id, q.ta_rm_id, q.role_title, p.number,
+                q.department_id
+           FROM ta.positions p JOIN ta.requisitions q ON q.id = p.requisition_id
+          WHERE p.id = $1`,
+        [positionId],
+      )
+    )[0],
 
   /**
    * Sourced → interviewing with `firstRound` open (the screening). The first
@@ -758,16 +1056,25 @@ export const createCandidatesRepository = (db: DbClient) => ({
         [applicationId, round, status, reason],
       );
       if (!rows[0]) return false;
-      await audit(tx, actor, `application.round_${status}`, `applications:${applicationId}`, {
-        round,
-        reason,
-      });
+      await audit(
+        tx,
+        actor,
+        `application.round_${status}`,
+        `applications:${applicationId}`,
+        {
+          round,
+          reason,
+        },
+      );
       await ring(tx, bells);
       return true;
     }),
 
   /** The attributes of one round's sheet on the application's position scorecard. */
-  attributesFor: async (applicationId: string, round: InterviewRound): Promise<string[]> =>
+  attributesFor: async (
+    applicationId: string,
+    round: InterviewRound,
+  ): Promise<string[]> =>
     (
       await db.query<{ name: string }>(
         `SELECT y->>'name' AS name
@@ -801,7 +1108,12 @@ export const createCandidatesRepository = (db: DbClient) => ({
       next: { round: InterviewRound; interviewerId: string | null } | null,
     ) => Bell[],
   ): Promise<
-    'not_interviewing' | 'not_open' | 'already_scored' | 'rejected' | 'next_round' | 'all_scored'
+    | 'not_interviewing'
+    | 'not_open'
+    | 'already_scored'
+    | 'rejected'
+    | 'next_round'
+    | 'all_scored'
   > =>
     db.transaction(async (tx) => {
       const app = (
@@ -846,14 +1158,20 @@ export const createCandidatesRepository = (db: DbClient) => ({
         await tx.query(
           `UPDATE ta.applications SET stage = 'rejected', outcome_reason = $2,
                   rejected_round = $3::interview_round, rejected_by = $4, current_round = NULL,
-                  updated_at = now()
+                  pre_end_stage = stage, updated_at = now()
             WHERE id = $1`,
           [input.applicationId, input.notes, input.round, input.interviewerId],
         );
-        await audit(tx, actor, 'application.rejected', `applications:${input.applicationId}`, {
-          round: input.round,
-          reason: input.notes,
-        });
+        await audit(
+          tx,
+          actor,
+          'application.rejected',
+          `applications:${input.applicationId}`,
+          {
+            round: input.round,
+            reason: input.notes,
+          },
+        );
         await ring(tx, bellsFor('rejected', null));
         return 'rejected';
       }
@@ -878,7 +1196,13 @@ export const createCandidatesRepository = (db: DbClient) => ({
             WHERE id = $1`,
           [input.applicationId, next.round],
         );
-        await ring(tx, bellsFor('next_round', { round: next.round, interviewerId: next.interviewer_id }));
+        await ring(
+          tx,
+          bellsFor('next_round', {
+            round: next.round,
+            interviewerId: next.interviewer_id,
+          }),
+        );
         return 'next_round';
       }
       await tx.query(

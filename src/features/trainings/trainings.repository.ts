@@ -19,6 +19,10 @@ export interface ActorContext {
 export interface Bell {
   to: string[];
   event: NotificationEvent;
+  /** Also send this bell as an email (email service) — decided where the bell is built. */
+  email?: boolean;
+  /** Queue the email at most once per key + recipient (retries, double clicks). */
+  dedupeKey?: string;
 }
 
 /** A training joined with the names the screens show. */
@@ -70,7 +74,11 @@ const audit = (
   });
 
 const ring = async (tx: DbClient, bells: Bell[]) => {
-  for (const b of bells) await insertNotifications(tx, b.to, b.event);
+  for (const b of bells)
+    await insertNotifications(tx, b.to, b.event, {
+      email: b.email,
+      dedupeKey: b.dedupeKey,
+    });
 };
 
 /** The only place the trainings feature touches the database. */

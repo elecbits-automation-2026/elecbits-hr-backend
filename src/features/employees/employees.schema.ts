@@ -132,6 +132,12 @@ export const updateSalarySchema = z
       .regex(/^\d{12}$/, 'UAN is 12 digits')
       .nullable()
       .optional(),
+    esicIpNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{10}$/, 'ESIC IP number is 10 digits')
+      .nullable()
+      .optional(),
     providentFundAccount: z.string().nullable().optional(),
     employeeAdvanceAccount: z.string().nullable().optional(),
     bankName: z.string().nullable().optional(),

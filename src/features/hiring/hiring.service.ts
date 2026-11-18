@@ -194,6 +194,7 @@ const toDto = (
         : [],
     returnReason: r.return_reason,
     createdByName: r.created_by_name,
+    urgentRequestedByName: r.urgent_requested_by_name,
     submittedAt: iso(r.submitted_at),
     approvedAt: iso(r.approved_at),
     taRm: r.ta_rm_id ? { id: r.ta_rm_id, name: r.ta_rm_name ?? '' } : null,
@@ -226,6 +227,9 @@ const toDto = (
             }
           : null,
         openedAt: iso(p.opened_at),
+        onHold: p.on_hold_at
+          ? { at: iso(p.on_hold_at)!, reason: p.on_hold_reason, byName: p.on_hold_by_name }
+          : null,
         documents: { jd: doc(p, 'jd'), scorecard: doc(p, 'scorecard') },
       })),
   };

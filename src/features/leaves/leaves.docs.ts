@@ -1,9 +1,11 @@
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
+import { LEAVE_TYPES } from '../../shared/constants/constants.js';
 import { z } from '../../shared/zod.js';
 import {
   createLeaveRequestSchema,
   decideLeaveSchema,
+  leaveApprovalRouteSchema,
   leaveBalanceSchema,
   leaveRequestSchema,
 } from './leaves.schema.js';
@@ -31,6 +33,19 @@ export const registerLeavesDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: jsonResponse('LeaveBalances', z.array(leaveBalanceSchema)),
       401: errorResponse('Not authenticated'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/leaves/approval-route',
+    tags: ['Leaves'],
+    summary: 'Who a request of this type would go to (the form preview; same rule as raising)',
+    security: [{ bearerAuth: [] }],
+    request: { query: z.object({ type: z.enum(LEAVE_TYPES) }) },
+    responses: {
+      200: jsonResponse('LeaveApprovalRoute', leaveApprovalRouteSchema),
+      400: errorResponse('Unknown leave type'),
     },
   });
 
