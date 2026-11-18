@@ -349,6 +349,8 @@ export const createPerformanceRepository = (db: DbClient) => ({
         reportsTo: employees.reportsTo,
         leaveApprover: employees.leaveApprover,
         dateOfJoining: employees.dateOfJoining,
+        // The scorer reads the department's KPI text (performance.departmentTargets).
+        departmentId: employees.departmentId,
       })
       .from(employees)
       .where(inArray(employees.id, employeeIds));

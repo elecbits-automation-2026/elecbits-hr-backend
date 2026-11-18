@@ -617,6 +617,34 @@
       "when": 1794810603892,
       "tag": "0087_trainings",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1794825557574,
+      "tag": "0088_email-outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794899971256,
+      "tag": "0089_oauth-login-states",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794986265345,
+      "tag": "0090_payroll-esic",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1794986482284,
+      "tag": "0091_hiring-restore-hold",
+      "breakpoints": true
     }
   ]
 }

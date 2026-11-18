@@ -67,4 +67,31 @@ export const registerAuthDocs = (registry: OpenAPIRegistry): void => {
     summary: "Sign out — revokes the refresh cookie's sign-in and clears the cookie",
     responses: { 204: { description: 'Signed out' } },
   });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/auth/google/start',
+    tags: ['Auth'],
+    summary: 'Begin Google sign-in (SSO) — 302 redirects to Google with PKCE + state',
+    responses: {
+      302: {
+        description:
+          'Redirect to the Google consent screen (or to /auth?error=SSO_DISABLED when SSO is not configured)',
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/auth/google/callback',
+    tags: ['Auth'],
+    summary:
+      'Finish Google sign-in — verifies the ID token, sets the refresh cookie, redirects to the app',
+    responses: {
+      302: {
+        description:
+          'Redirect to the app sign-in page: /auth?google=done on success, /auth?error=<code> on failure',
+      },
+    },
+  });
 };

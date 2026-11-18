@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
   employees,
+  oauthLoginStates,
   orgOwner,
   refreshTokens,
   users,
@@ -195,6 +196,34 @@ export const createAuthRepository = (db: DbClient) => ({
       .update(refreshTokens)
       .set({ revokedAt: new Date(), revokedReason: reason })
       .where(and(eq(refreshTokens.familyId, familyId), isNull(refreshTokens.revokedAt)));
+  },
+
+  // --- Google sign-in (SSO) --------------------------------------------------
+
+  /** Record a pending sign-in; sweep expired rows first so the table stays tiny. */
+  saveOauthState: async (input: {
+    state: string;
+    codeVerifier: string;
+    expiresAt: Date;
+  }): Promise<void> => {
+    await db.orm
+      .delete(oauthLoginStates)
+      .where(lt(oauthLoginStates.expiresAt, new Date()));
+    await db.orm.insert(oauthLoginStates).values(input);
+  },
+
+  /** Single-use: delete the row and hand back its verifier (undefined if unknown). */
+  consumeOauthState: async (
+    state: string,
+  ): Promise<{ codeVerifier: string; expiresAt: Date } | undefined> => {
+    const rows = await db.orm
+      .delete(oauthLoginStates)
+      .where(eq(oauthLoginStates.state, state))
+      .returning({
+        codeVerifier: oauthLoginStates.codeVerifier,
+        expiresAt: oauthLoginStates.expiresAt,
+      });
+    return rows[0];
   },
 });
 

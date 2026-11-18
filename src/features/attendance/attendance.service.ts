@@ -1244,6 +1244,26 @@ export const createAttendanceService = (deps: {
    * from anywhere while it waits; a decline makes those days absent.
    * (`partially_approved` is a leftover of the old two-step flow.)
    */
+  /** The requester hears the decision on their remote-work request (bell + email). */
+  const tellRemoteDecided = async (
+    row: { id: string; employeeId: string; startDate: string; endDate: string },
+    outcome: 'approved' | 'declined',
+    reason: string | null,
+  ) => {
+    const range =
+      row.startDate === row.endDate ? row.startDate : `${row.startDate} to ${row.endDate}`;
+    await repo.notify(
+      [row.employeeId],
+      {
+        type: 'remote.decided',
+        title: `Your remote work (${range}) was ${outcome}`,
+        body: outcome === 'declined' && reason ? `Reason: ${reason}` : null,
+        link: '/my-attendance',
+      },
+      { email: true, dedupeKey: `remote.decided:${row.id}` },
+    );
+  };
+
   const decideWfh = async (
     id: string,
     input: DecideInput,
@@ -1299,6 +1319,7 @@ export const createAttendanceService = (deps: {
           },
         )
         .catch(mapDecisionConflict);
+      await tellRemoteDecided(row, 'declined', input.reason ?? null);
       const emp = await repo.findEmployeeApprovers(row.employeeId);
       return (
         await withWfhApproverNames([
@@ -1342,6 +1363,7 @@ export const createAttendanceService = (deps: {
         },
       )
       .catch(mapDecisionConflict);
+    await tellRemoteDecided(row, 'approved', null);
     const emp = await repo.findEmployeeApprovers(row.employeeId);
     return (
       await withWfhApproverNames([

@@ -32,6 +32,15 @@ import type {
   PayslipRow,
 } from './payroll.repository.js';
 import { renderPayslipPdf } from './payslip.pdf.js';
+import {
+  SHEET_DAY_BASE,
+  esicEligibleFor,
+  esicOf,
+  esicPeriodStart,
+  pfOf,
+  type EsicPolicy,
+  type EsicRule,
+} from './payroll.math.js';
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -53,6 +62,8 @@ const POLICY_KEYS = [
   'payroll.ptStates',
   'payroll.autoCoverLeaveTypes',
   'payroll.monthEndAutoApprove',
+  'payroll.esic',
+  'payroll.esicRates',
 ] as const;
 type PayrollPolicy = { [K in (typeof POLICY_KEYS)[number]]: SettingValue<K> };
 
@@ -130,23 +141,15 @@ const ptAmount = (rule: PtRule | null, prorated: number): number => {
  *   PF (employee AND employer, identical) =
  *     12% × min(basic, 15000) × 16/30 + 12% × min(basic, 25000) × 14/30
  *     — the sheet's wage-cap transition blend, kept verbatim
- *   gross Q = J − PF(employee);  PT = setting amount (₹200) when PT-eligible
- *     and J ≥ the setting's salary floor (25000)
- *   net  AG = J − (PF×2 + PT + TDS + health insurance + CNPS + other/loan)
+ *   ESIC (payroll.esic, when the period's snapshot says covered): wages
+ *     W = (J − PF) ÷ 1.0325, employee 0.75% and employer 3.25% of W, each
+ *     rounded up (payroll.math.ts); the employer share sits inside CTC
+ *   gross Q = J − PF(employee) − ESIC(employer);  PT = setting amount (₹200)
+ *     when PT-eligible and J ≥ the setting's salary floor (25000)
+ *   net  AG = J − (PF×2 + ESIC×2 + PT + TDS + health insurance + CNPS + other/loan)
  *   final AH = net + reimbursement + bonuses + leave encashment + advance
  */
-const SHEET_DAY_BASE = 30;
-const PF_RATE = 0.12;
-const PF_OLD_CAP = 15000;
-const PF_OLD_DAYS = 16;
-const PF_NEW_CAP = 25000;
-const PF_NEW_DAYS = 14;
-
-const pfOf = (basic: number): number =>
-  round2(
-    Math.min(basic, PF_OLD_CAP) * (PF_OLD_DAYS / SHEET_DAY_BASE) * PF_RATE +
-      Math.min(basic, PF_NEW_CAP) * (PF_NEW_DAYS / SHEET_DAY_BASE) * PF_RATE,
-  );
+// PF and ESIC math lives in payroll.math.ts (pure, testable on its own).
 
 /** The structure split when the salary record leaves it blank. */
 export const DEFAULT_BASIC_PCT = 50;
@@ -209,11 +212,19 @@ const fnfColumns = (f: FnfLines) => ({
   fnfRecovery: String(f.fnfRecovery),
 });
 
+/** A slip's ESIC rule: its snapshotted period eligibility + the live rates. */
+const esicPolicyOf = (
+  p: Pick<PayrollPolicy, 'payroll.esic' | 'payroll.esicRates'>,
+): EsicPolicy => ({ ...p['payroll.esicRates'], enabled: p['payroll.esic'].onPayslips });
+const esicRuleFor = (eligible: boolean | null, policy: EsicPolicy): EsicRule | null =>
+  eligible && policy.enabled ? { eligible, policy } : null;
+
 /**
  * The PT amount is NOT snapshotted (only the state is): a draft picks up a
- * changed payroll.ptStates slab when it is next edited or finalized.
+ * changed payroll.ptStates slab when it is next edited or finalized. ESIC
+ * works the same way — eligibility is snapshotted, the rates are live.
  */
-const compute = (input: ComputeInput, pt: PtRule | null) => {
+export const compute = (input: ComputeInput, pt: PtRule | null, esic: EsicRule | null) => {
   const monthlyGross = round2(input.ctc / 12);
   const daysPaid = Math.max(0, SHEET_DAY_BASE - input.lopDays);
   const prorated = round2((monthlyGross / SHEET_DAY_BASE) * daysPaid);
@@ -222,7 +233,9 @@ const compute = (input: ComputeInput, pt: PtRule | null) => {
   const lta = round2((prorated * LTA_PCT) / 100);
   const pfEmployee = pfOf(basic);
   const pfEmployer = pfOf(basic);
-  const gross = round2(prorated - pfEmployee);
+  const { esicEmployee, esicEmployer } = esicOf(prorated, pfEmployer, daysPaid, esic);
+  // Employer PF and employer ESIC both sit inside CTC, so neither is gross.
+  const gross = round2(prorated - pfEmployee - esicEmployer);
   const specialAllowance = round2(gross - basic - hra - lta);
   const professionalTax = ptAmount(pt, prorated);
   const lopAmount = round2(monthlyGross - prorated);
@@ -230,6 +243,8 @@ const compute = (input: ComputeInput, pt: PtRule | null) => {
   const deductionsTotal = round2(
     pfEmployee +
       pfEmployer +
+      esicEmployee +
+      esicEmployer +
       professionalTax +
       input.tds +
       input.healthInsurance +
@@ -258,6 +273,8 @@ const compute = (input: ComputeInput, pt: PtRule | null) => {
     specialAllowance,
     pfEmployee,
     pfEmployer,
+    esicEmployee,
+    esicEmployer,
     professionalTax,
     lopAmount,
     earningsTotal,
@@ -472,6 +489,8 @@ const toPayslip = (
   lopOverridden: row.lopOverridden,
   pf: num(row.pf),
   pfEmployer: num(row.pfEmployer),
+  esicEmployee: num(row.esicEmployee),
+  esicEmployer: num(row.esicEmployer),
   tds: num(row.tds),
   professionalTax: num(row.professionalTax),
   otherDeduction: num(row.otherDeduction),
@@ -723,6 +742,13 @@ export const createPayrollService = (deps: {
       month,
       new Set(fnfBy.keys()),
     );
+    // ESIC coverage is fixed per contribution period: inherit what an earlier
+    // slip of the period decided, else decide now on the full month's gross.
+    const esicPolicy = esicPolicyOf(policy);
+    const esicPeriod = esicPeriodStart(month);
+    const esicDecided = esicPolicy.enabled
+      ? await repo.esicEligibilityInPeriod(esicPeriod, month)
+      : new Map<string, boolean>();
 
     for (const p of people) {
       if (p.ctc === null || p.ctc === undefined) {
@@ -775,9 +801,13 @@ export const createPayrollService = (deps: {
         fnfDeductions: fnfDeductionsOf(lines),
         loanEmi: loanDue.get(p.id)?.total ?? 0,
       };
+      const esicEligible = esicPolicy.enabled
+        ? (esicDecided.get(p.id) ?? esicEligibleFor(input.ctc, input.basicPct, esicPolicy))
+        : null;
       const c = compute(
         input,
         ptRuleFor(ptState, month, policy['payroll.ptStates'].states),
+        esicRuleFor(esicEligible, esicPolicy),
       );
       slips.push({
         employeeId: p.id,
@@ -803,6 +833,10 @@ export const createPayrollService = (deps: {
         professionalTax: String(c.professionalTax),
         ptEligible: ptState !== null,
         ptState,
+        esicEmployee: String(c.esicEmployee),
+        esicEmployer: String(c.esicEmployer),
+        esicEligible,
+        esicPeriodStart: esicEligible === null ? null : esicPeriod,
         otherDeduction: String(input.otherDeduction),
         healthInsurance: '0',
         cnpsEmployer: '0',
@@ -937,13 +971,11 @@ export const createPayrollService = (deps: {
       fnfDeductions: fnfDeductionsOf(fnfOfSlip(slip)),
       loanEmi: num(slip.loanEmi),
     };
+    const editPolicy = await loadPolicy();
     const c = compute(
       merged,
-      ptRuleFor(
-        slip.ptState,
-        run.month,
-        (await settings.effective('payroll.ptStates')).states,
-      ),
+      ptRuleFor(slip.ptState, run.month, editPolicy['payroll.ptStates'].states),
+      esicRuleFor(slip.esicEligible, esicPolicyOf(editPolicy)),
     );
 
     const updated = await repo
@@ -963,6 +995,8 @@ export const createPayrollService = (deps: {
           specialAllowance: String(c.specialAllowance),
           pf: String(c.pfEmployee),
           pfEmployer: String(c.pfEmployer),
+          esicEmployee: String(c.esicEmployee),
+          esicEmployer: String(c.esicEmployer),
           tds: String(merged.tds),
           professionalTax: String(c.professionalTax),
           otherDeduction: String(merged.otherDeduction),
@@ -1124,6 +1158,7 @@ export const createPayrollService = (deps: {
           loanEmi: loanDue.get(slip.employeeId)?.total ?? 0,
         },
         ptRuleFor(slip.ptState, run.month, policy['payroll.ptStates'].states),
+        esicRuleFor(slip.esicEligible, esicPolicyOf(policy)),
       );
       updates.push({
         id: slip.id,
@@ -1140,6 +1175,8 @@ export const createPayrollService = (deps: {
           specialAllowance: String(c.specialAllowance),
           pf: String(c.pfEmployee),
           pfEmployer: String(c.pfEmployer),
+          esicEmployee: String(c.esicEmployee),
+          esicEmployer: String(c.esicEmployer),
           professionalTax: String(c.professionalTax),
           loanEmi: String(loanDue.get(slip.employeeId)?.total ?? 0),
           ...(fnf ? { leaveEncashment: String(fnf.leaveEncashment), ...fnfColumns(fnf) } : {}),
@@ -1313,7 +1350,10 @@ export const createPayrollService = (deps: {
     const { surcharge: surchargeAnnual, total: totalTaxAnnual } =
       taxBreakdown(taxableIncome);
     const tdsPerMonth = round2(totalTaxAnnual / 12);
-    const { states } = await settings.effective('payroll.ptStates');
+    const annexPolicy = await loadPolicy();
+    const { states } = annexPolicy['payroll.ptStates'];
+    const esicPolicy = esicPolicyOf(annexPolicy);
+    const esicCovered = esicEligibleFor(input.ctc, input.basicPercent, esicPolicy);
     // A regular month (not February) — the offer shows the usual figure.
     const parts = compute(
       {
@@ -1337,6 +1377,7 @@ export const createPayrollService = (deps: {
         loanEmi: 0,
       },
       ptRuleFor(input.ptState ?? null, '2026-04', states),
+      esicRuleFor(esicCovered, esicPolicy),
     );
     return {
       ctcAnnual: input.ctc,
@@ -1345,9 +1386,11 @@ export const createPayrollService = (deps: {
       hra: parts.hra,
       lta: parts.lta,
       specialAllowance: parts.specialAllowance,
-      grossSalary: round2(ctcMonthly - parts.pfEmployer),
+      grossSalary: round2(ctcMonthly - parts.pfEmployer - parts.esicEmployer),
       pfEmployee: parts.pfEmployee,
       pfEmployer: parts.pfEmployer,
+      esicEmployee: parts.esicEmployee,
+      esicEmployer: parts.esicEmployer,
       professionalTax: parts.professionalTax,
       healthInsurance: input.healthInsurance,
       cnpsEmployer: cnpsMonthly,
@@ -1482,6 +1525,7 @@ export const createPayrollService = (deps: {
         dateOfJoining: header?.dateOfJoining ?? null,
         panLast4: header?.panLast4 ?? null,
         uan: header?.uan ?? null,
+        esicIp: header?.esicIp ?? null,
         bankName: header?.bankName ?? null,
         accountLast4: header?.accountLast4 ?? null,
       },
@@ -1547,6 +1591,7 @@ export const createPayrollService = (deps: {
         loanEmi: num(slip.loanEmi),
       },
       ptRuleFor(slip.ptState, draft.month, (await settings.effective('payroll.ptStates')).states),
+      esicRuleFor(slip.esicEligible, esicPolicyOf(await loadPolicy())),
     );
     await repo
       .updatePayslip(

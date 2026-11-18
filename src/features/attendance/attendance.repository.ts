@@ -12,7 +12,11 @@ import {
   punchZones,
   wfhRequests,
 } from '../../db/schema/index.js';
-import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
+import {
+  insertNotifications,
+  type NotificationEvent,
+  type NotificationOptions,
+} from '../notifications/index.js';
 
 /** Who performed the mutation — for the audit row (§10). */
 export interface ActorContext {
@@ -418,9 +422,13 @@ export const createAttendanceRepository = (db: DbClient) => ({
    * by its owner, the punch written in the same transaction as the row and
    * its audit — exactly what an RM approval would have done.
    */
-  /** Bell rows for an attendance event (e.g. a short day). */
-  notify: async (recipientIds: string[], event: NotificationEvent): Promise<void> => {
-    await insertNotifications(db, recipientIds, event);
+  /** Bell rows for an attendance event (e.g. a short day); `opts.email` mails it too. */
+  notify: async (
+    recipientIds: string[],
+    event: NotificationEvent,
+    opts: NotificationOptions = {},
+  ): Promise<void> => {
+    await insertNotifications(db, recipientIds, event, opts);
   },
 
   insertRegularizationSelfApproved: async (

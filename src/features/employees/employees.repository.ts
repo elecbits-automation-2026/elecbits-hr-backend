@@ -12,6 +12,7 @@ import {
 } from '../../db/schema/index.js';
 import { revokeEmployeeRefreshTokens } from '../auth/index.js';
 import { recordLevelChange } from '../career/index.js';
+import { enqueueEmails } from '../email/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import { BASELINE_BATCHES } from '../../shared/constants/constants.js';
 import type {
@@ -211,6 +212,35 @@ export const createEmployeesRepository = (db: DbClient) => ({
       .where(eq(users.employeeId, employeeId))
       .limit(1);
     return rows.length > 0;
+  },
+
+  /**
+   * The invite email (email service): the claim link goes to the person's
+   * company address, so HR no longer has to copy-paste it. One per token
+   * (a reissued link sends again). The person has no account yet — not a bell.
+   */
+  queueInviteEmail: (
+    person: { id: string; name: string; email: string },
+    token: string,
+    expiresAt: Date,
+  ) => {
+    const first = person.name.trim().split(/\s+/)[0] ?? person.name;
+    const until = expiresAt.toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    return enqueueEmails(db, [
+      {
+        recipientId: person.id,
+        toAddress: person.email,
+        type: 'employee.invite',
+        subject: 'Your Elecbits HR account is ready',
+        body: `Hi ${first}, HR has set up your record in Elecbits HR. Open the link below and sign in with this company email to claim it.\n\nThe link works once and until ${until}. If it has expired, ask HR for a new one.`,
+        link: `/auth?claim=${encodeURIComponent(token)}`,
+        dedupeKey: `invite:${person.id}:${expiresAt.toISOString()}`,
+      },
+    ]);
   },
 
   /** Reissue the claim token (hash only) + audit, one transaction (§10). */

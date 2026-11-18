@@ -23,6 +23,8 @@ export const employeeSalary = orgSchema.table('employee_salary', {
   panNumber: text('pan_number'),
   // Universal Account Number (EPFO) — printed in full on the payslip.
   uanNumber: text('uan_number'),
+  // ESIC Insurance Number (IP number) — printed on the payslip like the UAN.
+  esicIpNumber: text('esic_ip_number'),
   providentFundAccount: text('provident_fund_account'),
   employeeAdvanceAccount: text('employee_advance_account'),
 

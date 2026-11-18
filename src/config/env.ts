@@ -119,9 +119,7 @@ export const env = {
     // 'lax' works while the app and API share a site (localhost ports, or
     // app./api. subdomains); a cross-site deploy needs 'none' (+ HTTPS).
     refreshCookieSameSite: (process.env.REFRESH_COOKIE_SAMESITE ?? 'lax') as
-      | 'lax'
-      | 'strict'
-      | 'none',
+      'lax' | 'strict' | 'none',
     // Company-email-only sign-in blocks outsiders entirely (§5.4).
     companyEmailDomain: required('COMPANY_EMAIL_DOMAIN', 'elecbits.in'),
     // The only email that may claim the org as Owner, once (§5.2).
@@ -138,6 +136,51 @@ export const env = {
   ai: {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? null,
     model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
+  },
+
+  // --- Email ------------------------------------------------------------------
+  // Outbox sender (email service). `log` writes each email to the server log
+  // and sends nothing — the default until Workspace credentials exist; `gmail`
+  // sends through the Gmail API as EMAIL_FROM via a service account with
+  // domain-wide delegation (scope gmail.send only). The Admin switch
+  // (settings email.delivery) must ALSO be on before anything leaves.
+  email: {
+    driver: (process.env.EMAIL_DRIVER ?? 'log') as 'log' | 'gmail',
+    from: process.env.EMAIL_FROM ?? 'no-reply@elecbits.in',
+    fromName: process.env.EMAIL_FROM_NAME ?? 'Elecbits HR',
+    replyTo: process.env.EMAIL_REPLY_TO || null,
+    // Testing safety net: when set, EVERY email goes to this one address
+    // instead (the real recipient is named in the subject).
+    redirectTo: process.env.EMAIL_REDIRECT_TO || null,
+    // The service account's JSON key — the whole JSON, or a path to the file.
+    serviceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || null,
+  },
+
+  // --- Google sign-in (SSO) ---------------------------------------------------
+  // OAuth 2.0 (auth code + PKCE). Google only proves identity; access still
+  // needs a claimed, active HR record. No client id/secret => SSO is simply
+  // unavailable (the password form stays the way in), so the app runs without
+  // Workspace credentials.
+  google: {
+    oauthClientId: process.env.GOOGLE_OAUTH_CLIENT_ID || null,
+    oauthClientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || null,
+    oauthRedirectUri:
+      process.env.GOOGLE_OAUTH_REDIRECT_URI ??
+      'http://localhost:4000/api/v1/auth/google/callback',
+    // The service-account JSON key (JSON itself or a path) — shared by the
+    // Gmail sender and Drive storage. The same robot account does both.
+    serviceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || null,
+    // The company-owned Shared Drive that holds HR files (its id from the URL).
+    driveSharedDriveId: process.env.DRIVE_SHARED_DRIVE_ID || null,
+  },
+
+  // --- File storage -----------------------------------------------------------
+  // Where uploaded HR files live. `db` keeps the bytes in Postgres (today's
+  // behaviour); `drive` stores them in the company Shared Drive and keeps only
+  // a file id in the row. `drive` needs google.serviceAccountKey +
+  // driveSharedDriveId, so the app falls back to `db` until those exist.
+  storage: {
+    driver: (process.env.STORAGE_DRIVER ?? 'db') as 'db' | 'drive',
   },
 
   // --- Attendance -----------------------------------------------------------

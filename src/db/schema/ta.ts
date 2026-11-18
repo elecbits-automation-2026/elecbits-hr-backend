@@ -200,6 +200,13 @@ export const positions = taSchema.table(
     /** TA ownership (workflow deck, 2026-10-27): copied from the line, set by the TA RM. */
     priority: hiringPriorityEnum('priority').notNull().default('normal'),
     expectedCloseOn: date('expected_close_on'),
+    /**
+     * On hold (TA RM / HRBP): kept apart from `status` so resuming returns to
+     * exactly where it was. While set, nothing moves the seat forward.
+     */
+    onHoldAt: timestamp('on_hold_at', { withTimezone: true }),
+    onHoldBy: uuid('on_hold_by').references(() => employees.id),
+    onHoldReason: text('on_hold_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -345,6 +352,8 @@ export const applications = taSchema.table(
     interviewsStartedAt: timestamp('interviews_started_at', { withTimezone: true }),
     /** Why it was rejected / withdrawn. */
     outcomeReason: text('outcome_reason'),
+    /** The stage it was rejected / withdrawn FROM — where a restore puts it back. */
+    preEndStage: applicationStageEnum('pre_end_stage'),
     // ── Step E: decision, offer, BGV, hire ──
     decisionStartedAt: timestamp('decision_started_at', { withTimezone: true }),
     selectedAt: timestamp('selected_at', { withTimezone: true }),

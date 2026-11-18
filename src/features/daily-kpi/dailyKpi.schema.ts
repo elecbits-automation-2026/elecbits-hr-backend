@@ -48,6 +48,8 @@ export const dailyKpiRowSchema = z
     strip: z.array(z.object({ date: z.string(), status: z.enum(STRIP_STATUSES) })),
     /** Working days with an update over the last 7 working days before the date. */
     recentUpdates: z.object({ done: z.number().int(), workingDays: z.number().int() }),
+    /** Average worked hours over the 7 days up to the date (days with hours only). */
+    recentHours: z.object({ avg: z.number().nullable(), days: z.number().int() }),
     goals: z.object({
       count: z.number().int(),
       atRisk: z.number().int(),

@@ -68,6 +68,8 @@ import {
  *   Step D — candidates (ta.hiring): GET/POST /candidates, GET /candidates/match, GET /candidates/:id,
  *     PUT|GET /candidates/:id/cv, GET|POST /positions/:id/applications,
  *     POST /applications/:id/start-interviews (round 1 = screening opens) | informed | reject | withdraw,
+ *     POST /applications/:id/move-back (one step, reason) | restore (rejected/withdrawn, reason),
+ *     POST /positions/:id/hold (reason) | resume — the line's TA RM or an HRBP,
  *     PUT /requisitions/:id/rounds/:round/interviewer;
  *   PATCH /candidates/:id (profile), PUT /applications/:id/next-action,
  *     GET|POST /applications/:id/activities (calls, emails… — recruiter / TA RM);
@@ -256,6 +258,25 @@ hiringRoutes.post(
   validateBody(endApplicationSchema),
   candidatesController.withdraw,
 );
+hiringRoutes.post(
+  '/applications/:id/move-back',
+  taUpdates,
+  validateBody(endApplicationSchema),
+  candidatesController.moveBack,
+);
+hiringRoutes.post(
+  '/applications/:id/restore',
+  taUpdates,
+  validateBody(endApplicationSchema),
+  candidatesController.restore,
+);
+// Hold / resume: the line's TA RM or an HRBP — checked in the service.
+hiringRoutes.post(
+  '/positions/:id/hold',
+  validateBody(endApplicationSchema),
+  candidatesController.hold,
+);
+hiringRoutes.post('/positions/:id/resume', candidatesController.resume);
 hiringRoutes.put(
   '/requisitions/:id/rounds/:round/interviewer',
   taUpdates,

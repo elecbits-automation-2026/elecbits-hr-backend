@@ -21,6 +21,7 @@ import {
 import type {
   CreateLeaveRequestInput,
   DecideLeaveInput,
+  LeaveApprovalRouteDto,
   LeaveBalanceDto,
   LeaveRequestDto,
 } from './leaves.schema.js';
@@ -263,6 +264,47 @@ export const createLeavesService = (deps: {
     return (await balances(targetId, year)).filter((b) => b.type !== 'menstrual');
   };
 
+  /**
+   * Who a request needs, decided ONCE here for both raise() and the form's
+   * preview, so the two can never drift:
+   *  - the RM slot (leave approver, else reporting manager) — waived only
+   *    when there is no effective RM at raise time (the Owner);
+   *  - the HR slot — waived for an HRBP's own leave (user decision) when the
+   *    requester holds hrbp.leaves THEMSELVES via a real broad grant (same bar
+   *    as holding the HR slot in decide; not the Owner/SuperAdmin bypass, not
+   *    a me/team-scoped grant), and only while an RM slot exists, so a request
+   *    can never require nobody;
+   *  - menstrual leave needs the RM AND HR (learner, 2026-11-05): HR is never
+   *    waived for it (another broad hrbp.leaves holder approves).
+   */
+  const slotsFor = async (
+    me: { id: string; leaveApprover: string | null; reportsTo: string | null },
+    type: CreateLeaveRequestInput['type'],
+  ): Promise<{ rmId: string | null; hrRequired: boolean }> => {
+    const rmId = me.leaveApprover ?? me.reportsTo ?? null;
+    const myHrAccess = await authz.resolveAccess(me.id, 'hrbp.leaves', 'update');
+    const hrRequired =
+      type === 'menstrual' || !(rmId !== null && hasBroadScope(myHrAccess.scopes));
+    return { rmId, hrRequired };
+  };
+
+  /** The leave form's "goes to …" line: self-approved, or the RM and/or HR. */
+  const approvalRoute = async (
+    employeeId: string,
+    type: CreateLeaveRequestInput['type'],
+  ): Promise<LeaveApprovalRouteDto> => {
+    const gate = await repo.findEmployeeApprovers(employeeId);
+    if (!gate)
+      throw createError(404, 'Employee record not found', { code: 'EMPLOYEE_NOT_FOUND' });
+    if (await selfGoverned(gate)) return { selfApproved: true, rm: null, hr: false };
+    const { rmId, hrRequired } = await slotsFor(gate, type);
+    return {
+      selfApproved: false,
+      rm: rmId ? { id: rmId, name: (await repo.nameOf(rmId)) ?? 'your manager' } : null,
+      hr: hrRequired,
+    };
+  };
+
   const raise = async (
     employeeId: string,
     input: CreateLeaveRequestInput,
@@ -402,24 +444,11 @@ export const createLeavesService = (deps: {
     }
 
     const me = gate;
-    // Waived only when there is no effective RM at raise time (the Owner).
-    let rmRequired = Boolean(me.leaveApprover ?? me.reportsTo);
-    // An HRBP's own leave needs only their RM (user decision): the HR slot is
-    // waived when the requester holds hrbp.leaves THEMSELVES — via a real
-    // broad grant (same bar as holding the HR slot in decide), not the
-    // Owner/SuperAdmin bypass and not a me/team-scoped grant — and only while
-    // an RM slot exists, so a request can never require nobody.
-    const myHrAccess = await authz.resolveAccess(employeeId, 'hrbp.leaves', 'update');
-    let hrRequired = !(rmRequired && hasBroadScope(myHrAccess.scopes));
-    // Menstrual leave needs the RM AND HR (learner, 2026-11-05 — it used to
-    // be HR-only): HR is never waived for it, even for an HRBP's own request
-    // (another broad hrbp.leaves holder approves). Other RM surfaces still
-    // show it as a generic leave day.
-    if (input.type === 'menstrual') hrRequired = true;
+    const { rmId, hrRequired } = await slotsFor(me, input.type);
+    const rmRequired = rmId !== null;
 
     // Bells to whoever must approve (learner, 2026-11-14) — the same people the
     // approval-reminders job chases later, never the requester.
-    const rmId = rmRequired ? (me.leaveApprover ?? me.reportsTo) : null;
     const hrIds = hrRequired
       ? (await authz.listBroadHolders('hrbp.leaves', 'update', employeeId)).filter(
           (x) => x !== employeeId && x !== rmId,
@@ -428,9 +457,16 @@ export const createLeavesService = (deps: {
     const title = `${me.name} asked for leave (${dateRange(input)})`;
     const bells: LeaveBell[] = [
       ...(rmId
-        ? [{ to: [rmId], event: { type: 'leave.requested', title, link: '/my-team?tab=leave' } }]
+        ? [
+            {
+              to: [rmId],
+              event: { type: 'leave.requested', title, link: '/my-team?tab=leave' },
+              // An approval waiting on someone — worth an email (raised once).
+              email: true,
+            },
+          ]
         : []),
-      { to: hrIds, event: { type: 'leave.requested', title, link: '/hr/leaves' } },
+      { to: hrIds, event: { type: 'leave.requested', title, link: '/hr/leaves' }, email: true },
     ];
 
     const row = await repo.insertRequest(
@@ -567,7 +603,12 @@ export const createLeavesService = (deps: {
     const holdsRmSlot = row.rmRequired && rmEligible;
     // The HR slot: a hrbp.leaves grant that REACHES this person (M4, Phase 3
     // — a dept grant decides for its department only).
-    const holdsHrSlot = await authz.reaches(caller, 'hrbp.leaves', 'update', row.employeeId);
+    const holdsHrSlot = await authz.reaches(
+      caller,
+      'hrbp.leaves',
+      'update',
+      row.employeeId,
+    );
     if (!holdsRmSlot && !holdsHrSlot) {
       throw createError(403, 'You are not an approver for this request', {
         code: 'NOT_AN_APPROVER',
@@ -597,6 +638,8 @@ export const createLeavesService = (deps: {
                 body: input.reason ?? null,
                 link: '/my-leaves',
               },
+              email: true,
+              dedupeKey: `leave.decided:${id}:declined`,
             },
           ],
         )
@@ -670,6 +713,8 @@ export const createLeavesService = (deps: {
                   } — waiting for ${rmSatisfied ? 'HR' : 'your manager'}`,
               link: '/my-leaves',
             },
+            email: true,
+            dedupeKey: `leave.decided:${id}:${final ? 'final' : slots.join('+')}`,
           },
         ],
       );
@@ -766,7 +811,9 @@ export const createLeavesService = (deps: {
       throw createError(404, 'Leave not found', { code: 'LEAVE_NOT_FOUND' });
     }
     if (leave.type !== 'sick') {
-      throw createError(422, 'Certificates are for sick leave', { code: 'NOT_SICK_LEAVE' });
+      throw createError(422, 'Certificates are for sick leave', {
+        code: 'NOT_SICK_LEAVE',
+      });
     }
     if (leave.status === 'declined' || leave.status === 'cancelled') {
       throw createError(409, `This leave is ${leave.status}`, { code: 'LEAVE_CLOSED' });
@@ -785,7 +832,8 @@ export const createLeavesService = (deps: {
   /** The owner, HR in reach (hrbp.leaves read) or payroll (org) may open it. */
   const certificate = async (id: string, callerId: string) => {
     const leave = await repo.findById(id);
-    if (!leave) throw createError(404, 'Certificate not found', { code: 'CERT_NOT_FOUND' });
+    if (!leave)
+      throw createError(404, 'Certificate not found', { code: 'CERT_NOT_FOUND' });
     if (leave.employeeId !== callerId) {
       const [hr, pr] = await Promise.all([
         authz.reaches(callerId, 'hrbp.leaves', 'read', leave.employeeId),
@@ -796,7 +844,8 @@ export const createLeavesService = (deps: {
       }
     }
     const file = await repo.getCertificate(id);
-    if (!file) throw createError(404, 'Certificate not found', { code: 'CERT_NOT_FOUND' });
+    if (!file)
+      throw createError(404, 'Certificate not found', { code: 'CERT_NOT_FOUND' });
     return file;
   };
 
@@ -808,6 +857,7 @@ export const createLeavesService = (deps: {
     listQueue,
     balances,
     teamBalances,
+    approvalRoute,
     raise,
     cancel,
     decide,

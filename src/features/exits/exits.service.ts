@@ -552,6 +552,8 @@ export const createExitsService = (deps: {
             title: `Your employment ends on ${input.lastWorkingDay}. HR will be in touch about the handover and your full & final.`,
             link: LINK_ME,
           },
+          email: true,
+          dedupeKey: `exit.terminated:${p.id}:${input.lastWorkingDay}`,
         },
         ...(p.effective_rm && p.effective_rm !== actor.actorEmployeeId
           ? [
@@ -668,6 +670,8 @@ export const createExitsService = (deps: {
             title: `HR accepted your resignation — your last working day is ${input.lastWorkingDay}`,
             link: LINK_ME,
           },
+          email: true,
+          dedupeKey: `exit.accepted:${p.id}:${input.lastWorkingDay}`,
         },
         ...(p.effective_rm && p.effective_rm !== actor.actorEmployeeId
           ? [
@@ -862,6 +866,8 @@ export const createExitsService = (deps: {
             title: 'Today is your last working day — please fill in the exit interview',
             link: LINK_ME,
           },
+          email: true,
+          dedupeKey: `exit.last_day:${x.id}`,
         },
         {
           to: ops.filter((o) => o !== x.employee_id),
@@ -870,6 +876,8 @@ export const createExitsService = (deps: {
             title: `${x.name}'s last working day is today — ${count ? `${count} item(s) to collect` : 'nothing held'}; clear OPS`,
             link: LINK_HR,
           },
+          email: true,
+          dedupeKey: `exit.last_day:${x.id}`,
         },
       ]);
       reminded += 1;

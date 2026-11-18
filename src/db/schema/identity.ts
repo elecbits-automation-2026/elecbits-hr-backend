@@ -59,3 +59,21 @@ export const refreshTokens = pgTable(
     index('refresh_tokens_family_idx').on(t.familyId),
   ],
 );
+
+/**
+ * Pending Google sign-ins (SSO). One short-lived, single-use row per attempt:
+ * `/auth/google/start` writes the `state` and the PKCE `code_verifier`;
+ * `/auth/google/callback` deletes the row as it reads it, so a state can never
+ * be replayed. Rows past `expires_at` are swept on the next start. No identity
+ * or secret lives here beyond the one-time verifier.
+ */
+export const oauthLoginStates = pgTable(
+  'oauth_login_states',
+  {
+    state: text('state').primaryKey(),
+    codeVerifier: text('code_verifier').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('oauth_login_states_expires_idx').on(t.expiresAt)],
+);

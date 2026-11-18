@@ -21,3 +21,8 @@ authRoutes.post('/claim', validateBody(claimRecordSchema), authController.claimR
 authRoutes.post('/claim-org', validateBody(claimOrgSchema), authController.claimOrg);
 authRoutes.post('/refresh', authController.refresh);
 authRoutes.post('/logout', authController.logout);
+
+// Google sign-in (SSO): start redirects to Google, callback completes it. Both
+// are top-level browser navigations, so they are GET and set no JSON body.
+authRoutes.get('/google/start', authController.googleStart);
+authRoutes.get('/google/callback', authController.googleCallback);

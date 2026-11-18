@@ -344,3 +344,42 @@ export const remindersSent = opsSchema.table(
     index('reminders_sent_lookup_idx').on(t.kind, t.subjectId, t.recipientId, t.sentAt),
   ],
 );
+
+/**
+ * Outgoing email (email service, 2026-11-16). A row is written in the SAME
+ * transaction as the change that causes it — rolled back with it — and the
+ * outbox sender delivers it later, so a mail outage never blocks the change.
+ * Only the message (subject, body, link) is stored; the branded layout is
+ * rendered at send time. Never salary figures, never attachments.
+ */
+export const emailOutbox = opsSchema.table(
+  'email_outbox',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // null = an address with no employee yet (a joiner's invite).
+    recipientId: uuid('recipient_id').references(() => employees.id),
+    toAddress: text('to_address').notNull(),
+    // The bell type it came from (leave.decided, payslip.ready, …) — for the log.
+    type: text('type').notNull(),
+    subject: text('subject').notNull(),
+    body: text('body'),
+    // App-relative link the "Open in Elecbits HR" button points at.
+    link: text('link'),
+    // pending | sent | failed
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastError: text('last_error'),
+    // Optional: the same key twice is queued once (a reminder re-run, a double click).
+    dedupeKey: text('dedupe_key'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('email_outbox_dedupe_uq').on(t.dedupeKey),
+    index('email_outbox_due_idx').on(t.status, t.nextAttemptAt),
+    check('email_outbox_status_chk', sql`${t.status} IN ('pending', 'sent', 'failed')`),
+  ],
+);

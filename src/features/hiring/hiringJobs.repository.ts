@@ -132,6 +132,7 @@ export const createHiringJobsRepository = (db: DbClient) => ({
          JOIN ta.requisitions r ON r.id = p.requisition_id
          JOIN org.employees e ON e.id = a.next_action_owner_id AND e.status = 'active'
         WHERE a.next_action IS NOT NULL AND a.next_action_due < $1::date
+          AND p.on_hold_at IS NULL
           AND a.stage NOT IN ('rejected', 'withdrawn', 'offer_declined', 'offer_withdrawn',
                               'no_show', 'joined')
           AND NOT EXISTS (SELECT 1 FROM ops.reminders_sent s

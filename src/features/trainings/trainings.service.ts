@@ -166,6 +166,7 @@ export const createTrainingsService = (deps: {
                 body: input.description,
                 link: LINK_MINE,
               },
+              email: true,
             },
           ]
         : [];

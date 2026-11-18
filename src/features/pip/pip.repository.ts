@@ -13,6 +13,10 @@ export interface ActorContext {
 export interface Bell {
   to: string[];
   event: NotificationEvent;
+  /** Also send this bell as an email (email service) — decided where the bell is built. */
+  email?: boolean;
+  /** Queue the email at most once per key + recipient (retries, double clicks). */
+  dedupeKey?: string;
 }
 
 const isUniqueViolation = (err: unknown) =>
@@ -22,7 +26,11 @@ const isUniqueViolation = (err: unknown) =>
 /** The only place the PIP feature touches the database. Notes never reach the audit log. */
 export const createPipRepository = (db: DbClient) => {
   const ring = async (tx: DbClient, bells: Bell[]) => {
-    for (const b of bells) await insertNotifications(tx, b.to, b.event);
+    for (const b of bells)
+      await insertNotifications(tx, b.to, b.event, {
+        email: b.email,
+        dedupeKey: b.dedupeKey,
+      });
   };
   const audit = (tx: DbClient, actor: ActorContext, action: string, id: string) =>
     tx.orm.insert(auditLog).values({

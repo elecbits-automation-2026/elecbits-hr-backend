@@ -175,6 +175,8 @@ export const teamUpdatesRowSchema = z
       employeeCode: z.string(),
     }),
     updates: z.array(workUpdateSchema),
+    /** One status per day over the window (people × days grid). */
+    strip: z.array(stripDaySchema),
     missesThisMonth: z.number().int(),
     overAllowance: z.boolean(),
   })
