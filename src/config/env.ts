@@ -136,6 +136,9 @@ export const env = {
   ai: {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? null,
     model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
+    // HR Assistant chat (agent loop with read-only tools). No key = the
+    // assistant answers 503; the Admin switch assistant.enabled gates it too.
+    assistantModel: process.env.ANTHROPIC_ASSISTANT_MODEL ?? 'claude-opus-5-5',
   },
 
   // --- Email ------------------------------------------------------------------

@@ -418,6 +418,16 @@ const definitions = {
     schema: z.object({ enabled: z.boolean() }),
     default: { enabled: false },
   },
+  'assistant.enabled': {
+    area: 'access',
+    live: true,
+    public: true,
+    label: 'HR Assistant',
+    description:
+      'The chat assistant for HR and managers. It answers questions from the HRMS through read-only tools that keep each person to what their access already covers; nothing is changed and chats are not stored. Payroll, salary and concern contents are never available to it. Needs the Anthropic API key on the server.',
+    schema: z.object({ enabled: z.boolean() }),
+    default: { enabled: false },
+  },
 } as const;
 
 export type SettingKey = keyof typeof definitions;

@@ -32,7 +32,15 @@ export function createApp(): Express {
 
   // --- Security & transport -------------------------------------------------
   app.use(helmet());
-  app.use(compression());
+  // Server-sent events (the HR Assistant) must reach the browser as they are
+  // written — compression would buffer them.
+  app.use(
+    compression({
+      filter: (req, res) =>
+        !String(res.getHeader('Content-Type') ?? '').startsWith('text/event-stream') &&
+        compression.filter(req, res),
+    }),
+  );
   app.use(
     cors({
       // Explicit allow-list in prod; reflect any origin in dev for convenience.

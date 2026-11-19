@@ -39,6 +39,7 @@ import { notificationsRoutes } from '../features/notifications/index.js';
 import { jobsRoutes } from '../features/jobs/index.js';
 import { emailRoutes } from '../features/email/index.js';
 import { concernsRoutes } from '../features/concerns/index.js';
+import { assistantRoutes } from '../features/assistant/index.js';
 import { openDoorRoutes } from '../features/open-door/index.js';
 
 /**
@@ -139,6 +140,9 @@ apiV1.use('/admin/email', emailRoutes);
 
 // Concerns (Batch 4): disputes and complaints.
 apiV1.use('/concerns', concernsRoutes);
+
+// HR Assistant (phase 1): read-only chat for HR and managers, streamed (SSE).
+apiV1.use('/assistant', assistantRoutes);
 
 // Open door (Batch 4): HR and department heads publish slots, anyone books.
 apiV1.use('/open-door', openDoorRoutes);

@@ -44,6 +44,7 @@ import { registerNotificationsDocs } from '../features/notifications/index.js';
 import { registerJobsDocs } from '../features/jobs/index.js';
 import { registerEmailDocs } from '../features/email/index.js';
 import { registerConcernsDocs } from '../features/concerns/index.js';
+import { registerAssistantDocs } from '../features/assistant/index.js';
 import { registerOpenDoorDocs } from '../features/open-door/index.js';
 import { apiErrorSchema } from './helpers.js';
 
@@ -110,6 +111,7 @@ export const buildOpenApiDocument = () => {
   registerEmailDocs(registry);
   registerConcernsDocs(registry);
   registerOpenDoorDocs(registry);
+  registerAssistantDocs(registry);
 
   return new OpenApiGeneratorV3(registry.definitions).generateDocument({
     openapi: '3.0.3',
