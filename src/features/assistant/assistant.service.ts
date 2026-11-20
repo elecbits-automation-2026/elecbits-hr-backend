@@ -3,6 +3,7 @@ import createError from 'http-errors';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
+import { hasOrgScope } from '../../shared/helpers/helpers.js';
 import type { AuthzRepository, ResolvedAccess } from '../access/authz.repository.js';
 import type { SettingsReader } from '../settings/index.js';
 import { FALLBACK_REPLY, SYSTEM_PROMPT, requestContext } from './assistant.prompt.js';
@@ -59,10 +60,11 @@ export const createAssistantService = (deps: {
   };
 
   const callerOf = async (userId: string, employeeId: string): Promise<AssistantCaller> => {
-    const [manager, people, attendance, name] = await Promise.all([
+    const [manager, people, attendance, policies, name] = await Promise.all([
       repo.hasReports(employeeId),
       authz.resolveAccess(employeeId, 'hrbp.people', 'read'),
       authz.resolveAccess(employeeId, 'hrbp.attendance', 'read'),
+      authz.resolveAccess(employeeId, 'hrbp.policies', 'read'),
       repo.employeeName(employeeId),
     ]);
     const [hrPeople, hrAttendance] = await Promise.all([
@@ -76,10 +78,11 @@ export const createAssistantService = (deps: {
       hrPeople,
       hrPeopleOrg: people.bypass || people.scopes.includes('org'),
       hrAttendance,
+      hrPoliciesOrg: hasOrgScope(policies),
     };
     const roles = [
       ...(manager ? ['manager'] : []),
-      ...(hrPeople || hrAttendance ? ['HR'] : []),
+      ...(hrPeople || hrAttendance || hasOrgScope(policies) ? ['HR'] : []),
     ];
     return { ...caller, name: name ?? 'Unknown', roles };
   };
@@ -234,7 +237,31 @@ export const createAssistantService = (deps: {
       emit({ type: 'done', tools: [...used] });
     } catch (err) {
       if (err instanceof Anthropic.APIUserAbortError || signal.aborted) return;
-      if (err instanceof Anthropic.RateLimitError) {
+      // Server setup problems get an admin-readable message, never the generic
+      // "couldn't answer" — that reads like a hard question, not a broken key.
+      if (
+        err instanceof Anthropic.AuthenticationError ||
+        err instanceof Anthropic.PermissionDeniedError
+      ) {
+        logger.error({ status: err.status, requestId: err.requestID }, 'assistant API key rejected');
+        emit({
+          type: 'error',
+          code: 'ASSISTANT_KEY_INVALID',
+          message:
+            "The AI service rejected the server's API key. An admin needs to replace ANTHROPIC_API_KEY and restart the backend.",
+        });
+      } else if (err instanceof Anthropic.NotFoundError) {
+        logger.error(
+          { status: err.status, requestId: err.requestID, model: env.ai.assistantModel },
+          'assistant model unavailable',
+        );
+        emit({
+          type: 'error',
+          code: 'ASSISTANT_MODEL_UNAVAILABLE',
+          message:
+            "The configured AI model isn't available to this API key. An admin needs to check ANTHROPIC_ASSISTANT_MODEL.",
+        });
+      } else if (err instanceof Anthropic.RateLimitError) {
         emit({
           type: 'error',
           code: 'ASSISTANT_BUSY',

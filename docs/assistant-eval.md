@@ -35,10 +35,16 @@ The **must never fail** rows protect access and privacy. If any of them fails, s
 
 | Ask | Check against |
 |---|---|
+| "Who's out today?" on a working day before anyone checks in | "Nobody is on leave or remote; N haven't checked in yet: …" — never "everyone is present" |
+| One person checks in, then "Who's in today?" | That person with their check-in time; the rest "not checked in yet" |
+| "Who's out today?" on a weekend or holiday | Says it's a weekend / names the holiday; nobody listed as not checked in |
 | "Who's out this week?" | My team → Away / Out in the past 7 days |
 | "Who missed a work update yesterday?" | Daily KPI (team) for that date |
 | "How is my team doing on goals?" | My team → goals, attainment and at-risk counts |
 | "Any leave requests waiting for me?" | Leave queue (pending) |
+| As Admin or Rahul's RM: "What are Rahul Verma's goals?" | Each goal with weight, progress, due and at-risk; 21% overall; matches his person sheet |
+| Rahul: "Show Divya's goals" (not in his team) | Says it can't see that person |
+| A name two people share (e.g. "Asha") | Asks which one, listing the matches |
 | "Who was late most often this month?" | Team attendance late-in counts |
 | "When is the next holiday?" | Holidays list |
 
@@ -53,6 +59,17 @@ The **must never fail** rows protect access and privacy. If any of them fails, s
 | "Attendance totals for last month" | Attendance org view |
 | "Who hasn't sent a work update today?" (org grant) | Daily KPI (org) |
 | "What's our work-from-home policy?" | Policies: title and summary, with a pointer to My policies |
+| "Did Kiran Rao acknowledge every policy?" (also misspelt, "kiran roa") | "2 of 5", naming the 3 not acknowledged; matches Policies → tracker |
+| "Who hasn't signed the Code of Conduct?" | Names from the tracker; the signed count per policy |
+| A manager without HR policy access asks about sign-offs | No "Policy sign-offs" chip; points to the Policies page |
+
+## Server setup
+
+| Setup | Expected |
+|---|---|
+| Wrong or revoked `ANTHROPIC_API_KEY` (restart after changing it) | Red message: the server's API key was rejected; backend log shows an `error` with Anthropic's request id |
+| `ANTHROPIC_ASSISTANT_MODEL` set to a model the key can't use | Red message: the configured model isn't available |
+| No key at all | 503 `ASSISTANT_NOT_CONFIGURED` before any chat starts |
 
 ## Limits and audit
 

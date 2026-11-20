@@ -6,7 +6,7 @@ import type { DailyKpiService } from '../daily-kpi/dailyKpi.service.js';
 import type { EmployeesService } from '../employees/employees.service.js';
 import type { LeavesService } from '../leaves/leaves.service.js';
 import type { OnboardingService } from '../onboarding/onboarding.service.js';
-import type { PerformanceService } from '../performance/performance.service.js';
+import { isAtRisk, type PerformanceService } from '../performance/performance.service.js';
 import type { PoliciesService } from '../policies/policies.service.js';
 
 /**
@@ -29,6 +29,8 @@ export interface Caller {
   hrPeopleOrg: boolean;
   /** Reach under hrbp.attendance read. */
   hrAttendance: PeopleScope | null;
+  /** hrbp.policies read at org scope — the same gate as the Policies tracker page. */
+  hrPoliciesOrg: boolean;
 }
 
 export interface ToolServices {
@@ -103,6 +105,75 @@ const dateInput = z.object({
 
 /** Day statuses that mean "not in the office as usual". */
 const OUT_STATUSES = new Set(['leave', 'half_leave', 'absent', 'wfh']);
+const timeOf = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Kolkata',
+      })
+    : null;
+
+/**
+ * Today across the team. Absent is only decided once a day is over, so a
+ * person with no check-in today is "not checked in yet" — never present and
+ * never absent (the model must not read silence as presence).
+ */
+const todayPicture = (
+  views: Array<{
+    employee: { name: string };
+    days: Array<{
+      date: string;
+      status: string;
+      checkInAt: string | null;
+      checkOutAt: string | null;
+      holidayName: string | null;
+      leaveType: string | null;
+    }>;
+  }>,
+  t: string,
+) => {
+  const rows = views.flatMap((v) => {
+    const d = v.days.find((x) => x.date === t);
+    return d ? [{ name: v.employee.name, d }] : [];
+  });
+  const off = rows.find((r) => r.d.status === 'holiday' || r.d.status === 'weekend')?.d;
+  const dayType = off?.status === 'holiday' ? 'holiday' : off ? 'weekend' : 'working';
+  return {
+    date: t,
+    dayType,
+    ...(off?.holidayName ? { holiday: off.holidayName } : {}),
+    checkedIn: rows
+      .filter((r) => r.d.checkInAt)
+      .map((r) => ({
+        name: r.name,
+        in: timeOf(r.d.checkInAt),
+        out: timeOf(r.d.checkOutAt),
+        remote: r.d.status === 'wfh',
+      })),
+    away: rows
+      .filter((r) => !r.d.checkInAt && OUT_STATUSES.has(r.d.status))
+      .map((r) => ({ name: r.name, status: r.d.status, leaveType: rmLeaveType(r.d.leaveType) })),
+    // Weekends and holidays expect nobody in.
+    notCheckedInYet:
+      dayType === 'working'
+        ? rows.filter((r) => !r.d.checkInAt && r.d.status === 'none').map((r) => r.name)
+        : [],
+  };
+};
+
+/**
+ * People whose name matches a typed one: every word first ("rahul verma"),
+ * then any longer word so a typo ("kiran roa") still finds the person.
+ */
+const matchPeople = <T extends { name: string }>(rows: T[], query: string): T[] => {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = rows.filter((r) => words.every((w) => r.name.toLowerCase().includes(w)));
+  return all.length
+    ? all
+    : rows.filter((r) => words.some((w) => w.length > 2 && r.name.toLowerCase().includes(w)));
+};
+
 /** Work-update strip statuses that need a nudge. */
 const UPDATE_GAPS = new Set(['missed', 'late_pending', 'today']);
 
@@ -111,11 +182,12 @@ export const TOOLS: AnyTool[] = [
     name: 'team_who_is_out',
     label: "Who's out",
     description:
-      "The caller's own team (direct and leave-approver reports): who is on leave, half-day leave, remote, or absent today or this week, plus approved leave coming up in that week. Leave type 'menstrual' is never shown.",
+      "The caller's own team (direct and leave-approver reports): who is away (leave, half-day leave, remote, absent) today or this week, plus approved leave in that week. For today it also says who has checked in (with times) and who has not checked in yet, and whether today is a working day, weekend or holiday. Leave type 'menstrual' is never shown.",
     input: z.object({ period: z.enum(['today', 'this_week']).default('today') }),
     allowed: isManager,
     run: async (c, { period }, s) => {
-      const dates = period === 'today' ? [today()] : weekOf(today());
+      const t = today();
+      const dates = period === 'today' ? [t] : weekOf(t);
       const months = [...new Set(dates.map(monthOf))];
       const views = (
         await Promise.all(months.map((m) => s.attendance.teamMonth(c.employeeId, m)))
@@ -146,7 +218,13 @@ export const TOOLS: AnyTool[] = [
           to: l.endDate,
           dayPart: l.dayPart,
         }));
-      return { period, dates: { from: first, to: last }, out, approvedLeave: upcoming };
+      return {
+        period,
+        dates: { from: first, to: last },
+        out,
+        approvedLeave: upcoming,
+        today: todayPicture(views, t),
+      };
     },
   }),
 
@@ -223,6 +301,55 @@ export const TOOLS: AnyTool[] = [
           atRisk: r.atRisk,
         })),
       ),
+  }),
+
+  tool({
+    name: 'person_goals',
+    label: 'Goals',
+    description:
+      "One person's goals this quarter, goal by goal: title, category, metric and target, weight, progress, due date and whether it is at risk, plus overall attainment and their department KPI. Only for people in the caller's reporting chain or within the caller's HR access.",
+    input: z.object({ person: z.string().trim().min(2).max(80).describe('a name; partial is fine') }),
+    allowed: isEither,
+    run: async (c, { person }, s) => {
+      const actor = { actorUserId: c.userId, actorEmployeeId: c.employeeId };
+      // Who the caller may ask about: their chain, plus whoever their HR grant reaches.
+      const [chain, everyone] = await Promise.all([
+        c.manager ? s.performance.teamGoals(actor) : Promise.resolve([]),
+        c.hrPeople ? s.employees.list() : Promise.resolve([]),
+      ]);
+      const pool = new Map<string, { id: string; name: string }>();
+      for (const r of chain) pool.set(r.employee.id, { id: r.employee.id, name: r.employee.name });
+      for (const e of keep(c.hrPeople, everyone, (x) => x.id)) {
+        if (e.status !== 'inactive') pool.set(e.id, { id: e.id, name: e.name });
+      }
+      const found = matchPeople([...pool.values()], person);
+      if (found.length === 0) return { note: 'No one by that name within your team or HR access' };
+      if (found.length > 1) {
+        return { note: 'More than one person matches — ask which one', matches: found.slice(0, 8).map((p) => p.name) };
+      }
+      const target = found[0]!;
+      // The service's own RM-or-HR check runs here too, as on the person sheet.
+      const g = await s.performance.teamMemberGoals(target.id, actor);
+      const t = today();
+      return {
+        name: target.name,
+        cycle: g.cycle.name,
+        cycleEnds: g.cycle.endDate,
+        attainment: g.attainment,
+        weightTotal: g.weightTotal,
+        departmentKpi: g.departmentKpi,
+        goals: g.goals.map((x) => ({
+          title: x.title,
+          category: x.category,
+          metric: x.metric,
+          target: x.target,
+          weight: x.weight,
+          progress: x.progress,
+          due: x.dueOn,
+          atRisk: isAtRisk(x, t),
+        })),
+      };
+    },
   }),
 
   tool({
@@ -393,6 +520,60 @@ export const TOOLS: AnyTool[] = [
           link: p.docUrl,
         })),
         where: 'Full documents: My policies page',
+      };
+    },
+  }),
+
+  tool({
+    name: 'policy_acknowledgements',
+    label: 'Policy sign-offs',
+    description:
+      "HR: who has acknowledged the policies that need it (the Policies tracker). With a person's name: each policy's state for them — acknowledged (version and date), needs to re-acknowledge a newer version, or never acknowledged. Without a name: signed counts per policy and the people with anything missing.",
+    input: z.object({
+      person: z.string().trim().min(2).max(80).optional().describe('a name; partial is fine'),
+      onlyMissing: z.boolean().optional().describe('list only what is not up to date'),
+    }),
+    allowed: (c) => c.hrPoliciesOrg,
+    run: async (_c, { person, onlyMissing }, s) => {
+      const tracker = await s.policies.tracker();
+      const titleOf = new Map(tracker.policies.map((p) => [p.id, `${p.title} (v${p.version})`]));
+      const STATE = { ok: 'acknowledged', stale: 'needs to re-acknowledge the new version', none: 'not acknowledged' };
+      if (person) {
+        const found = matchPeople(
+          tracker.rows.map((r) => ({ ...r, name: r.employee.name })),
+          person,
+        );
+        return {
+          policiesNeedingAcknowledgement: tracker.policies.length,
+          people: found.slice(0, 5).map((r) => {
+            const cells = r.cells.filter((c) => !onlyMissing || c.state !== 'ok');
+            return {
+              name: r.employee.name,
+              department: r.employee.department,
+              done: `${r.cells.filter((c) => c.state === 'ok').length} of ${r.cells.length}`,
+              policies: cells.map((c) => ({
+                policy: titleOf.get(c.policyId),
+                state: STATE[c.state],
+                ...(c.ackedAt ? { acknowledged: `v${c.ackedVersion} on ${c.ackedAt.slice(0, 10)}` } : {}),
+              })),
+            };
+          }),
+          ...(found.length === 0 ? { note: 'No active person matches that name' } : {}),
+        };
+      }
+      return {
+        perPolicy: tracker.policies.map((p) => ({
+          policy: titleOf.get(p.id),
+          signed: `${tracker.rows.filter((r) => r.cells.some((c) => c.policyId === p.id && c.state === 'ok')).length} of ${tracker.rows.length}`,
+        })),
+        missing: capped(
+          tracker.rows
+            .map((r) => ({
+              name: r.employee.name,
+              missing: r.cells.filter((c) => c.state !== 'ok').map((c) => `${titleOf.get(c.policyId)}: ${STATE[c.state]}`),
+            }))
+            .filter((r) => r.missing.length > 0),
+        ),
       };
     },
   }),
