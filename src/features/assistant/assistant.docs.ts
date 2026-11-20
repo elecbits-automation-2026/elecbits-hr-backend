@@ -18,7 +18,7 @@ export const registerAssistantDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: {
         description:
-          'text/event-stream — each `data:` line is one AssistantEvent: tool (a tool ran), text (answer delta), done (with the tools used) or error',
+          'text/event-stream — each `data:` line is one AssistantEvent: tool (a tool ran), text (answer delta), done (with the tools used) or error (ASSISTANT_KEY_INVALID, ASSISTANT_MODEL_UNAVAILABLE, ASSISTANT_BUSY, ASSISTANT_UPSTREAM, ASSISTANT_TRUNCATED, ASSISTANT_FAILED)',
         content: { 'text/event-stream': { schema: assistantEventSchema } },
       },
       403: errorResponse('ASSISTANT_OFF (Admin switch), ASSISTANT_NOT_ALLOWED (not HR or a manager)'),

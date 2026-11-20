@@ -39,7 +39,7 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 /** At risk = under 40% with under 30 days to the due date (incl. overdue). */
 const AT_RISK_PROGRESS = 40;
 const AT_RISK_DAYS = 30;
-const isAtRisk = (g: GoalRow, today: string): boolean =>
+export const isAtRisk = (g: Pick<GoalRow, 'progress' | 'dueOn'>, today: string): boolean =>
   g.progress < AT_RISK_PROGRESS &&
   (Date.parse(g.dueOn) - Date.parse(today)) / DAY_MS < AT_RISK_DAYS;
 
