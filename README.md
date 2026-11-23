@@ -22,12 +22,38 @@ npm install
 copy .env.example .env          # Windows; on macOS/Linux use cp. Then edit DATABASE_URL etc.
 createdb elecbits_hr            # or create the DB in pgAdmin
 
-npm run db:generate -- --name init   # generate SQL migrations from src/db/schema
-npm run db:migrate                   # apply them
-npm run db:seed-modules              # seed the grantable module tree
+npm run db:migrate                   # apply every migration (works on an empty DB in one run)
+npm run db:seed-modules              # 1. the grantable module tree
+npm run db:seed-batches              # 2. baseline batches (Employee, HRBP, PR, OPS)
+npm run db:seed-policies             # 3. starter policy library
+npm run db:seed-asset-categories     # 4. OPS asset categories
 
 npm run dev                          # http://localhost:4000, docs at /docs
 ```
+
+### Test data (never in production)
+
+Run these **after** steps 1–4, in this order. Both refuse `NODE_ENV=production`.
+
+```bash
+npm run db:seed-test-employees       # 5. claims the org as OWNER_CLAIM_EMAIL if nobody has,
+                                     #    then the 13-person roster (password test1234),
+                                     #    incl. a test-only "TA (test)" batch for pooja.ta@
+npm run db:seed-test-activity        # 6. Jul → yesterday: punches, leave, remote work, goals,
+                                     #    Q3 closed, career, awards, claims (one-shot; --force to rerun)
+```
+
+### Tests
+
+```bash
+npm test                             # needs DATABASE_URL pointing at a THROWAWAY database
+```
+
+The suite drops and rebuilds that database's schemas, runs every migration, the
+seeds above, then boots the app in-process and drives real multi-role flows over
+HTTP. It refuses to run when the database name doesn't contain `test`, `e2e` or
+`ci`, or when `NODE_ENV=production`. CI runs the same thing on a `postgres:16`
+service (`.github/workflows/ci.yml`).
 
 ## Layout
 

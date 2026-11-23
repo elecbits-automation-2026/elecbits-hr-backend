@@ -71,7 +71,8 @@ export const registerOnboardingDocs = (registry: OpenAPIRegistry): void => {
     method: 'get',
     path: '/api/v1/onboarding/tasks/{id}/file',
     tags: ['Onboarding'],
-    summary: 'Open the uploaded document (the joiner, or HR whose people grant reaches them)',
+    summary:
+      'Open the uploaded document (the joiner, or HR whose people grant reaches them)',
     security: [{ bearerAuth: [] }],
     responses: {
       200: { description: 'The file' },

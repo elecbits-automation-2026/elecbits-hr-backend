@@ -16,6 +16,7 @@ import {
   type CappedLeaveType,
 } from '../../shared/constants/constants.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
+import { fileColumns } from '../storage/index.js';
 
 /** Who performed the mutation — for the audit row (§10). */
 export interface ActorContext {
@@ -276,7 +277,13 @@ export const createLeavesRepository = (db: DbClient) => ({
 
   /** Store (or replace) a leave's certificate, with its audit row. */
   upsertCertificate: async (
-    file: { leaveId: string; fileName: string; contentType: string; data: Buffer },
+    file: {
+      leaveId: string;
+      fileName: string;
+      contentType: string;
+      data: Buffer;
+      driveFileId?: string | null;
+    },
     actor: ActorContext,
   ): Promise<void> =>
     db.transaction(async (tx) => {
@@ -287,7 +294,7 @@ export const createLeavesRepository = (db: DbClient) => ({
           fileName: file.fileName,
           contentType: file.contentType,
           sizeBytes: file.data.length,
-          data: file.data,
+          ...fileColumns(file),
           uploadedBy: actor.actorEmployeeId,
         })
         .onConflictDoUpdate({
@@ -296,7 +303,7 @@ export const createLeavesRepository = (db: DbClient) => ({
             fileName: file.fileName,
             contentType: file.contentType,
             sizeBytes: file.data.length,
-            data: file.data,
+            ...fileColumns(file),
             uploadedBy: actor.actorEmployeeId,
             uploadedAt: new Date(),
           },
@@ -316,6 +323,7 @@ export const createLeavesRepository = (db: DbClient) => ({
           fileName: leaveCertificates.fileName,
           contentType: leaveCertificates.contentType,
           data: leaveCertificates.data,
+          driveFileId: leaveCertificates.driveFileId,
         })
         .from(leaveCertificates)
         .where(eq(leaveCertificates.leaveId, leaveId))

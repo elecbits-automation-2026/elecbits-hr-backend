@@ -121,11 +121,16 @@ export const createLoansRepository = (db: DbClient) => {
           subject: `loans:${id}`,
           detail: JSON.stringify({ employeeId: values.employeeId, kind: values.kind }),
         });
-        await insertNotifications(tx, [values.employeeId], {
-          type: 'payroll.loan',
-          title: `A ${values.kind === 'advance' ? 'salary advance' : 'loan'} is on record for you — repayments start with the ${values.startMonth} payroll`,
-          link: '/my-payslips',
-        });
+        await insertNotifications(
+          tx,
+          [values.employeeId],
+          {
+            type: 'payroll.loan',
+            title: `A ${values.kind === 'advance' ? 'salary advance' : 'loan'} is on record for you — repayments start with the ${values.startMonth} payroll`,
+            link: '/my-payslips',
+          },
+          { email: true, dedupeKey: `payroll.loan:${id}` },
+        );
         return id;
       }),
 

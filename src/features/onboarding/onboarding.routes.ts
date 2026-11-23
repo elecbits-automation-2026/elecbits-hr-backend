@@ -41,7 +41,11 @@ onboardingRoutes.put(
   onboardingController.uploadTaskFile,
 );
 onboardingRoutes.get('/tasks/:id/file', onboardingController.taskFile);
-onboardingRoutes.get('/', requireAccess('hrbp.people', 'read'), onboardingController.queue);
+onboardingRoutes.get(
+  '/',
+  requireAccess('hrbp.people', 'read'),
+  onboardingController.queue,
+);
 onboardingRoutes.get(
   '/overview',
   requireAccess('hrbp.people', 'read'),

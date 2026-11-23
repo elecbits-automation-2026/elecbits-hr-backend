@@ -1,0 +1,67 @@
+name: CI
+
+# Pull requests and pushes to main: typecheck, then the full test suite against
+# a throwaway Postgres. The suite starts with ONE `db:migrate` on an empty
+# database, so a migration that only works when applied step by step (the
+# enum-in-one-transaction bug) fails here before it can reach a deploy.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The runner refuses any database whose name lacks test / e2e / ci.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/hrms_ci
+      PGSSL: 'false'
+      NODE_ENV: test
+      JWT_SECRET: ci-only-secret
+      # Repeated sign-ins across the suite; the rate-limit test turns it on itself.
+      AUTH_RATE_LIMIT: 'off'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Typecheck tests
+        run: npx tsc -p test/tsconfig.json
+
+      # Resets hrms_ci, migrates it from empty in one run, seeds the test
+      # roster, then runs every test file under test/.
+      - name: Tests
+        run: npm test

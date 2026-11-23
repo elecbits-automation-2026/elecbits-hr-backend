@@ -101,22 +101,14 @@ export const createAuthService = (deps: {
     requireCompanyEmail(input.email);
     const email = input.email.toLowerCase();
 
-    if (await repo.findUserByEmail(email)) {
-      throw createError(409, 'This record is already claimed — sign in instead', {
-        code: 'ALREADY_CLAIMED',
-      });
-    }
+    // One answer for "no record", "already claimed" and "bad token": the claim
+    // form must not tell a stranger which company emails have records.
+    // No self-registration: HRBP must have created the record first (§5.4).
     const employee = await repo.findEmployeeByEmail(email);
-    if (!employee) {
-      // No self-registration: HRBP must have created the record first (§5.4).
-      throw createError(404, 'No employee record exists for this email', {
-        code: 'RECORD_NOT_FOUND',
-      });
-    }
-
     // Claim security: the claimer must present the single-use invite token.
     // Knowing a colleague's email must never be enough to become them.
     if (
+      !employee ||
       !employee.claimTokenHash ||
       !employee.claimTokenExpiresAt ||
       employee.claimTokenExpiresAt < new Date() ||
@@ -124,11 +116,16 @@ export const createAuthService = (deps: {
     ) {
       throw createError(
         403,
-        'This invite link is invalid or expired — ask HR for a new one',
+        'This invite link is invalid, expired or already used — sign in if you have already claimed your record, or ask HR for a new link',
         {
           code: 'INVALID_CLAIM_TOKEN',
         },
       );
+    }
+    if (await repo.findUserByEmail(email)) {
+      throw createError(409, 'This record is already claimed — sign in instead', {
+        code: 'ALREADY_CLAIMED',
+      });
     }
 
     // One transaction in the repo: users row + invited -> active + audit (§10).
@@ -181,6 +178,9 @@ export const createAuthService = (deps: {
       throw sessionEnded();
     }
     if (row.expiresAt < new Date()) throw sessionEnded();
+    // A graced (just-rotated) token must not outlive a logout, deactivation or
+    // reuse kill of its family — otherwise the old cookie revives the session.
+    if (inGrace && (await repo.isFamilyEnded(row.familyId))) throw sessionEnded();
 
     const user = await repo.findUserById(row.userId);
     if (!user || !(await canAct(user.id))) {

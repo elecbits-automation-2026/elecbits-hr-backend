@@ -7,6 +7,7 @@ import { createAttendanceService } from '../attendance/attendance.service.js';
 import { createExitsFnf } from '../exits/index.js';
 import { createLeavesRepository } from '../leaves/leaves.repository.js';
 import { createLeavesService } from '../leaves/leaves.service.js';
+import { privacyServiceFor } from '../privacy/index.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createLoansRepository } from './loans.repository.js';
 import type { CloseLoanInput, CreateLoanInput, UpdateLoanInput } from './loans.schema.js';
@@ -16,6 +17,7 @@ import {
   annexureQuerySchema,
   type CreateCorrectionInput,
   type CreateRunInput,
+  type FinalizeRunInput,
   type FnfRecoveryInput,
   type UpdatePayslipInput,
 } from './payroll.schema.js';
@@ -83,7 +85,9 @@ export const payrollController = {
     res.json(await loansService(req).detail(requireId(req, 'loanId')));
   },
   myLoan: async (req: Request, res: Response): Promise<void> => {
-    res.json(await loansService(req).detail(requireId(req, 'loanId'), req.auth!.employeeId));
+    res.json(
+      await loansService(req).detail(requireId(req, 'loanId'), req.auth!.employeeId),
+    );
   },
   createLoan: async (req: Request, res: Response): Promise<void> => {
     const input: CreateLoanInput = req.body;
@@ -106,7 +110,9 @@ export const payrollController = {
   },
   addExitRecovery: async (req: Request, res: Response): Promise<void> => {
     const input: FnfRecoveryInput = req.body;
-    res.status(201).json(await service(req).addRecovery(requireId(req, 'exitId'), input, actor(req)));
+    res
+      .status(201)
+      .json(await service(req).addRecovery(requireId(req, 'exitId'), input, actor(req)));
   },
   removeExitRecovery: async (req: Request, res: Response): Promise<void> => {
     res.json(
@@ -118,7 +124,10 @@ export const payrollController = {
     );
   },
   exitStatementPdf: async (req: Request, res: Response): Promise<void> => {
-    sendPdf(res, await service(req).exitStatementPdf(requireId(req, 'exitId'), req.auth!.employeeId));
+    sendPdf(
+      res,
+      await service(req).exitStatementPdf(requireId(req, 'exitId'), req.auth!.employeeId),
+    );
   },
 
   myPayslipPdf: async (req: Request, res: Response): Promise<void> => {
@@ -129,10 +138,16 @@ export const payrollController = {
   },
 
   runPayslipPdf: async (req: Request, res: Response): Promise<void> => {
-    sendPdf(
-      res,
-      await service(req).runPayslipPdf(requireId(req, 'id'), requireId(req, 'payslipId')),
-    );
+    const payslipId = requireId(req, 'payslipId');
+    const pdf = await service(req).runPayslipPdf(requireId(req, 'id'), payslipId);
+    // Someone else's payslip is sensitive: every look is in the audit log (DPDP, M12).
+    await privacyServiceFor(req.db).logRead({
+      actorUserId: req.auth!.userId,
+      actorEmployeeId: req.auth!.employeeId,
+      what: 'payslip_pdf',
+      payslipId,
+    });
+    sendPdf(res, pdf);
   },
 
   listCorrections: async (req: Request, res: Response): Promise<void> => {
@@ -141,8 +156,15 @@ export const payrollController = {
 
   addCorrection: async (req: Request, res: Response): Promise<void> => {
     const input: CreateCorrectionInput = req.body;
-    const row = await service(req).addCorrection(requireId(req, 'payslipId'), input, actor(req));
-    req.log.info({ correction: row.id, sourceMonth: row.sourceMonth }, 'payslip correction added');
+    const row = await service(req).addCorrection(
+      requireId(req, 'payslipId'),
+      input,
+      actor(req),
+    );
+    req.log.info(
+      { correction: row.id, sourceMonth: row.sourceMonth },
+      'payslip correction added',
+    );
     res.status(201).json(row);
   },
 
@@ -191,7 +213,9 @@ export const payrollController = {
   },
 
   finalize: async (req: Request, res: Response): Promise<void> => {
-    const run = await service(req).finalize(requireId(req, 'id'), actor(req));
+    const run = await service(req).finalize(requireId(req, 'id'), actor(req), {
+      early: (req.body as FinalizeRunInput).early === true,
+    });
     req.log.info({ runId: run.id, month: run.month }, 'payroll run finalized');
     res.json(run);
   },

@@ -21,6 +21,7 @@ import {
   concernTrackEnum,
   openDoorBookingStatusEnum,
   openDoorRequestStatusEnum,
+  openDoorSlotTypeEnum,
 } from './enums.js';
 
 /**
@@ -71,6 +72,14 @@ export const concerns = orgSchema.table(
     ownerId: uuid('owner_id').references(() => employees.id),
     ownerAssignedAt: timestamp('owner_assigned_at', { withTimezone: true }),
     severity: concernSeverityEnum('severity'),
+    // AI triage suggestion (Admin switch concerns.aiTriage): a category from
+    // the track's list, a severity and a neutral one-to-two-line summary,
+    // read from the concern text only. Handlers only, like owner/severity —
+    // never shown to the raiser. All null when off, no key or the call failed.
+    aiCategory: text('ai_category'),
+    aiSeverity: concernSeverityEnum('ai_severity'),
+    aiSummary: text('ai_summary'),
+    aiSuggestedAt: timestamp('ai_suggested_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -115,6 +124,9 @@ export const openDoorSlots = orgSchema.table(
     startTime: time('start_time').notNull(),
     endTime: time('end_time').notNull(),
     capacity: integer('capacity').notNull().default(1),
+    // HR open door / department head / skip level. Existing rows read as HR
+    // open door; new slots default from the publisher (HR → HR open door).
+    slotType: openDoorSlotTypeEnum('slot_type').notNull().default('hr_open_door'),
     note: text('note'),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

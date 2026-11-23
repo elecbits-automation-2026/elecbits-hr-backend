@@ -29,7 +29,6 @@ export const APPLICATION_STAGES = [
   'withdrawn',
 ] as const;
 
-
 const roundSchema = z.enum(ROUNDS);
 const stageSchema = z.enum(APPLICATION_STAGES);
 const recommendationSchema = z.enum(['hire', 'no_hire']);
@@ -157,7 +156,11 @@ export const applicationSchema = z
     hasOfferLetter: z.boolean(),
     hasSignedLetter: z.boolean(),
     /** The document checklist and the candidate folder (workflow deck steps 13–14). */
-    documents: z.object({ received: z.number().int(), pending: z.number().int(), total: z.number().int() }),
+    documents: z.object({
+      received: z.number().int(),
+      pending: z.number().int(),
+      total: z.number().int(),
+    }),
     folderLink: z.string().nullable(),
     employeeId: z.string().uuid().nullable(),
     /** HRBP confirmed the actual joining. */
@@ -250,7 +253,13 @@ export const nextActionSchema = z
   .openapi('NextAction');
 
 export const ACTIVITY_KINDS = ['call', 'email', 'whatsapp', 'meeting'] as const;
-export const ACTIVITY_OUTCOMES = ['connected', 'no_answer', 'busy', 'wrong_number', 'other'] as const;
+export const ACTIVITY_OUTCOMES = [
+  'connected',
+  'no_answer',
+  'busy',
+  'wrong_number',
+  'other',
+] as const;
 
 /** Log a contact with the candidate (workflow deck: "calls done"). */
 export const logActivitySchema = z
@@ -326,7 +335,10 @@ export const submitScoreSchema = z
           evidence: z
             .string()
             .trim()
-            .min(EVIDENCE_MIN, `Write the evidence for this score (at least ${EVIDENCE_MIN} characters)`)
+            .min(
+              EVIDENCE_MIN,
+              `Write the evidence for this score (at least ${EVIDENCE_MIN} characters)`,
+            )
             .max(4000),
         }),
       )

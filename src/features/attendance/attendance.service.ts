@@ -472,11 +472,19 @@ export const createAttendanceService = (deps: {
     // A fix this vague can't prove where someone is (Wi-Fi / IP guesses on
     // laptops) — ask for a better one rather than judging it (learner, 2026-11-14).
     const maxErrorM = await settings.effective('attendance.maxLocationErrorM');
-    if (coords?.accuracyM !== undefined && maxErrorM > 0 && coords.accuracyM > maxErrorM) {
+    if (
+      coords?.accuracyM !== undefined &&
+      maxErrorM > 0 &&
+      coords.accuracyM > maxErrorM
+    ) {
       throw createError(
         422,
         `Your location is only accurate to about ${formatDistance(coords.accuracyM)} (needs ${maxErrorM} m) — turn on GPS / precise location on your phone and try again, or submit a remote-work request for today`,
-        { code: 'LOCATION_TOO_VAGUE', accuracyM: Math.round(coords.accuracyM), maxErrorM },
+        {
+          code: 'LOCATION_TOO_VAGUE',
+          accuracyM: Math.round(coords.accuracyM),
+          maxErrorM,
+        },
       );
     }
     const stored = await repo.listZones();
@@ -635,19 +643,20 @@ export const createAttendanceService = (deps: {
     month: string,
   ): Promise<ClassifierData> => {
     const { from, to } = monthRange(month);
-    const [holidayRows, punchRows, leaves, wfh, liveWfh, schedRows, policy] = await Promise.all([
-      repo.listHolidays(from, to),
-      repo.listPunches(employeeIds, from, to),
-      repo.listApprovedLeaves(employeeIds, from, to),
-      repo.listApprovedWfh(employeeIds, from, to),
-      repo.listWfhRanges(employeeIds, from, to, WFH_COUNTS),
-      repo.listSchedules(employeeIds),
-      settings.effectiveMany([
-        'attendance.workHours',
-        'attendance.workWeek',
-        'attendance.hourRules',
-      ] as const),
-    ]);
+    const [holidayRows, punchRows, leaves, wfh, liveWfh, schedRows, policy] =
+      await Promise.all([
+        repo.listHolidays(from, to),
+        repo.listPunches(employeeIds, from, to),
+        repo.listApprovedLeaves(employeeIds, from, to),
+        repo.listApprovedWfh(employeeIds, from, to),
+        repo.listWfhRanges(employeeIds, from, to, WFH_COUNTS),
+        repo.listSchedules(employeeIds),
+        settings.effectiveMany([
+          'attendance.workHours',
+          'attendance.workWeek',
+          'attendance.hourRules',
+        ] as const),
+      ]);
     const fallback = scheduleFrom(policy['attendance.workHours']);
     // A REMOTE punch counts only while a request covers its day (approved or
     // still waiting on the RM); once declined or withdrawn, the punch is
@@ -797,8 +806,8 @@ export const createAttendanceService = (deps: {
       });
     }
 
-    const people = (await repo.listActiveWithDepartment(departmentId, zoneId)).filter((p) =>
-      reachesIn(reach, p.id),
+    const people = (await repo.listActiveWithDepartment(departmentId, zoneId)).filter(
+      (p) => reachesIn(reach, p.id),
     );
     const data = await loadClassifierData(
       people.map((p) => p.id),
@@ -941,13 +950,18 @@ export const createAttendanceService = (deps: {
     const held = [
       use.assets && `${use.assets} asset${use.assets === 1 ? '' : 's'}`,
       use.stock && `${use.stock} stock record${use.stock === 1 ? '' : 's'}`,
-      use.history && `${use.history} asset history entr${use.history === 1 ? 'y' : 'ies'}`,
+      use.history &&
+        `${use.history} asset history entr${use.history === 1 ? 'y' : 'ies'}`,
       use.people && `${use.people} ${use.people === 1 ? 'person' : 'people'} based here`,
     ].filter(Boolean);
     if (held.length > 0) {
-      throw createError(409, `${row.name} is still in use: ${held.join(', ')} — it can't be removed`, {
-        code: 'ZONE_IN_USE',
-      });
+      throw createError(
+        409,
+        `${row.name} is still in use: ${held.join(', ')} — it can't be removed`,
+        {
+          code: 'ZONE_IN_USE',
+        },
+      );
     }
     try {
       await repo.deleteZone(row, actor);
@@ -1028,7 +1042,8 @@ export const createAttendanceService = (deps: {
     if (!subject?.leaveApprover && !subject?.reportsTo) {
       // No RM (the Owner's reports chain root): hrbp.attendance stands in —
       // a grant that reaches this person (review finding M4, Phase 3).
-      if (await authz.reaches(callerId, 'hrbp.attendance', 'update', subjectEmployeeId)) return;
+      if (await authz.reaches(callerId, 'hrbp.attendance', 'update', subjectEmployeeId))
+        return;
     }
     throw createError(403, 'You are not the approver for this request', {
       code: 'NOT_AN_APPROVER',
@@ -1185,6 +1200,30 @@ export const createAttendanceService = (deps: {
         code: 'WFH_IN_PAST',
       });
     }
+    // One request covers a bounded stretch (setting), so the RM re-looks at long ones.
+    const maxDays = await settings.effective('attendance.remoteWorkMaxDays');
+    const spanDays =
+      (Date.parse(`${input.endDate}T00:00:00Z`) -
+        Date.parse(`${input.startDate}T00:00:00Z`)) /
+        86_400_000 +
+      1;
+    if (spanDays > maxDays) {
+      throw createError(
+        422,
+        `One remote-work request can cover at most ${maxDays} days`,
+        {
+          code: 'WFH_TOO_LONG',
+        },
+      );
+    }
+    const [clash] = await repo.overlappingWfh(employeeId, input.startDate, input.endDate);
+    if (clash) {
+      throw createError(
+        409,
+        `You already have remote work requested for ${clash.startDate} – ${clash.endDate}`,
+        { code: 'WFH_OVERLAP' },
+      );
+    }
     const me = await repo.findEmployeeApprovers(employeeId);
     const values = {
       employeeId,
@@ -1197,6 +1236,28 @@ export const createAttendanceService = (deps: {
     const row = (await selfGoverned(me))
       ? await repo.insertWfhSelfApproved(values, actor)
       : await repo.insertWfh(values);
+    // The approver hears about it at once (bell + email): the RM, or HR when
+    // there is no RM. A self-governed request is born approved — nobody to ask.
+    if (row.status !== 'approved') {
+      const rm = me?.leaveApprover ?? me?.reportsTo ?? null;
+      const to = rm
+        ? [rm]
+        : await authz.listBroadHolders('hrbp.attendance', 'update', employeeId);
+      const range =
+        row.startDate === row.endDate
+          ? row.startDate
+          : `${row.startDate} to ${row.endDate}`;
+      await repo.notify(
+        to.filter((id) => id !== employeeId),
+        {
+          type: 'remote.requested',
+          title: `${me?.name ?? 'Someone'} asked to work remotely (${range})`,
+          body: input.reason ?? null,
+          link: rm ? '/my-team?tab=attendance' : '/hr/attendance',
+        },
+        { email: true, dedupeKey: `remote.requested:${row.id}` },
+      );
+    }
     return toWfh({
       ...row,
       employeeName: me?.name ?? '',
@@ -1251,7 +1312,9 @@ export const createAttendanceService = (deps: {
     reason: string | null,
   ) => {
     const range =
-      row.startDate === row.endDate ? row.startDate : `${row.startDate} to ${row.endDate}`;
+      row.startDate === row.endDate
+        ? row.startDate
+        : `${row.startDate} to ${row.endDate}`;
     await repo.notify(
       [row.employeeId],
       {
@@ -1290,7 +1353,8 @@ export const createAttendanceService = (deps: {
     // No RM at all (shouldn't happen for real people): HR in reach decides.
     const noRmExists = !target?.leaveApprover && !target?.reportsTo;
     const holdsHrSlot =
-      noRmExists && (await authz.reaches(caller, 'hrbp.attendance', 'update', row.employeeId));
+      noRmExists &&
+      (await authz.reaches(caller, 'hrbp.attendance', 'update', row.employeeId));
     if (!holdsRmSlot && !holdsHrSlot) {
       throw createError(403, 'Only this person’s RM approves remote work', {
         code: 'NOT_AN_APPROVER',

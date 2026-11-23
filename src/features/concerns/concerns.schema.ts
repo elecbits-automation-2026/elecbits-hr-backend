@@ -170,6 +170,18 @@ export const concernSchema = z
     /** HR-queue triage — handlers only; always null in the raiser's view. */
     owner: z.object({ id: z.string().uuid(), name: z.string() }).nullable(),
     severity: SEVERITY.nullable(),
+    /**
+     * AI triage suggestion (Admin switch concerns.aiTriage) — HR-queue
+     * handlers only, like owner/severity; always null in the raiser's view.
+     */
+    aiSuggestion: z
+      .object({
+        category: z.string().nullable(),
+        severity: SEVERITY.nullable(),
+        summary: z.string(),
+        suggestedAt: z.string().datetime(),
+      })
+      .nullable(),
     /** Who the case may be assigned to (its handlers); empty unless can.assign. */
     assignable: z.array(z.object({ id: z.string().uuid(), name: z.string() })),
     notes: z.array(concernNoteSchema),
@@ -185,6 +197,12 @@ export const severitySchema = z
   .object({ severity: SEVERITY.nullable() })
   .strict()
   .openapi('ConcernSeverityInput');
+
+/** HR-level triage: re-categorise within the case's own track list. */
+export const categorySchema = z
+  .object({ category: z.string().trim().min(2).max(40) })
+  .strict()
+  .openapi('ConcernCategoryInput');
 
 export const createdConcernSchema = z
   .object({
@@ -236,6 +254,7 @@ export type FollowUpNoteInput = z.infer<typeof followUpNoteSchema>;
 export type ConcernDto = z.infer<typeof concernSchema>;
 export type AssignInput = z.infer<typeof assignSchema>;
 export type SeverityInput = z.infer<typeof severitySchema>;
+export type CategoryInput = z.infer<typeof categorySchema>;
 export type ConcernNoteDto = z.infer<typeof concernNoteSchema>;
 export type QueueSummaryDto = z.infer<typeof queueSummarySchema>;
 export type QueueName = QueueSummaryDto['queue'];

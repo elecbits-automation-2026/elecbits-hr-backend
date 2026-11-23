@@ -6,16 +6,23 @@ import { createConcernsRepository, createConcernsService } from '../concerns/ind
 import { createDailyKpiRepository } from '../daily-kpi/dailyKpi.repository.js';
 import { createDailyKpiService } from '../daily-kpi/dailyKpi.service.js';
 import { createEmployeesRepository, createEmployeesService } from '../employees/index.js';
+import { createHiringRepository } from '../hiring/hiring.repository.js';
+import { createHiringService } from '../hiring/hiring.service.js';
 import { createLeavesRepository } from '../leaves/leaves.repository.js';
 import { createLeavesService } from '../leaves/leaves.service.js';
-import { createOnboardingRepository, createOnboardingService } from '../onboarding/index.js';
+import {
+  createOnboardingRepository,
+  createOnboardingService,
+} from '../onboarding/index.js';
 import { createPerformanceRepository } from '../performance/performance.repository.js';
 import { createPerformanceService } from '../performance/performance.service.js';
 import { createPoliciesRepository } from '../policies/policies.repository.js';
 import { createPoliciesService } from '../policies/policies.service.js';
+import { createRecognitionsRepository } from '../recognitions/recognitions.repository.js';
+import { createRecognitionsService } from '../recognitions/recognitions.service.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createAssistantRepository } from './assistant.repository.js';
-import type { ChatInput } from './assistant.schema.js';
+import type { ChatInput, QuickInput } from './assistant.schema.js';
 import {
   assistantClient,
   createAssistantService,
@@ -40,8 +47,9 @@ const service = (req: Request) => {
     repo: createOnboardingRepository(req.db),
     authz,
   });
+  const repo = createAssistantRepository(req.db);
   return createAssistantService({
-    repo: createAssistantRepository(req.db),
+    repo,
     authz,
     settings,
     client: assistantClient,
@@ -49,7 +57,11 @@ const service = (req: Request) => {
       attendance,
       performance,
       onboarding,
-      leaves: createLeavesService({ repo: createLeavesRepository(req.db), authz, settings }),
+      leaves: createLeavesService({
+        repo: createLeavesRepository(req.db),
+        authz,
+        settings,
+      }),
       dailyKpi: createDailyKpiService({
         repo: createDailyKpiRepository(req.db),
         attendance,
@@ -68,6 +80,13 @@ const service = (req: Request) => {
         settings,
       }),
       policies: createPoliciesService({ repo: createPoliciesRepository(req.db) }),
+      recognitions: createRecognitionsService({
+        repo: createRecognitionsRepository(req.db),
+        authz,
+        settings,
+      }),
+      hiring: createHiringService({ repo: createHiringRepository(req.db), settings }),
+      actionablePeople: repo.actionablePeople,
     },
   });
 };
@@ -97,5 +116,20 @@ export const assistantController = {
     await assistant.chat(caller, input.messages, emit, abort.signal);
     req.log.info({ employeeId: caller.employeeId }, 'assistant message answered');
     res.end();
+  },
+
+  /** The offline buttons: one read, no model; same gating minus the key. */
+  quick: async (req: Request, res: Response): Promise<void> => {
+    const input: QuickInput = req.body;
+    const result = await service(req).quick(
+      req.auth!.userId,
+      req.auth!.employeeId,
+      input.question,
+    );
+    req.log.info(
+      { question: input.question, tool: result.tool },
+      'assistant quick answer',
+    );
+    res.status(200).json(result);
   },
 };

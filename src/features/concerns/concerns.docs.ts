@@ -3,6 +3,7 @@ import { errorResponse, jsonBody, jsonResponse } from '../../docs/helpers.js';
 import { z } from '../../shared/zod.js';
 import {
   assignSchema,
+  categorySchema,
   concernPersonSchema,
   concernSchema,
   createConcernSchema,
@@ -137,17 +138,22 @@ export const registerConcernsDocs = (registry: OpenAPIRegistry): void => {
     ],
     [
       '/api/v1/concerns/{id}/severity',
-      "HR-level case: internal severity (low / medium / high, null clears) — never shown to the raiser",
+      'HR-level case: internal severity (low / medium / high, null clears) — never shown to the raiser',
       severitySchema as unknown as typeof decideSchema,
     ],
     [
+      '/api/v1/concerns/{id}/category',
+      'HR-level case: re-categorise within the track list (e.g. apply the AI suggestion) — 422 BAD_CATEGORY',
+      categorySchema as unknown as typeof decideSchema,
+    ],
+    [
       '/api/v1/concerns/follow-up',
-      'Anonymous raiser: status and replies by code + key',
+      'Anonymous raiser: status and replies by code + key (failed lookups rate-limited per IP: 429 TOO_MANY_ATTEMPTS)',
       followUpSchema as unknown as typeof decideSchema,
     ],
     [
       '/api/v1/concerns/follow-up/notes',
-      'Anonymous raiser adds information by code + key',
+      'Anonymous raiser adds information by code + key (rate-limited per IP: 429 TOO_MANY_ATTEMPTS)',
       followUpNoteSchema as unknown as typeof decideSchema,
     ],
   ];

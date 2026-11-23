@@ -2,7 +2,11 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { careerController } from './career.controller.js';
-import { addTrackNoteSchema, closeTrackSchema, openTrackSchema } from './career.schema.js';
+import {
+  addTrackNoteSchema,
+  closeTrackSchema,
+  openTrackSchema,
+} from './career.schema.js';
 
 /**
  * Career ladder & roadmap — mounted at /api/v1/career.
@@ -26,6 +30,14 @@ careerRoutes.get('/mine', careerController.mine);
 careerRoutes.post('/request', careerController.request);
 careerRoutes.get('/team', careerController.team);
 careerRoutes.post('/tracks', validateBody(openTrackSchema), careerController.open);
-careerRoutes.post('/tracks/:id/close', validateBody(closeTrackSchema), careerController.close);
-careerRoutes.post('/tracks/:id/notes', validateBody(addTrackNoteSchema), careerController.addNote);
+careerRoutes.post(
+  '/tracks/:id/close',
+  validateBody(closeTrackSchema),
+  careerController.close,
+);
+careerRoutes.post(
+  '/tracks/:id/notes',
+  validateBody(addTrackNoteSchema),
+  careerController.addNote,
+);
 careerRoutes.get('/people/:employeeId', careerController.person);

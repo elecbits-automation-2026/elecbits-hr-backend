@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
-import { insertNotifications } from '../notifications/index.js';
+import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import {
   attendance,
   auditLog,
@@ -11,7 +11,9 @@ import {
   feedbackNotes,
   reviewCycles,
   goals,
+  holidays,
   recognitions,
+  workUpdates,
 } from '../../db/schema/index.js';
 
 export type CareerTrackRow = typeof careerTracks.$inferSelect;
@@ -40,7 +42,9 @@ export const recordLevelChange = async (
   const open = await db.orm
     .select()
     .from(careerTracks)
-    .where(and(eq(careerTracks.employeeId, input.employeeId), eq(careerTracks.status, 'open')))
+    .where(
+      and(eq(careerTracks.employeeId, input.employeeId), eq(careerTracks.status, 'open')),
+    )
     .limit(1);
   const met = open[0] && input.to >= open[0].targetBand ? open[0] : undefined;
   if (met) {
@@ -93,13 +97,19 @@ export const createCareerRepository = (db: DbClient) => ({
     const rows = await db.orm
       .select()
       .from(careerTracks)
-      .where(and(eq(careerTracks.employeeId, employeeId), eq(careerTracks.status, 'open')))
+      .where(
+        and(eq(careerTracks.employeeId, employeeId), eq(careerTracks.status, 'open')),
+      )
       .limit(1);
     return rows[0];
   },
 
   findTrackById: async (id: string): Promise<CareerTrackRow | undefined> => {
-    const rows = await db.orm.select().from(careerTracks).where(eq(careerTracks.id, id)).limit(1);
+    const rows = await db.orm
+      .select()
+      .from(careerTracks)
+      .where(eq(careerTracks.id, id))
+      .limit(1);
     return rows[0];
   },
 
@@ -111,6 +121,8 @@ export const createCareerRepository = (db: DbClient) => ({
       note: string | null;
     },
     actor: ActorContext,
+    /** Who hears about it (bell + email), in the same transaction as the track. */
+    notify?: { recipientIds: string[]; event: NotificationEvent },
   ): Promise<CareerTrackRow> => {
     return db.transaction(async (tx) => {
       const rows = await tx.orm
@@ -123,6 +135,12 @@ export const createCareerRepository = (db: DbClient) => ({
         subject: `employees:${input.employeeId}`,
         detail: JSON.stringify({ from: input.bandCode, toward: input.targetBand }),
       });
+      if (notify) {
+        await insertNotifications(tx, notify.recipientIds, notify.event, {
+          email: true,
+          dedupeKey: `career.requested:${rows[0]!.id}`,
+        });
+      }
       return rows[0]!;
     });
   },
@@ -159,6 +177,37 @@ export const createCareerRepository = (db: DbClient) => ({
     return rows.length;
   },
 
+  /**
+   * Dates in [from, to] the person wrote a work update for. A late entry
+   * counts once approved; pending or declined ones don't.
+   */
+  workUpdateDatesBetween: async (
+    employeeId: string,
+    from: string,
+    to: string,
+  ): Promise<Set<string>> => {
+    const rows = await db.orm
+      .select({ date: workUpdates.date })
+      .from(workUpdates)
+      .where(
+        and(
+          eq(workUpdates.employeeId, employeeId),
+          gte(workUpdates.date, from),
+          lte(workUpdates.date, to),
+          or(isNull(workUpdates.lateStatus), eq(workUpdates.lateStatus, 'approved')),
+        ),
+      );
+    return new Set(rows.map((r) => r.date));
+  },
+
+  holidaysBetween: async (from: string, to: string): Promise<Set<string>> => {
+    const rows = await db.orm
+      .select({ date: holidays.date })
+      .from(holidays)
+      .where(and(gte(holidays.date, from), lte(holidays.date, to)));
+    return new Set(rows.map((r) => r.date));
+  },
+
   approvedRecognitionsFor: async (
     employeeIds: string[],
   ): Promise<Map<string, { count: number; lastAt: Date | null }>> => {
@@ -167,7 +216,10 @@ export const createCareerRepository = (db: DbClient) => ({
       .select({ employeeId: recognitions.employeeId, decidedAt: recognitions.decidedAt })
       .from(recognitions)
       .where(
-        and(eq(recognitions.status, 'approved'), inArray(recognitions.employeeId, employeeIds)),
+        and(
+          eq(recognitions.status, 'approved'),
+          inArray(recognitions.employeeId, employeeIds),
+        ),
       )
       .orderBy(desc(recognitions.decidedAt));
     const map = new Map<string, { count: number; lastAt: Date | null }>();
@@ -184,7 +236,12 @@ export const createCareerRepository = (db: DbClient) => ({
     const rows = await db.orm
       .select({ id: feedbackNotes.id })
       .from(feedbackNotes)
-      .where(and(eq(feedbackNotes.employeeId, employeeId), eq(feedbackNotes.type, 'appreciation')));
+      .where(
+        and(
+          eq(feedbackNotes.employeeId, employeeId),
+          eq(feedbackNotes.type, 'appreciation'),
+        ),
+      );
     return rows.length;
   },
 
@@ -230,7 +287,10 @@ export const createCareerRepository = (db: DbClient) => ({
       .select()
       .from(careerTracks)
       .where(
-        and(eq(careerTracks.status, 'open'), inArray(careerTracks.employeeId, employeeIds)),
+        and(
+          eq(careerTracks.status, 'open'),
+          inArray(careerTracks.employeeId, employeeIds),
+        ),
       );
     return new Map(rows.map((r) => [r.employeeId, r]));
   },
@@ -248,7 +308,9 @@ export const createCareerRepository = (db: DbClient) => ({
     const rows = await db.orm
       .select()
       .from(careerTracks)
-      .where(and(eq(careerTracks.employeeId, employeeId), eq(careerTracks.status, 'closed')))
+      .where(
+        and(eq(careerTracks.employeeId, employeeId), eq(careerTracks.status, 'closed')),
+      )
       .orderBy(desc(careerTracks.closedAt))
       .limit(1);
     return rows[0];
@@ -260,7 +322,11 @@ export const createCareerRepository = (db: DbClient) => ({
    */
   goalsInCycle: async (employeeId: string, cycleName: string) =>
     db.orm
-      .select({ progress: goals.progress, weight: goals.weight, category: goals.category })
+      .select({
+        progress: goals.progress,
+        weight: goals.weight,
+        category: goals.category,
+      })
       .from(goals)
       .innerJoin(reviewCycles, eq(goals.cycleId, reviewCycles.id))
       .where(and(eq(goals.employeeId, employeeId), eq(reviewCycles.name, cycleName))),
@@ -280,7 +346,11 @@ export const createCareerRepository = (db: DbClient) => ({
     db.transaction(async (tx) => {
       const rows = await tx.orm
         .insert(careerTrackNotes)
-        .values({ trackId: input.trackId, authorId: actor.actorEmployeeId, body: input.body })
+        .values({
+          trackId: input.trackId,
+          authorId: actor.actorEmployeeId,
+          body: input.body,
+        })
         .returning();
       await tx.orm.insert(auditLog).values({
         actorUserId: actor.actorUserId,

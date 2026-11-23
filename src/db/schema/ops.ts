@@ -86,6 +86,10 @@ export const assets = opsSchema.table(
   (t) => [
     index('assets_holder_idx').on(t.holderId),
     index('assets_zone_idx').on(t.zoneId),
+    // One serial number per category (case-insensitive); blank serials repeat.
+    uniqueIndex('assets_category_serial_uniq')
+      .on(t.categoryId, sql`lower(${t.serialNo})`)
+      .where(sql`${t.serialNo} IS NOT NULL`),
     check(
       'assets_holder_matches_status',
       sql`(${t.status} = 'assigned') = (${t.holderId} IS NOT NULL)`,

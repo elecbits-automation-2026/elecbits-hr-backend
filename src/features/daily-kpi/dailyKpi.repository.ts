@@ -29,6 +29,32 @@ export const createDailyKpiRepository = (db: DbClient) => ({
       [rmId],
     ),
 
+  /**
+   * Goals each person moved the progress of in [from, to), per person. Read
+   * from the append-only `goal.progress` audit rows — every move is kept
+   * there with its time (goals.updated_at keeps only the last edit, and
+   * also changes on definition edits and hiring-driven moves). Only the
+   * owner moves progress, so a row is always the person's own move.
+   */
+  goalsMoved: async (
+    ids: string[],
+    from: Date,
+    to: Date,
+  ): Promise<Map<string, number>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await db.query<{ employeeId: string; moved: number }>(
+      `SELECT g.employee_id AS "employeeId", count(DISTINCT g.id)::int AS moved
+         FROM access.audit_log a
+         JOIN org.goals g ON a.subject = 'goals:' || g.id::text
+        WHERE a.action = 'goal.progress'
+          AND a.created_at >= $2 AND a.created_at < $3
+          AND g.employee_id = ANY($1::uuid[])
+        GROUP BY g.employee_id`,
+      [ids, from, to],
+    );
+    return new Map(rows.map((r) => [r.employeeId, r.moved]));
+  },
+
   /** Everyone working here — active or on notice — but the Admin account. */
   org: () =>
     db.query<KpiPerson>(

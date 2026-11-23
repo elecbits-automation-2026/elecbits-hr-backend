@@ -85,10 +85,10 @@ export const createProbationRepository = (db: DbClient) => ({
     if (employeeIds.length === 0) return new Map();
     const rows = await db.query<ReviewViewRow>(
       `SELECT e.id AS employee_id, e.id, e.name, e.employee_code, e.designation, d.name AS department,
-              e.date_of_joining::text, coalesce(e.leave_approver, e.reports_to) AS rm_id, rm.name AS rm_name
+              e.date_of_joining::text, e.reports_to AS rm_id, rm.name AS rm_name
          FROM org.employees e
          LEFT JOIN org.departments d ON d.id = e.department_id
-         LEFT JOIN org.employees rm ON rm.id = coalesce(e.leave_approver, e.reports_to)
+         LEFT JOIN org.employees rm ON rm.id = e.reports_to
         WHERE e.id = ANY($1::uuid[])`,
       [employeeIds],
     );
@@ -109,7 +109,7 @@ export const createProbationRepository = (db: DbClient) => ({
   dueToOpen: (from: string, to: string) =>
     db.query<{ id: string; name: string; due_on: string; rm_id: string | null }>(
       `SELECT e.id, e.name, e.confirmation_date::text AS due_on,
-              coalesce(e.leave_approver, e.reports_to) AS rm_id
+              e.reports_to AS rm_id
          FROM org.employees e
         WHERE e.status = 'active' AND e.confirmation_date BETWEEN $1::date AND $2::date
           AND NOT EXISTS (SELECT 1 FROM org.probation_reviews r WHERE r.employee_id = e.id)
@@ -126,7 +126,7 @@ export const createProbationRepository = (db: DbClient) => ({
       due_on: string;
       rm_id: string | null;
     }>(
-      `SELECT r.id, r.employee_id, e.name, r.due_on::text, coalesce(e.leave_approver, e.reports_to) AS rm_id
+      `SELECT r.id, r.employee_id, e.name, r.due_on::text, e.reports_to AS rm_id
          FROM org.probation_reviews r JOIN org.employees e ON e.id = r.employee_id
         WHERE r.status IN ('pending', 'recommended') AND r.due_on < $1::date AND e.status = 'active'`,
       [today],

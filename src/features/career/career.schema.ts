@@ -66,6 +66,14 @@ export const myCareerSchema = z
     evidence: z.object({
       /** Days with a punch in the last 30. */
       punchedDays30: z.number().int(),
+      /**
+       * Working days with a work update, in the 30 days ending yesterday
+       * (weekends per the work week, holidays and days before joining left out).
+       */
+      updateDays30: z.object({
+        withUpdate: z.number().int(),
+        workingDays: z.number().int(),
+      }),
       /** Approved recognitions, all time. */
       recognitions: z.number().int(),
       /** Appreciation notes received, all time. */
@@ -116,7 +124,11 @@ export const closeTrackSchema = z
 
 export const teamCareerRowSchema = z
   .object({
-    employee: z.object({ id: z.string().uuid(), name: z.string(), employeeCode: z.string() }),
+    employee: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      employeeCode: z.string(),
+    }),
     level: LEVEL,
     recognitions: z.number().int(),
     /** Last approved recognition, if any — feeds "due a conversation". */

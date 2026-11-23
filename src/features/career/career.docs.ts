@@ -20,7 +20,10 @@ export const registerCareerDocs = (registry: OpenAPIRegistry): void => {
     tags: ['Career'],
     summary: 'Own ladder view: current/next band, derived evidence, open conversation',
     security: [{ bearerAuth: [] }],
-    responses: { 200: jsonResponse('My career', myCareerSchema), 401: errorResponse('Not authenticated') },
+    responses: {
+      200: jsonResponse('My career', myCareerSchema),
+      401: errorResponse('Not authenticated'),
+    },
   });
 
   registry.registerPath({
@@ -32,7 +35,9 @@ export const registerCareerDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       201: jsonResponse('Opened', careerTrackSchema),
       409: errorResponse('A conversation is already open'),
-      422: errorResponse('Top of the ladder, or the career.selfRequest minimums are not met'),
+      422: errorResponse(
+        'Top of the ladder, or the career.selfRequest minimums are not met',
+      ),
     },
   });
 
@@ -40,7 +45,8 @@ export const registerCareerDocs = (registry: OpenAPIRegistry): void => {
     method: 'get',
     path: '/api/v1/career/team',
     tags: ['Career'],
-    summary: "The caller's chain grouped by band, with recognition recency and open tracks",
+    summary:
+      "The caller's chain grouped by band, with recognition recency and open tracks",
     security: [{ bearerAuth: [] }],
     responses: { 200: jsonResponse('Team', z.array(teamCareerRowSchema)) },
   });
@@ -64,7 +70,8 @@ export const registerCareerDocs = (registry: OpenAPIRegistry): void => {
     method: 'post',
     path: '/api/v1/career/tracks/{id}/close',
     tags: ['Career'],
-    summary: 'Close a conversation as met or closed (RM-or-HR; never the person themselves)',
+    summary:
+      'Close a conversation as met or closed (RM-or-HR; never the person themselves)',
     security: [{ bearerAuth: [] }],
     request: { body: jsonBody(closeTrackSchema) },
     responses: {

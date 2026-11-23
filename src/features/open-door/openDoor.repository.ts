@@ -14,6 +14,7 @@ import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
   concerns,
+  departments,
   employees,
   openDoorBookings,
   openDoorRequests,
@@ -53,6 +54,48 @@ export const createOpenDoorRepository = (db: DbClient) => ({
       .where(inArray(employees.id, ids));
     return new Map(rows.map((r) => [r.id, r.name]));
   },
+
+  /** Slot owners' title and department, shown on each slot. */
+  ownerCards: async (
+    ids: string[],
+  ): Promise<Map<string, { designation: string | null; department: string | null }>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await db.orm
+      .select({
+        id: employees.id,
+        designation: employees.designation,
+        department: departments.name,
+      })
+      .from(employees)
+      .leftJoin(departments, eq(departments.id, employees.departmentId))
+      .where(inArray(employees.id, ids));
+    return new Map(
+      rows.map((r) => [r.id, { designation: r.designation, department: r.department }]),
+    );
+  },
+
+  /** The owner edits a slot's type / note; audited (ids + fields only). */
+  updateSlot: async (
+    slotId: string,
+    patch: Partial<Pick<SlotRow, 'slotType' | 'note'>>,
+    actor: ActorContext,
+  ): Promise<SlotRow | undefined> =>
+    db.transaction(async (tx) => {
+      const rows = await tx.orm
+        .update(openDoorSlots)
+        .set(patch)
+        .where(and(eq(openDoorSlots.id, slotId), isNull(openDoorSlots.cancelledAt)))
+        .returning();
+      if (rows[0]) {
+        await tx.orm.insert(auditLog).values({
+          actorUserId: actor.actorUserId,
+          action: 'open_door.slot_updated',
+          subject: `open_door_slots:${slotId}`,
+          detail: JSON.stringify({ fields: Object.keys(patch) }),
+        });
+      }
+      return rows[0];
+    }),
 
   findSlot: async (id: string): Promise<SlotRow | undefined> =>
     (
@@ -300,6 +343,7 @@ export const createOpenDoorRepository = (db: DbClient) => ({
       startTime: string;
       endTime: string;
       note: string | null;
+      slotType?: SlotRow['slotType'];
     },
     actor: ActorContext,
     bell: { to: string[]; event: NotificationEvent },

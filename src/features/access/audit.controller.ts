@@ -11,7 +11,8 @@ import { auditQuerySchema, type AuditPageDto } from './audit.schema.js';
 export const auditController = {
   list: async (req: Request, res: Response): Promise<void> => {
     const query = auditQuerySchema.safeParse(req.query);
-    if (!query.success) throw createError(400, 'Invalid audit-log query', { code: 'BAD_QUERY' });
+    if (!query.success)
+      throw createError(400, 'Invalid audit-log query', { code: 'BAD_QUERY' });
     const { q, page, pageSize } = query.data;
     const { rows, total } = await createAuditRepository(req.db).listPage({
       search: q || undefined,

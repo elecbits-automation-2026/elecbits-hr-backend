@@ -3,7 +3,11 @@ import { assertReaches, keepReachable } from '../../middleware/authorize.js';
 import createError from 'http-errors';
 import { hasOrgScope, isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
-import { createOnboardingRepository, createOnboardingService } from '../onboarding/index.js';
+import {
+  createOnboardingRepository,
+  createOnboardingService,
+} from '../onboarding/index.js';
+import { privacyServiceFor } from '../privacy/index.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createEmployeesRepository } from './employees.repository.js';
 import type {
@@ -139,7 +143,16 @@ export const employeesController = {
   getSalary: async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid employee id');
-    res.json(await service(req).getSalary(id, await holdsBank(req, 'read')));
+    const withBank = await holdsBank(req, 'read');
+    const salary = await service(req).getSalary(id, withBank);
+    // Someone else's pay is sensitive: every look is in the audit log (DPDP, M12).
+    await privacyServiceFor(req.db).logRead({
+      actorUserId: req.auth!.userId,
+      actorEmployeeId: req.auth!.employeeId,
+      what: withBank ? 'bank_details' : 'salary',
+      subjectEmployeeId: id,
+    });
+    res.json(salary);
   },
 
   updateSalary: async (req: Request, res: Response): Promise<void> => {
@@ -163,7 +176,14 @@ export const employeesController = {
   getBankDetails: async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid employee id');
-    res.json(await service(req).getBankDetails(id));
+    const bank = await service(req).getBankDetails(id);
+    await privacyServiceFor(req.db).logRead({
+      actorUserId: req.auth!.userId,
+      actorEmployeeId: req.auth!.employeeId,
+      what: 'bank_details',
+      subjectEmployeeId: id,
+    });
+    res.json(bank);
   },
 
   updateBankDetails: async (req: Request, res: Response): Promise<void> => {

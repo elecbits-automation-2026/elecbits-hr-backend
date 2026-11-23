@@ -98,8 +98,7 @@ const iso = (d: Date | null) => (d ? new Date(d).toISOString() : null);
 export const docReviewers = (
   recruiterId: string | null,
   taRmId: string | null,
-): DocRole[] =>
-  recruiterId && recruiterId === taRmId ? ['dept_head'] : [...DOC_ROLES];
+): DocRole[] => (recruiterId && recruiterId === taRmId ? ['dept_head'] : [...DOC_ROLES]);
 
 const toDocument = (
   d: DocumentRow,
@@ -133,7 +132,6 @@ const toDocument = (
   };
 };
 
-
 const toDto = (
   r: RequisitionRow,
   rounds: RoundRow[],
@@ -152,7 +150,9 @@ const toDto = (
   );
   const doc = (p: PositionRow, kind: DocumentKind) => {
     const d = docs.find((x) => x.position_id === p.id && x.kind === kind);
-    return d ? toDocument(d, docApprovals, docReviewers(p.recruiter_id, r.ta_rm_id)) : null;
+    return d
+      ? toDocument(d, docApprovals, docReviewers(p.recruiter_id, r.ta_rm_id))
+      : null;
   };
   return {
     id: r.id,
@@ -228,7 +228,11 @@ const toDto = (
           : null,
         openedAt: iso(p.opened_at),
         onHold: p.on_hold_at
-          ? { at: iso(p.on_hold_at)!, reason: p.on_hold_reason, byName: p.on_hold_by_name }
+          ? {
+              at: iso(p.on_hold_at)!,
+              reason: p.on_hold_reason,
+              byName: p.on_hold_by_name,
+            }
           : null,
         documents: { jd: doc(p, 'jd'), scorecard: doc(p, 'scorecard') },
       })),
@@ -267,7 +271,8 @@ export const createHiringService = (deps: {
     repo.approverHolders((await settings.effective('hiring.hrDepartment')).departmentId);
 
   const planWindow = () => settings.effective('hiring.planWindow');
-  const planningNow = async () => planningQuarter(localDateOf(new Date()), await planWindow());
+  const planningNow = async () =>
+    planningQuarter(localDateOf(new Date()), await planWindow());
 
   const hydrate = async (rows: RequisitionRow[]): Promise<RequisitionDto[]> => {
     if (rows.length === 0) return [];
@@ -281,7 +286,9 @@ export const createHiringService = (deps: {
     const docApprovals = docs.length
       ? await repo.documentApprovalsOf(docs.map((d) => d.id))
       : [];
-    const sources = positions.length ? await repo.sourcesOf(positions.map((p) => p.id)) : [];
+    const sources = positions.length
+      ? await repo.sourcesOf(positions.map((p) => p.id))
+      : [];
     return rows.map((r) =>
       toDto(r, rounds, approvals, positions, docs, docApprovals, sources),
     );
@@ -344,7 +351,10 @@ export const createHiringService = (deps: {
       acting: d.acting,
     })),
     approverRoles: await rolesOf(employeeId),
-    ...(await planningNow().then((p) => ({ planQuarter: p.quarter, planDeadline: p.deadline }))),
+    ...(await planningNow().then((p) => ({
+      planQuarter: p.quarter,
+      planDeadline: p.deadline,
+    }))),
   });
 
   const plan = async (
@@ -548,52 +558,52 @@ export const createHiringService = (deps: {
               },
             ]
           : o === 'returned'
-          ? [
-              {
-                to: toHead,
-                event: {
-                  type: 'hiring.returned',
-                  title: `Hiring request returned: ${line} — ${reason}`,
-                  link: LINK_PLAN,
-                },
-              },
-              {
-                to: otherHr,
-                event: {
-                  type: 'hiring.returned',
-                  title: `Returned by ${by}: ${line} (${r.department_name}) — ${reason}`,
-                  link: LINK_TA,
-                },
-              },
-            ]
-          : o === 'approved'
             ? [
                 {
                   to: toHead,
                   event: {
-                    type: 'hiring.approved',
-                    title: `Hiring request approved: ${line}`,
+                    type: 'hiring.returned',
+                    title: `Hiring request returned: ${line} — ${reason}`,
                     link: LINK_PLAN,
                   },
                 },
                 {
                   to: otherHr,
                   event: {
-                    type: 'hiring.approved',
-                    title: `Approved by ${by}: ${line} (${r.department_name})`,
+                    type: 'hiring.returned',
+                    title: `Returned by ${by}: ${line} (${r.department_name}) — ${reason}`,
                     link: LINK_TA,
                   },
                 },
-                {
-                  to: otherAdmin,
-                  event: {
-                    type: 'hiring.approved',
-                    title: `Approved by ${by} (HRBP): ${line} (${r.department_name}) — give it to a TA RM`,
-                    link: LINK_ADMIN_APPROVALS,
-                  },
-                },
               ]
-            : [],
+            : o === 'approved'
+              ? [
+                  {
+                    to: toHead,
+                    event: {
+                      type: 'hiring.approved',
+                      title: `Hiring request approved: ${line}`,
+                      link: LINK_PLAN,
+                    },
+                  },
+                  {
+                    to: otherHr,
+                    event: {
+                      type: 'hiring.approved',
+                      title: `Approved by ${by}: ${line} (${r.department_name})`,
+                      link: LINK_TA,
+                    },
+                  },
+                  {
+                    to: otherAdmin,
+                    event: {
+                      type: 'hiring.approved',
+                      title: `Approved by ${by} (HRBP): ${line} (${r.department_name}) — give it to a TA RM`,
+                      link: LINK_ADMIN_APPROVALS,
+                    },
+                  },
+                ]
+              : [],
     );
     if (res === 'stale' || res === 'decided') throw decisionError(res);
     return one(id);
@@ -609,9 +619,13 @@ export const createHiringService = (deps: {
     const p = await repo.findPosition(positionId);
     if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
     if (!p.recruiter_id || p.recruiter_id !== actor.actorEmployeeId) {
-      throw createError(403, "Only this position's recruiter writes its JD and scorecard", {
-        code: 'NOT_POSITION_RECRUITER',
-      });
+      throw createError(
+        403,
+        "Only this position's recruiter writes its JD and scorecard",
+        {
+          code: 'NOT_POSITION_RECRUITER',
+        },
+      );
     }
     return { p, r: await findOr404(p.requisition_id) };
   };
@@ -646,9 +660,13 @@ export const createHiringService = (deps: {
       }
       const missing = [...used].filter((x) => !given.includes(x));
       if (missing.length) {
-        throw createError(422, `Add a sheet for every round of the line: ${missing.join(', ')}`, {
-          code: 'ROUND_MISSING',
-        });
+        throw createError(
+          422,
+          `Add a sheet for every round of the line: ${missing.join(', ')}`,
+          {
+            code: 'ROUND_MISSING',
+          },
+        );
       }
     }
     if (!(await repo.saveDocument(p, kind, content, actor))) {
@@ -804,14 +822,25 @@ export const createHiringService = (deps: {
   };
 
   /** Log a sourcing channel the position's recruiter (or the line's TA RM) activated. */
-  const addSource = async (positionId: string, input: AddSourceInput, actor: ActorContext) => {
+  const addSource = async (
+    positionId: string,
+    input: AddSourceInput,
+    actor: ActorContext,
+  ) => {
     const p = await repo.findPosition(positionId);
     if (!p) throw createError(404, 'Position not found', { code: 'POSITION_NOT_FOUND' });
     const r = await findOr404(p.requisition_id);
-    if (actor.actorEmployeeId !== p.recruiter_id && actor.actorEmployeeId !== r.ta_rm_id) {
-      throw createError(403, "Only this position's recruiter or the line's TA RM can do this", {
-        code: 'NOT_POSITION_OWNER',
-      });
+    if (
+      actor.actorEmployeeId !== p.recruiter_id &&
+      actor.actorEmployeeId !== r.ta_rm_id
+    ) {
+      throw createError(
+        403,
+        "Only this position's recruiter or the line's TA RM can do this",
+        {
+          code: 'NOT_POSITION_OWNER',
+        },
+      );
     }
     await repo.addSource(
       {
@@ -881,7 +910,9 @@ export const createHiringService = (deps: {
       });
     }
     if (res === 'same') {
-      throw createError(409, 'This TA RM already has the line', { code: 'ALREADY_ASSIGNED' });
+      throw createError(409, 'This TA RM already has the line', {
+        code: 'ALREADY_ASSIGNED',
+      });
     }
     if (res === 'positions_assigned') {
       throw createError(

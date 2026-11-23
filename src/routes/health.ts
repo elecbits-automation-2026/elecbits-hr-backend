@@ -14,14 +14,27 @@ healthRoutes.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-healthRoutes.get('/ready', async (req: Request, res: Response) => {
+const ready = async (req: Request, res: Response) => {
   // A failed probe must be 503 (not ready), never a 500. healthcheck() throws
   // when the pool can't connect, so treat any throw as "not ready" too.
+  const started = Date.now();
   let ok = false;
   try {
     ok = await req.db.healthcheck();
   } catch {
     ok = false;
   }
-  res.status(ok ? 200 : 503).json({ status: ok ? 'ready' : 'unavailable', db: ok });
-});
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'ready' : 'unavailable',
+    db: ok,
+    // How long the DB round trip took — the uptime check logs it, so a slow
+    // database shows up before it becomes an outage.
+    dbLatencyMs: Date.now() - started,
+    uptimeSeconds: Math.round(process.uptime()),
+  });
+};
+
+healthRoutes.get('/ready', ready);
+// Same probe under /health/ so external uptime monitors can watch one prefix
+// (the runbook's uptime check uses this path).
+healthRoutes.get('/health/ready', ready);

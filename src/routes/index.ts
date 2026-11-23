@@ -38,6 +38,7 @@ import { settingsRoutes } from '../features/settings/index.js';
 import { notificationsRoutes } from '../features/notifications/index.js';
 import { jobsRoutes } from '../features/jobs/index.js';
 import { emailRoutes } from '../features/email/index.js';
+import { privacyAdminRoutes, privacyMeRoutes } from '../features/privacy/index.js';
 import { concernsRoutes } from '../features/concerns/index.js';
 import { assistantRoutes } from '../features/assistant/index.js';
 import { openDoorRoutes } from '../features/open-door/index.js';
@@ -62,6 +63,8 @@ apiV1.use('/auth', authRoutes);
 
 // The signed-in employee's own view (profile, batches, direct reports).
 apiV1.use('/me', meRoutes);
+// Privacy notice acceptance + "download my data" (DPDP, me scope).
+apiV1.use('/me', privacyMeRoutes);
 
 // Org structure (HRBP portal, §2).
 apiV1.use('/employees', employeesRoutes);
@@ -137,6 +140,8 @@ apiV1.use('/notifications', notificationsRoutes);
 apiV1.use('/admin/jobs', jobsRoutes);
 // Email delivery (Admin): switch state, outbox counts, retry, test email.
 apiV1.use('/admin/email', emailRoutes);
+// Data retention preview (Admin): what the privacy purge would remove.
+apiV1.use('/admin/privacy', privacyAdminRoutes);
 
 // Concerns (Batch 4): disputes and complaints.
 apiV1.use('/concerns', concernsRoutes);

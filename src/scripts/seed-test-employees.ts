@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
+  batchGrants,
   batches,
   departments,
   employeeBatches,
@@ -11,11 +12,18 @@ import {
 } from '../db/schema/index.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
-import { BASELINE_BATCHES, type Level } from '../shared/constants/constants.js';
+import {
+  BASELINE_BATCHES,
+  RIGHTS_LEVELS,
+  type Level,
+} from '../shared/constants/constants.js';
+import { createAuthRepository } from '../features/auth/auth.repository.js';
 
 /**
  * CLI: seed a TEST roster for exercising payroll, attendance and leaves.
- *   npm run db:seed-test-employees      (after db:migrate + both other seeds)
+ *   npm run db:seed-test-employees      (after db:migrate + db:seed-modules +
+ *                                         db:seed-batches; claims the org itself
+ *                                         when no Owner exists yet)
  *
  * Idempotent — everyone conflicts on their unique email, so re-running only
  * fills gaps. Every account is created CLAIMED (status active + users row) so
@@ -28,6 +36,15 @@ import { BASELINE_BATCHES, type Level } from '../shared/constants/constants.js';
  */
 const TEST_PASSWORD = 'test1234';
 const BCRYPT_ROUNDS = 12;
+
+/**
+ * Hiring has no baseline batch (the Admin builds one under Roles & access).
+ * The test roster gets its own so the TA flows work out of the box.
+ */
+const TA_BATCH = 'TA (test)';
+const TA_GRANTS = [
+  { moduleKey: 'ta.hiring', actions: RIGHTS_LEVELS.manager, scope: 'org' as const },
+];
 
 interface SeedPerson {
   email: string;
@@ -238,7 +255,7 @@ const ROSTER: SeedPerson[] = [
     salary: { ctc: '1100000', pf: '1800', tds: '4500', professionalTax: '200' },
   },
   {
-    // For the TA (hiring) portal — no TA batch exists yet; plain employee now.
+    // For the TA (hiring) portal — holds the test-only TA batch.
     email: 'pooja.ta@elecbits.in',
     firstName: 'Pooja',
     lastName: 'Reddy',
@@ -247,7 +264,7 @@ const ROSTER: SeedPerson[] = [
     employmentType: 'permanent',
     department: 'People Operations',
     reportsToEmail: 'meera.hrbp@elecbits.in',
-    extraBatches: [],
+    extraBatches: [TA_BATCH],
     dateOfJoining: '2026-03-02',
     confirmationDate: '2026-05-02',
     noticeDays: 30,
@@ -321,16 +338,53 @@ async function upsertSalary(
     .onConflictDoNothing();
 }
 
+async function ensureTaBatch() {
+  await db.orm
+    .insert(batches)
+    .values({
+      name: TA_BATCH,
+      description: 'Test-only: hiring (ta.hiring) for the TA test person',
+    })
+    .onConflictDoNothing();
+  const rows = await db.orm
+    .select()
+    .from(batches)
+    .where(eq(batches.name, TA_BATCH))
+    .limit(1);
+  for (const grant of TA_GRANTS) {
+    for (const action of grant.actions) {
+      await db.orm
+        .insert(batchGrants)
+        .values({
+          batchId: rows[0]!.id,
+          moduleKey: grant.moduleKey,
+          action,
+          scope: grant.scope,
+        })
+        .onConflictDoNothing();
+    }
+  }
+}
+
 async function main() {
   if (env.nodeEnv === 'production') {
     throw new Error('seed-test-employees is test data — refusing to run in production');
   }
 
-  const owner = await findEmployeeByEmail(env.auth.ownerClaimEmail.toLowerCase());
-  if (!owner)
-    throw new Error('Owner not found — claim the org before seeding test people');
-
   const passwordHash = await bcrypt.hash(TEST_PASSWORD, BCRYPT_ROUNDS);
+
+  // A fresh test database has no Owner yet: claim the org here (the same row
+  // POST /auth/claim-org creates) so the seeds run in one go.
+  const ownerEmail = env.auth.ownerClaimEmail.toLowerCase();
+  const authRepo = createAuthRepository(db);
+  if (!(await authRepo.ownerExists())) {
+    await authRepo.createOwner({ email: ownerEmail, name: 'Test Admin', passwordHash });
+    logger.info({ email: ownerEmail }, 'Org claimed for the test roster');
+  }
+  const owner = await findEmployeeByEmail(ownerEmail);
+  if (!owner) throw new Error(`Owner ${ownerEmail} not found after claiming the org`);
+
+  await ensureTaBatch();
   let created = 0;
 
   for (const person of ROSTER) {

@@ -13,6 +13,7 @@ import type {
   DeclineRequestInput,
   MarkInput,
   OfferRequestInput,
+  UpdateSlotInput,
 } from './openDoor.schema.js';
 import { createOpenDoorService } from './openDoor.service.js';
 
@@ -55,6 +56,10 @@ export const openDoorController = {
   createSlot: async (req: Request, res: Response): Promise<void> => {
     const input: CreateSlotInput = req.body;
     res.status(201).json(await service(req).createSlot(input, actor(req)));
+  },
+  updateSlot: async (req: Request, res: Response): Promise<void> => {
+    const input: UpdateSlotInput = req.body;
+    res.json(await service(req).updateSlot(requireId(req), input, actor(req)));
   },
   cancelSlot: async (req: Request, res: Response): Promise<void> => {
     res.json(await service(req).cancelSlot(requireId(req), actor(req)));

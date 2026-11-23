@@ -3,10 +3,7 @@ import { authenticate } from '../../middleware/authenticate.js';
 import { requireAccess } from '../../middleware/authorize.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { assetSetupController } from './asset-setup.controller.js';
-import {
-  createCategorySchema,
-  updateCategorySchema,
-} from './asset-setup.schema.js';
+import { createCategorySchema, updateCategorySchema } from './asset-setup.schema.js';
 
 /**
  * OPS setup — mounted at /api/v1/asset-setup (grant: ops.locations, shown as

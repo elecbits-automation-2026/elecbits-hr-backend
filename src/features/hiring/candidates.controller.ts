@@ -178,17 +178,23 @@ export const candidatesController = {
 
   logActivity: async (req: Request, res: Response): Promise<void> => {
     const input: LogActivityInput = req.body;
-    res.status(201).json(await service(req).logActivity(req.params.id!, input, actor(req)));
+    res
+      .status(201)
+      .json(await service(req).logActivity(req.params.id!, input, actor(req)));
   },
 
   schedule: async (req: Request, res: Response): Promise<void> => {
     const input: ScheduleInterviewInput = req.body;
-    res.json(await service(req).schedule(req.params.id!, roundParam(req), input, actor(req)));
+    res.json(
+      await service(req).schedule(req.params.id!, roundParam(req), input, actor(req)),
+    );
   },
 
   endSlot: async (req: Request, res: Response): Promise<void> => {
     const input: EndInterviewSlotInput = req.body;
-    res.json(await service(req).endSlot(req.params.id!, roundParam(req), input, actor(req)));
+    res.json(
+      await service(req).endSlot(req.params.id!, roundParam(req), input, actor(req)),
+    );
   },
 
   myInterviews: async (req: Request, res: Response): Promise<void> => {

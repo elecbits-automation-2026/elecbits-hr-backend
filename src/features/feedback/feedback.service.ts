@@ -56,7 +56,9 @@ export const createFeedbackService = (deps: {
       target.leaveApprover === actor.actorEmployeeId;
     if (!inChain) {
       // HR stands in for people its grant reaches (Phase 3).
-      if (!(await authz.reaches(actor.actorEmployeeId, 'hrbp.people', 'update', target.id))) {
+      if (
+        !(await authz.reaches(actor.actorEmployeeId, 'hrbp.people', 'update', target.id))
+      ) {
         throw createError(403, "You are not in this person's reporting chain", {
           code: 'NOT_AN_APPROVER',
         });
@@ -74,7 +76,10 @@ export const createFeedbackService = (deps: {
     (await repo.listByAuthor(authorId)).map(toNote);
 
   /** The person's notes, for their RM or HR (hrbp.people read reach). */
-  const history = async (employeeId: string, viewerId: string): Promise<NoteHistoryDto[]> => {
+  const history = async (
+    employeeId: string,
+    viewerId: string,
+  ): Promise<NoteHistoryDto[]> => {
     await createRmOrHrGate(authz)(viewerId, employeeId, {
       moduleKey: 'hrbp.people',
       action: 'read',

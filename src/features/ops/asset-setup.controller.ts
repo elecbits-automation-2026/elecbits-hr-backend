@@ -1,10 +1,7 @@
 import type { Request, Response } from 'express';
 import { actorOf, idParam } from './assets.controller.js';
 import { createAssetSetupRepository } from './asset-setup.repository.js';
-import type {
-  CreateCategoryInput,
-  UpdateCategoryInput,
-} from './asset-setup.schema.js';
+import type { CreateCategoryInput, UpdateCategoryInput } from './asset-setup.schema.js';
 import { createAssetSetupService } from './asset-setup.service.js';
 import { createOpsRepository } from './ops.repository.js';
 

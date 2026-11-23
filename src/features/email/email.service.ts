@@ -63,16 +63,14 @@ export const createEmailService = (deps: {
     now: Date,
   ): Promise<'sent' | 'retry' | 'failed'> => {
     try {
-      await deps
-        .driver()
-        .send(
-          await compose({
-            to: row.toAddress,
-            subject: row.subject,
-            body: row.body,
-            link: row.link,
-          }),
-        );
+      await deps.driver().send(
+        await compose({
+          to: row.toAddress,
+          subject: row.subject,
+          body: row.body,
+          link: row.link,
+        }),
+      );
       await repo.markSent(row.id);
       return 'sent';
     } catch (err) {
@@ -147,8 +145,10 @@ export const createEmailService = (deps: {
     try {
       await deps.driver().send(email);
     } catch (err) {
+      // expose: the Admin needs Google's reason on the card, not "Bad Gateway".
       throw createError(502, `The test email was not sent: ${errorText(err)}`, {
         code: 'EMAIL_SEND_FAILED',
+        expose: true,
       });
     }
     return { sentTo: email.to, driver: config.driver };

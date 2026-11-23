@@ -152,9 +152,15 @@ export const payslipLines = (slip: PayslipDto) => {
     ['Health insurance', slip.healthInsurance],
     ['CNPS', slip.cnpsEmployer],
     ['Other deduction', slip.otherDeduction],
-    [slip.exitId ? 'Loan / advance balance recovered' : 'Loan / advance EMI', slip.loanEmi],
+    [
+      slip.exitId ? 'Loan / advance balance recovered' : 'Loan / advance EMI',
+      slip.loanEmi,
+    ],
     ['Notice shortfall recovered', slip.noticeRecovery],
-    [`Sick leave without a certificate (${slip.sickLopDays} days)`, slip.sickLopDeduction],
+    [
+      `Sick leave without a certificate (${slip.sickLopDays} days)`,
+      slip.sickLopDeduction,
+    ],
     ['Recoveries (full & final)', slip.fnfRecovery],
     ...slip.corrections
       .filter((c) => c.amount < 0)
@@ -165,7 +171,8 @@ export const payslipLines = (slip: PayslipDto) => {
     rows.filter(([, v], i) => i < fixed || v !== 0);
   const e = keep(earnings, 5);
   const d = keep(deductions, 4);
-  const sum = (rows: Row[]) => Math.round(rows.reduce((a, [, v]) => a + v, 0) * 100) / 100;
+  const sum = (rows: Row[]) =>
+    Math.round(rows.reduce((a, [, v]) => a + v, 0) * 100) / 100;
   return { earnings: e, deductions: d, totalEarnings: sum(e), totalDeductions: sum(d) };
 };
 
@@ -217,7 +224,11 @@ export const renderPayslipPdf = (input: PayslipPdfInput): Promise<Buffer> =>
       );
       doc.roundedRect(left + 8, 48, 48, 48, 6).fill('#ffffff');
       try {
-        doc.image(data, left + 12, 52, { fit: [40, 40], align: 'center', valign: 'center' });
+        doc.image(data, left + 12, 52, {
+          fit: [40, 40],
+          align: 'center',
+          valign: 'center',
+        });
         textX = left + 66;
       } catch {
         // Undecodable image: paint the tile back over with the band colour.
@@ -279,7 +290,11 @@ export const renderPayslipPdf = (input: PayslipPdfInput): Promise<Buffer> =>
     facts.forEach(([k, v], i) => {
       const x = left + (i % 2) * colW;
       const y = gridTop + Math.floor(i / 2) * rowH;
-      doc.font('Helvetica').fontSize(8.5).fillColor(muted).text(k, x + 8, y + 5, { width: 100 });
+      doc
+        .font('Helvetica')
+        .fontSize(8.5)
+        .fillColor(muted)
+        .text(k, x + 8, y + 5, { width: 100 });
       doc
         .font('Helvetica-Bold')
         .fillColor(ink)
@@ -339,12 +354,18 @@ export const renderPayslipPdf = (input: PayslipPdfInput): Promise<Buffer> =>
     ).forEach(([label, value], side) => {
       const x = left + side * half;
       doc.text(label, x + 8, totalsY + 6, { width: labelW });
-      doc.text(amount(value), x + half - amtW - 8, totalsY + 6, { width: amtW, align: 'right' });
+      doc.text(amount(value), x + half - amtW - 8, totalsY + 6, {
+        width: amtW,
+        align: 'right',
+      });
     });
     const tableBottom = totalsY + 20;
     doc.lineWidth(0.6).strokeColor(line);
     doc.rect(left, tableTop, width, tableBottom - tableTop).stroke();
-    doc.moveTo(left + half, tableTop).lineTo(left + half, tableBottom).stroke();
+    doc
+      .moveTo(left + half, tableTop)
+      .lineTo(left + half, tableBottom)
+      .stroke();
 
     // ── net pay box
     const netTop = tableBottom + 14;
@@ -385,7 +406,9 @@ export const renderPayslipPdf = (input: PayslipPdfInput): Promise<Buffer> =>
     }
     if (Math.abs(lines.totalEarnings - lines.totalDeductions - slip.finalPay) > 0.01) {
       // Only when deductions exceeded the month's salary (net is floored at 0).
-      notes.push('Deductions above this month’s salary were capped; net pay cannot go below zero.');
+      notes.push(
+        'Deductions above this month’s salary were capped; net pay cannot go below zero.',
+      );
     }
     doc.font('Helvetica').fontSize(8).fillColor(muted);
     for (const n of notes) {

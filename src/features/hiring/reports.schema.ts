@@ -3,7 +3,10 @@ import { z } from '../../shared/zod.js';
 /** A period: from / to dates, both inclusive. */
 export const reportPeriodQuery = z
   .object({ from: z.string().date(), to: z.string().date() })
-  .refine((v) => v.from <= v.to, { message: '"from" must be on or before "to"', path: ['to'] });
+  .refine((v) => v.from <= v.to, {
+    message: '"from" must be on or before "to"',
+    path: ['to'],
+  });
 
 /**
  * One role × SPOC row of the TA tracker (workflow deck slides 14–16), counted

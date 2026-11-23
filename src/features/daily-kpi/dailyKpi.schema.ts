@@ -54,6 +54,8 @@ export const dailyKpiRowSchema = z
       count: z.number().int(),
       atRisk: z.number().int(),
       attainment: z.number().int().nullable(),
+      /** Goals whose progress the person moved on the date (from the audit log). */
+      moved: z.number().int(),
     }),
     targets: z.object({
       kpi: z.string().nullable(),

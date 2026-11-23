@@ -38,6 +38,18 @@ const isDisposed = (s: AssetRow['status']) =>
   (DISPOSED_STATUSES as readonly string[]).includes(s);
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A warranty can't end before the asset was bought. */
+const requireWarrantyAfterPurchase = (
+  purchasedOn: string | null | undefined,
+  warrantyUntil: string | null | undefined,
+): void => {
+  if (purchasedOn && warrantyUntil && warrantyUntil < purchasedOn) {
+    throw createError(422, 'The warranty end date is before the purchase date', {
+      code: 'WARRANTY_BEFORE_PURCHASE',
+    });
+  }
+};
+
 /**
  * The asset register (OPS, user decisions 2026-10-15). Every asset sits in a
  * punch zone and may also be held by one person (`assigned`). OPS issues,
@@ -211,6 +223,21 @@ export const createAssetsService = (deps: {
       });
     }
     planned.add(code);
+    requireWarrantyAfterPurchase(input.purchasedOn, input.warrantyUntil);
+    const serial = input.serialNo?.trim() || null;
+    if (serial) {
+      const key = `serial:${category.id}:${serial.toLowerCase()}`;
+      if (planned.has(key) || (await ops.serialTaken(category.id, serial))) {
+        throw createError(
+          409,
+          `Serial number ${serial} is already on another ${category.name}`,
+          {
+            code: 'SERIAL_TAKEN',
+          },
+        );
+      }
+      planned.add(key);
+    }
     const holder = input.holderId ? await liveEmployee(input.holderId) : null;
     const dueOn = holder ? loanDue(category, input.loanDueOn) : null;
     const values = {
@@ -223,7 +250,7 @@ export const createAssetsService = (deps: {
       loanDueOn: dueOn,
       make: input.make ?? null,
       model: input.model ?? null,
-      serialNo: input.serialNo ?? null,
+      serialNo: serial,
       purchasedOn: input.purchasedOn ?? null,
       purchaseCost: input.purchaseCost == null ? null : String(input.purchaseCost),
       vendor: input.vendor ?? null,
@@ -366,6 +393,26 @@ export const createAssetsService = (deps: {
       throw createError(409, `Asset code ${code} is already used`, {
         code: 'CODE_TAKEN',
       });
+    }
+    requireWarrantyAfterPurchase(
+      input.purchasedOn !== undefined ? input.purchasedOn : a.purchasedOn,
+      input.warrantyUntil !== undefined ? input.warrantyUntil : a.warrantyUntil,
+    );
+    const serial =
+      input.serialNo !== undefined ? input.serialNo?.trim() || null : a.serialNo;
+    const categoryId = input.categoryId ?? a.categoryId;
+    if (
+      serial &&
+      (input.serialNo !== undefined || input.categoryId !== undefined) &&
+      (await ops.serialTaken(categoryId, serial, id))
+    ) {
+      throw createError(
+        409,
+        `Serial number ${serial} is already on another asset of this category`,
+        {
+          code: 'SERIAL_TAKEN',
+        },
+      );
     }
     const { purchaseCost, assetCode: _code, ...rest } = input;
     return applyOrConflict(

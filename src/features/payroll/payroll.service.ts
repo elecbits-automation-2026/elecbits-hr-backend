@@ -1,5 +1,5 @@
 import createError from 'http-errors';
-import { hasOrgScope } from '../../shared/helpers/helpers.js';
+import { hasOrgScope, localDateOf } from '../../shared/helpers/helpers.js';
 import { EL_BALANCE_CAP, accruedAllocation } from '../../shared/constants/constants.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import type { AttendanceService } from '../attendance/attendance.service.js';
@@ -224,7 +224,11 @@ const esicRuleFor = (eligible: boolean | null, policy: EsicPolicy): EsicRule | n
  * changed payroll.ptStates slab when it is next edited or finalized. ESIC
  * works the same way — eligibility is snapshotted, the rates are live.
  */
-export const compute = (input: ComputeInput, pt: PtRule | null, esic: EsicRule | null) => {
+export const compute = (
+  input: ComputeInput,
+  pt: PtRule | null,
+  esic: EsicRule | null,
+) => {
   const monthlyGross = round2(input.ctc / 12);
   const daysPaid = Math.max(0, SHEET_DAY_BASE - input.lopDays);
   const prorated = round2((monthlyGross / SHEET_DAY_BASE) * daysPaid);
@@ -449,7 +453,9 @@ const claimsOn = (
   claims
     .filter(
       (c) =>
-        run.status !== 'draft' && c.employeeId === slip.employeeId && c.paidRunId === run.id,
+        run.status !== 'draft' &&
+        c.employeeId === slip.employeeId &&
+        c.paidRunId === run.id,
     )
     .map((c) => ({
       id: c.id,
@@ -571,7 +577,8 @@ export const createPayrollService = (deps: {
     const after =
       exit && exit.last_working_day.slice(0, 7) === month
         ? round1(
-            (SHEET_DAY_BASE * (daysInMonth - Number(exit.last_working_day.slice(8, 10)))) /
+            (SHEET_DAY_BASE *
+              (daysInMonth - Number(exit.last_working_day.slice(8, 10)))) /
               daysInMonth,
           )
         : 0;
@@ -584,13 +591,19 @@ export const createPayrollService = (deps: {
         ? { el: 0, sl: 0, uncovered: absent }
         : splitAbsence(absent, remaining, order);
     return {
-      lopDays: Math.min(SHEET_DAY_BASE, round1(split.uncovered + unpaid + after + before)),
+      lopDays: Math.min(
+        SHEET_DAY_BASE,
+        round1(split.uncovered + unpaid + after + before),
+      ),
       split,
     };
   };
 
   /** F&F lines for a settleable exit (null when it can't ride this run). */
-  const fnfLinesFor = async (t: Touching | undefined, ctc: number): Promise<FnfLines | null> => {
+  const fnfLinesFor = async (
+    t: Touching | undefined,
+    ctc: number,
+  ): Promise<FnfLines | null> => {
     if (!t?.settleable) return null;
     const exit = await exits.find(t.exit_id);
     return exit ? exits.fnfFor(exit, ctc) : null;
@@ -703,11 +716,16 @@ export const createPayrollService = (deps: {
     // A leaver from an earlier month only comes back for a ready F&F.
     const wanted = (t: Touching | undefined) =>
       !t || t.last_working_day >= monthStart || t.settleable;
-    const base = (await repo.listActiveWithSalary()).filter((p) => wanted(exitBy.get(p.id)));
+    const base = (await repo.listActiveWithSalary()).filter((p) =>
+      wanted(exitBy.get(p.id)),
+    );
     const extraIds = touching
       .filter((t) => wanted(t) && !base.some((p) => p.id === t.employee_id))
       .map((t) => t.employee_id);
-    const people = [...base, ...(extraIds.length ? await repo.listActiveWithSalary(extraIds) : [])];
+    const people = [
+      ...base,
+      ...(extraIds.length ? await repo.listActiveWithSalary(extraIds) : []),
+    ];
     const lastDays = new Map(
       touching
         .filter((t) => t.last_working_day.slice(0, 7) === month)
@@ -802,7 +820,8 @@ export const createPayrollService = (deps: {
         loanEmi: loanDue.get(p.id)?.total ?? 0,
       };
       const esicEligible = esicPolicy.enabled
-        ? (esicDecided.get(p.id) ?? esicEligibleFor(input.ctc, input.basicPct, esicPolicy))
+        ? (esicDecided.get(p.id) ??
+          esicEligibleFor(input.ctc, input.basicPct, esicPolicy))
         : null;
       const c = compute(
         input,
@@ -905,6 +924,12 @@ export const createPayrollService = (deps: {
     input: CreateRunInput,
     actor: ActorContext,
   ): Promise<GenerateRunResultDto> => {
+    // Never a month that hasn't started (IST): there is nothing to pay yet.
+    if (input.month > localDateOf(new Date()).slice(0, 7)) {
+      throw createError(422, 'Payroll can only be run for this month or earlier', {
+        code: 'FUTURE_MONTH',
+      });
+    }
     if (await repo.findRunByMonth(input.month)) {
       throw createError(409, 'A payroll run already exists for this month', {
         code: 'RUN_EXISTS',
@@ -1027,9 +1052,21 @@ export const createPayrollService = (deps: {
    * rewritten, then everything locks. Slips whose LOP was manually overridden
    * are passed through untouched.
    */
-  const finalize = async (id: string, actor: ActorContext): Promise<PayrollRunDto> => {
+  const finalize = async (
+    id: string,
+    actor: ActorContext,
+    opts: { early?: boolean } = {},
+  ): Promise<PayrollRunDto> => {
     const run = await requireRun(id);
     requireStatus(run, 'draft');
+    // Finalizing locks LOP: before the month's last day that needs an explicit yes.
+    if (!opts.early && localDateOf(new Date()) < monthEndOf(run.month)) {
+      throw createError(
+        409,
+        `${run.month} isn't over until ${monthEndOf(run.month)} — finalizing now locks attendance and leave for the rest of the month`,
+        { code: 'MONTH_NOT_OVER' },
+      );
+    }
 
     // M7 guard: a request still partially approved for this month would be
     // auto-approved on a re-pull — finalizing past it would charge those days
@@ -1065,7 +1102,11 @@ export const createPayrollService = (deps: {
     );
     const [months, remaining, statuses, joined] = await Promise.all([
       attendance.peopleMonth(
-        slips.map((s) => ({ id: s.employeeId, name: s.employeeName, employeeCode: s.employeeCode })),
+        slips.map((s) => ({
+          id: s.employeeId,
+          name: s.employeeName,
+          employeeCode: s.employeeCode,
+        })),
         run.month,
         lastDays,
       ),
@@ -1085,9 +1126,13 @@ export const createPayrollService = (deps: {
       const t = exitBy.get(slip.employeeId);
       const exit = await exits.find(slip.exitId!);
       if (slip.employeeId === actor.actorEmployeeId) {
-        throw createError(403, 'Someone else must finalize the run that carries your own F&F', {
-          code: 'NO_SELF_SETTLEMENT',
-        });
+        throw createError(
+          403,
+          'Someone else must finalize the run that carries your own F&F',
+          {
+            code: 'NO_SELF_SETTLEMENT',
+          },
+        );
       }
       if (!exit || exit.status !== 'relieved') {
         throw createError(
@@ -1179,7 +1224,9 @@ export const createPayrollService = (deps: {
           esicEmployer: String(c.esicEmployer),
           professionalTax: String(c.professionalTax),
           loanEmi: String(loanDue.get(slip.employeeId)?.total ?? 0),
-          ...(fnf ? { leaveEncashment: String(fnf.leaveEncashment), ...fnfColumns(fnf) } : {}),
+          ...(fnf
+            ? { leaveEncashment: String(fnf.leaveEncashment), ...fnfColumns(fnf) }
+            : {}),
         } as Record<string, string | number>,
         earningsTotal: String(c.earningsTotal),
         deductionsTotal: String(c.deductionsTotal),
@@ -1202,7 +1249,13 @@ export const createPayrollService = (deps: {
     }
 
     try {
-      const updated = await repo.finalizeRun(run, updates, actor, settleExits, loanPayments);
+      const updated = await repo.finalizeRun(
+        run,
+        updates,
+        actor,
+        settleExits,
+        loanPayments,
+      );
       const { run: dto } = await getRun(updated.id);
       return dto;
     } catch (err) {
@@ -1214,9 +1267,13 @@ export const createPayrollService = (deps: {
         );
       }
       if ((err as { code?: string }).code === 'EXIT_CONFLICT') {
-        throw createError(409, 'An exit changed while finalizing — re-pull, then finalize', {
-          code: 'EXIT_CONFLICT',
-        });
+        throw createError(
+          409,
+          'An exit changed while finalizing — re-pull, then finalize',
+          {
+            code: 'EXIT_CONFLICT',
+          },
+        );
       }
       if ((err as { code?: string }).code === 'AUTO_LEAVE_CONFLICT') {
         throw createError(409, 'Leave balances changed while finalizing — retry', {
@@ -1514,7 +1571,11 @@ export const createPayrollService = (deps: {
       settings.effective('payroll.payslipHeader'),
     ]);
     const file = await renderPayslipPdf({
-      company: { name: company.companyName, address: company.address, logo: company.logo },
+      company: {
+        name: company.companyName,
+        address: company.address,
+        logo: company.logo,
+      },
       month,
       runStatus,
       employee: {
@@ -1590,7 +1651,11 @@ export const createPayrollService = (deps: {
         fnfDeductions: fnfDeductionsOf(lines),
         loanEmi: num(slip.loanEmi),
       },
-      ptRuleFor(slip.ptState, draft.month, (await settings.effective('payroll.ptStates')).states),
+      ptRuleFor(
+        slip.ptState,
+        draft.month,
+        (await settings.effective('payroll.ptStates')).states,
+      ),
       esicRuleFor(slip.esicEligible, esicPolicyOf(await loadPolicy())),
     );
     await repo
@@ -1627,7 +1692,9 @@ export const createPayrollService = (deps: {
   ) => {
     const exit = await exitForRecoveries(exitId);
     if (exit.employeeId === actor.actorEmployeeId) {
-      throw createError(403, 'You cannot work your own F&F', { code: 'NO_SELF_SETTLEMENT' });
+      throw createError(403, 'You cannot work your own F&F', {
+        code: 'NO_SELF_SETTLEMENT',
+      });
     }
     if (exit.status !== 'accepted' && exit.status !== 'relieved') {
       throw createError(409, `This exit is ${exit.status}`, { code: 'EXIT_CLOSED' });
@@ -1637,7 +1704,11 @@ export const createPayrollService = (deps: {
     return recoveries(exitId);
   };
 
-  const removeRecovery = async (exitId: string, recoveryId: string, actor: ActorContext) => {
+  const removeRecovery = async (
+    exitId: string,
+    recoveryId: string,
+    actor: ActorContext,
+  ) => {
     const exit = await exitForRecoveries(exitId);
     if (exit.status !== 'accepted' && exit.status !== 'relieved') {
       throw createError(409, `This exit is ${exit.status}`, { code: 'EXIT_CLOSED' });

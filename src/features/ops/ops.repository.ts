@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   assetCategories,
@@ -263,6 +263,25 @@ export const createOpsRepository = (db: DbClient) => ({
         .from(assets)
         .where(eq(assets.assetCode, code))
         .limit(1)
+    ).some((r) => r.id !== exceptId),
+
+  /** Is this serial already on another asset of the category (case-insensitive)? */
+  serialTaken: async (
+    categoryId: string,
+    serialNo: string,
+    exceptId?: string,
+  ): Promise<boolean> =>
+    (
+      await db.orm
+        .select({ id: assets.id })
+        .from(assets)
+        .where(
+          and(
+            eq(assets.categoryId, categoryId),
+            sql`lower(${assets.serialNo}) = lower(${serialNo})`,
+          ),
+        )
+        .limit(2)
     ).some((r) => r.id !== exceptId),
 
   applyAssetChange: (change: AssetChange, actor: ActorContext): Promise<boolean> =>

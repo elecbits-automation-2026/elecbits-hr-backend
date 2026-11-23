@@ -199,7 +199,9 @@ export const registerHiringDocs = (registry: OpenAPIRegistry): void => {
       200: jsonResponse('Assigned', requisitionSchema),
       403: errorResponse("Not this line's TA RM"),
       409: errorResponse('Closed position, same recruiter, or closed quarter'),
-      422: errorResponse('Recruiter inactive, not a direct report, or not in the TA batch'),
+      422: errorResponse(
+        'Recruiter inactive, not a direct report, or not in the TA batch',
+      ),
     },
   });
 
@@ -207,7 +209,8 @@ export const registerHiringDocs = (registry: OpenAPIRegistry): void => {
     method: 'post',
     path: '/api/v1/hiring/positions/{id}/sources',
     tags: ['Hiring'],
-    summary: "Log a sourcing channel activated for a position (its recruiter / the line's TA RM)",
+    summary:
+      "Log a sourcing channel activated for a position (its recruiter / the line's TA RM)",
     security,
     request: { params: idParam, body: jsonBody(addSourceSchema) },
     responses: {
@@ -220,7 +223,7 @@ export const registerHiringDocs = (registry: OpenAPIRegistry): void => {
     method: 'get',
     path: '/api/v1/hiring/recruiters',
     tags: ['Hiring'],
-    summary: "TA RM: their reports in the TA batch — who can take a position",
+    summary: 'TA RM: their reports in the TA batch — who can take a position',
     security,
     responses: {
       200: jsonResponse('Recruiters', z.array(recruiterOptionSchema)),

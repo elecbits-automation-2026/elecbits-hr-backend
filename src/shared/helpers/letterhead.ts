@@ -44,7 +44,11 @@ export const drawLetterhead = (
     width: textW,
   });
   if (company.address) {
-    doc.font('Helvetica').fontSize(9).fillColor(muted).text(company.address, { width: textW });
+    doc
+      .font('Helvetica')
+      .fontSize(9)
+      .fillColor(muted)
+      .text(company.address, { width: textW });
   }
   doc.moveDown(1.5);
   doc.y = Math.max(doc.y, logoBottom + 10);

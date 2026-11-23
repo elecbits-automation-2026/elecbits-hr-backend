@@ -66,8 +66,12 @@ export const payslips = orgSchema.table(
 
     // The structure split, snapshotted from the salary record at build
     // (blank record = 50 / 25) so edits and finalize recompute the same.
-    basicPercent: numeric('basic_percent', { precision: 5, scale: 2 }).notNull().default('50'),
-    hraPercent: numeric('hra_percent', { precision: 5, scale: 2 }).notNull().default('25'),
+    basicPercent: numeric('basic_percent', { precision: 5, scale: 2 })
+      .notNull()
+      .default('50'),
+    hraPercent: numeric('hra_percent', { precision: 5, scale: 2 })
+      .notNull()
+      .default('25'),
 
     // Earnings (ERP sheet model): monthly CTC prorated over a fixed 30-day
     // base, split Basic / HRA (per person, default 50 / 25) / LTA 10 /
@@ -100,7 +104,9 @@ export const payslips = orgSchema.table(
     // the blended wage-cap formula; PT by the snapshotted location rule; TDS
     // and the rest are per-month entries, editable in draft.
     pf: numeric('pf', { precision: 12, scale: 2 }).notNull().default('0'),
-    pfEmployer: numeric('pf_employer', { precision: 12, scale: 2 }).notNull().default('0'),
+    pfEmployer: numeric('pf_employer', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
     tds: numeric('tds', { precision: 12, scale: 2 }).notNull().default('0'),
     professionalTax: numeric('professional_tax', { precision: 12, scale: 2 })
       .notNull()
@@ -115,8 +121,12 @@ export const payslips = orgSchema.table(
     // employer share inside CTC like employer PF. Eligibility is fixed per
     // contribution period (Apr–Sep, Oct–Mar), so it is SNAPSHOTTED here and
     // inherited by every later slip in the same period; null = ESIC was off.
-    esicEmployee: numeric('esic_employee', { precision: 12, scale: 2 }).notNull().default('0'),
-    esicEmployer: numeric('esic_employer', { precision: 12, scale: 2 }).notNull().default('0'),
+    esicEmployee: numeric('esic_employee', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
+    esicEmployer: numeric('esic_employer', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
     esicEligible: boolean('esic_eligible'),
     esicPeriodStart: date('esic_period_start'),
     // Loan EMI / recovery / other deductions (sheet column AA).
@@ -126,10 +136,14 @@ export const payslips = orgSchema.table(
     healthInsurance: numeric('health_insurance', { precision: 12, scale: 2 })
       .notNull()
       .default('0'),
-    cnpsEmployer: numeric('cnps_employer', { precision: 12, scale: 2 }).notNull().default('0'),
+    cnpsEmployer: numeric('cnps_employer', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
 
     // Earnings-side per-month adjustments (sheet: final pay = net + these).
-    reimbursement: numeric('reimbursement', { precision: 12, scale: 2 }).notNull().default('0'),
+    reimbursement: numeric('reimbursement', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
     performanceBonus: numeric('performance_bonus', { precision: 12, scale: 2 })
       .notNull()
       .default('0'),
@@ -138,7 +152,9 @@ export const payslips = orgSchema.table(
     recognitionBonus: numeric('recognition_bonus', { precision: 12, scale: 2 })
       .notNull()
       .default('0'),
-    otherBonus: numeric('other_bonus', { precision: 12, scale: 2 }).notNull().default('0'),
+    otherBonus: numeric('other_bonus', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
     // Signed total of post-finalize corrections to EARLIER slips carried by
     // this one (+ pays more, − recovers). Not editable: it follows
     // payslip_corrections (Phase 3).
@@ -161,11 +177,15 @@ export const payslips = orgSchema.table(
     noticeRecovery: numeric('notice_recovery', { precision: 12, scale: 2 })
       .notNull()
       .default('0'),
-    sickLopDays: numeric('sick_lop_days', { precision: 5, scale: 1 }).notNull().default('0'),
+    sickLopDays: numeric('sick_lop_days', { precision: 5, scale: 1 })
+      .notNull()
+      .default('0'),
     sickLopDeduction: numeric('sick_lop_deduction', { precision: 12, scale: 2 })
       .notNull()
       .default('0'),
-    fnfRecovery: numeric('fnf_recovery', { precision: 12, scale: 2 }).notNull().default('0'),
+    fnfRecovery: numeric('fnf_recovery', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
     // Loan / advance EMIs due this month (the whole balance on an F&F slip).
     loanEmi: numeric('loan_emi', { precision: 12, scale: 2 }).notNull().default('0'),
 

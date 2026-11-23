@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import jwt from 'jsonwebtoken';
 
@@ -160,7 +160,7 @@ export const createDriveClient = (config: DriveConfig) => {
       Buffer.from(`\r\n--${boundary}--\r\n`),
     ]);
     const res = await authed(
-      `${UPLOAD_URL}?uploadType=multipart&supportsAllDrives=true&fields=id`,
+      `${UPLOAD_URL}?uploadType=multipart&supportsAllDrives=true&fields=id,md5Checksum,size`,
       {
         method: 'POST',
         headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
@@ -169,12 +169,25 @@ export const createDriveClient = (config: DriveConfig) => {
     );
     const made = (await res.json().catch(() => ({}))) as {
       id?: string;
+      md5Checksum?: string;
+      size?: string;
       error?: { message?: string };
     };
     if (!res.ok || !made.id) {
       throw new Error(
         `Drive upload failed (${res.status}): ${made.error?.message ?? ''}`.trim(),
       );
+    }
+    // Trust nothing we can't check: Google reports what it stored. A size or
+    // checksum mismatch trashes the copy and fails the upload, so the caller
+    // never clears the database bytes on a bad copy.
+    const md5 = createHash('md5').update(input.data).digest('hex');
+    if (
+      (made.size !== undefined && Number(made.size) !== input.data.length) ||
+      (made.md5Checksum !== undefined && made.md5Checksum !== md5)
+    ) {
+      await trash(made.id).catch(() => undefined);
+      throw new Error(`Drive upload of "${input.fileName}" did not verify (size/md5)`);
     }
     return made.id;
   };

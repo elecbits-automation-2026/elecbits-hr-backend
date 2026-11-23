@@ -57,7 +57,8 @@ const POLICY_SEED: Array<typeof policies.$inferInsert> = [
     ackRequired: true,
     effectiveFrom: '2026-04-01',
     docUrl: file('1K8gKCLURFm342GViw_8cEU_0o7dzRt2l'),
-    summary: 'How the quarterly performance cycle runs: goals, review, calibration, rating, outcome.',
+    summary:
+      'How the quarterly performance cycle runs: goals, review, calibration, rating, outcome.',
   },
   {
     code: 'band',
@@ -67,7 +68,8 @@ const POLICY_SEED: Array<typeof policies.$inferInsert> = [
     ackRequired: false,
     effectiveFrom: '2026-04-01',
     docUrl: file('1Hd4k7QwBlzYL_ePY4EZ0yCpw1LUaQxyEWjx6aPKmtRA'),
-    summary: 'The L1–L6 ladder, what each band is expected to own, and what moves you up one.',
+    summary:
+      'The L1–L6 ladder, what each band is expected to own, and what moves you up one.',
   },
   {
     code: 'leave',
@@ -115,14 +117,19 @@ const POLICY_SEED: Array<typeof policies.$inferInsert> = [
     version: '2026.1',
     ackRequired: false,
     effectiveFrom: '2026-04-01',
-    summary: 'When a performance improvement plan is opened, what it contains, and how it closes.',
+    summary:
+      'When a performance improvement plan is opened, what it contains, and how it closes.',
   },
 ];
 
 async function main() {
   let inserted = 0;
   for (const row of POLICY_SEED) {
-    const result = await db.orm.insert(policies).values(row).onConflictDoNothing().returning();
+    const result = await db.orm
+      .insert(policies)
+      .values(row)
+      .onConflictDoNothing()
+      .returning();
     if (result.length > 0) inserted += 1;
   }
   logger.info({ inserted, total: POLICY_SEED.length }, 'Policy seed complete');

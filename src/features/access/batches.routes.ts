@@ -20,7 +20,11 @@ export const batchesRoutes = Router();
 
 batchesRoutes.use(authenticate);
 
-batchesRoutes.get('/', requireAccess('access.batches', 'read', { orgOnly: true }), batchesController.list);
+batchesRoutes.get(
+  '/',
+  requireAccess('access.batches', 'read', { orgOnly: true }),
+  batchesController.list,
+);
 // Static path registered before any '/:id' route so it never matches as an id.
 batchesRoutes.get(
   '/modules',

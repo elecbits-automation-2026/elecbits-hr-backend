@@ -6,6 +6,7 @@ import { createSettingsRepository } from '../settings/index.js';
 import { createConcernsRepository } from './concerns.repository.js';
 import type {
   AssignInput,
+  CategoryInput,
   CreateConcernInput,
   DecideInput,
   DeclineInput,
@@ -84,6 +85,11 @@ export const concernsController = {
   assign: async (req: Request, res: Response): Promise<void> => {
     const input: AssignInput = req.body;
     res.json(await service(req).assign(requireId(req), input.ownerId, actor(req)));
+  },
+
+  category: async (req: Request, res: Response): Promise<void> => {
+    const input: CategoryInput = req.body;
+    res.json(await service(req).setCategory(requireId(req), input.category, actor(req)));
   },
 
   severity: async (req: Request, res: Response): Promise<void> => {

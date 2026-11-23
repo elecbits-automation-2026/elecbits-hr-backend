@@ -160,7 +160,12 @@ export const createAttendanceRepository = (db: DbClient) => ({
   zoneUsage: async (
     id: string,
   ): Promise<{ assets: number; stock: number; history: number; people: number }> => {
-    const [row] = await db.query<{ assets: number; stock: number; history: number; people: number }>(
+    const [row] = await db.query<{
+      assets: number;
+      stock: number;
+      history: number;
+      people: number;
+    }>(
       `SELECT
          (SELECT count(*)::int FROM ops.assets WHERE zone_id = $1) AS assets,
          (SELECT count(*)::int FROM ops.stock_levels WHERE zone_id = $1)
@@ -721,6 +726,21 @@ export const createAttendanceRepository = (db: DbClient) => ({
       return row;
     });
   },
+
+  /** Own live (pending / approved) remote-work requests touching [start, end]. */
+  overlappingWfh: async (employeeId: string, startDate: string, endDate: string) =>
+    db.orm
+      .select({ startDate: wfhRequests.startDate, endDate: wfhRequests.endDate })
+      .from(wfhRequests)
+      .where(
+        and(
+          eq(wfhRequests.employeeId, employeeId),
+          inArray(wfhRequests.status, ['pending', 'partially_approved', 'approved']),
+          lte(wfhRequests.startDate, endDate),
+          gte(wfhRequests.endDate, startDate),
+        ),
+      )
+      .limit(1),
 
   insertWfh: async (values: typeof wfhRequests.$inferInsert) => {
     const rows = await db.orm.insert(wfhRequests).values(values).returning();

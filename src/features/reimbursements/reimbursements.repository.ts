@@ -10,6 +10,7 @@ import {
   payrollRuns,
   reimbursementClaims,
 } from '../../db/schema/index.js';
+import { fileColumns } from '../storage/index.js';
 import type { CreateClaimInput, ReimbursementStatus } from './reimbursements.schema.js';
 
 export type ClaimRow = typeof reimbursementClaims.$inferSelect;
@@ -50,7 +51,9 @@ export type ClaimJoinedRow = {
 };
 
 /** The month a claim was approved in: Admin's decision, or PR's for older claims. */
-const approvedMonth = sql<string | null>`to_char(coalesce(${reimbursementClaims.adminDecidedAt}, ${reimbursementClaims.payrollDecidedAt}) AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')`;
+const approvedMonth = sql<
+  string | null
+>`to_char(coalesce(${reimbursementClaims.adminDecidedAt}, ${reimbursementClaims.payrollDecidedAt}) AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')`;
 
 /** The only place the reimbursements feature touches the database. */
 export const createReimbursementsRepository = (db: DbClient) => {
@@ -293,7 +296,13 @@ export const createReimbursementsRepository = (db: DbClient) => {
 
     /** Store (or replace) a claim's receipt, with its audit row. */
     upsertReceipt: async (
-      file: { claimId: string; fileName: string; contentType: string; data: Buffer },
+      file: {
+        claimId: string;
+        fileName: string;
+        contentType: string;
+        data: Buffer;
+        driveFileId?: string | null;
+      },
       actor: ActorContext,
     ): Promise<void> =>
       db.transaction(async (tx) => {
@@ -304,7 +313,7 @@ export const createReimbursementsRepository = (db: DbClient) => {
             fileName: file.fileName,
             contentType: file.contentType,
             sizeBytes: file.data.length,
-            data: file.data,
+            ...fileColumns(file),
             uploadedBy: actor.actorEmployeeId,
           })
           .onConflictDoUpdate({
@@ -313,7 +322,7 @@ export const createReimbursementsRepository = (db: DbClient) => {
               fileName: file.fileName,
               contentType: file.contentType,
               sizeBytes: file.data.length,
-              data: file.data,
+              ...fileColumns(file),
               uploadedBy: actor.actorEmployeeId,
               uploadedAt: new Date(),
             },
@@ -333,6 +342,7 @@ export const createReimbursementsRepository = (db: DbClient) => {
             fileName: claimReceipts.fileName,
             contentType: claimReceipts.contentType,
             data: claimReceipts.data,
+            driveFileId: claimReceipts.driveFileId,
           })
           .from(claimReceipts)
           .where(eq(claimReceipts.claimId, claimId))

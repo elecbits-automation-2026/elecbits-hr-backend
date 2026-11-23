@@ -24,7 +24,9 @@ const main = async (): Promise<void> => {
       text: 'If you can read this, the Gmail API, service account and domain-wide delegation all work.',
       html: '<p>If you can read this, the Gmail API, service account and domain-wide delegation all work.</p>',
     });
-    console.log('OK — sent. Check the inbox (and Spam, in case DKIM is still propagating).');
+    console.log(
+      'OK — sent. Check the inbox (and Spam, in case DKIM is still propagating).',
+    );
   } catch (err) {
     console.error('FAILED to send:');
     console.error(err instanceof Error ? err.message : err);

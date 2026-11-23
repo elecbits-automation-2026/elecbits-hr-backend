@@ -2,6 +2,7 @@ import createError from 'http-errors';
 import { env } from '../../config/env.js';
 import { localDateOf } from '../../shared/helpers/helpers.js';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type { CreateEmployeeInput, EmployeesService } from '../employees/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { CandidatesService } from './candidates.service.js';
@@ -60,8 +61,11 @@ export const createHireService = (deps: {
   const { repo, hiring, settings, applications, transaction } = deps;
 
   const hrHead = async () =>
-    (await hiring.approverHolders((await settings.effective('hiring.hrDepartment')).departmentId))
-      .hr_head;
+    (
+      await hiring.approverHolders(
+        (await settings.effective('hiring.hrDepartment')).departmentId,
+      )
+    ).hr_head;
 
   const find = async (id: string) => {
     const a = await repo.findApplication(id);
@@ -86,10 +90,17 @@ export const createHireService = (deps: {
     a: { recruiter_id: string | null; ta_rm_id: string | null },
     actor: ActorContext,
   ) => {
-    if (actor.actorEmployeeId !== a.recruiter_id && actor.actorEmployeeId !== a.ta_rm_id) {
-      throw createError(403, "Only this position's recruiter or the line's TA RM can do this", {
-        code: 'NOT_POSITION_OWNER',
-      });
+    if (
+      actor.actorEmployeeId !== a.recruiter_id &&
+      actor.actorEmployeeId !== a.ta_rm_id
+    ) {
+      throw createError(
+        403,
+        "Only this position's recruiter or the line's TA RM can do this",
+        {
+          code: 'NOT_POSITION_OWNER',
+        },
+      );
     }
   };
 
@@ -102,8 +113,9 @@ export const createHireService = (deps: {
     }
   };
 
-  const ta = (a: { recruiter_id: string | null; ta_rm_id: string | null }) =>
-    [...new Set([a.recruiter_id, a.ta_rm_id].filter((x): x is string => !!x))];
+  const ta = (a: { recruiter_id: string | null; ta_rm_id: string | null }) => [
+    ...new Set([a.recruiter_id, a.ta_rm_id].filter((x): x is string => !!x)),
+  ];
 
   const checkLetter = (file: { fileName: string; data: Buffer }) =>
     checkUpload(file, ['pdf', 'doc', 'docx'], {
@@ -126,7 +138,9 @@ export const createHireService = (deps: {
   const addDocument = async (id: string, name: string, actor: ActorContext) => {
     assertTa(await find(id), actor);
     if (!(await repo.addDocument(id, name, actor))) {
-      throw createError(409, 'That document is already on the list', { code: 'DUPLICATE' });
+      throw createError(409, 'That document is already on the list', {
+        code: 'DUPLICATE',
+      });
     }
     return documents(id);
   };
@@ -164,28 +178,49 @@ export const createHireService = (deps: {
       throw wrongStage('The offer letter is drafted once every round has passed');
     }
     const contentType = checkLetter(file);
-    await repo.saveOfferLetter(id, { ...file, contentType }, actor);
+    await withStoredFile(
+      DRIVE_FOLDERS.offerLetters,
+      { fileName: `application-${id}-${file.fileName}`, contentType, data: file.data },
+      (driveFileId) =>
+        repo.saveOfferLetter(id, { ...file, contentType, driveFileId }, actor),
+    );
     return applications.one(id);
   };
 
   const offerLetter = async (id: string) => {
     const f = await repo.offerLetter(id);
     if (!f) throw createError(404, 'No offer letter uploaded', { code: 'NOT_FOUND' });
-    return { fileName: f.file_name, contentType: f.content_type, data: f.data };
+    return loadStoredFile({
+      fileName: f.file_name,
+      contentType: f.content_type,
+      data: f.data,
+      driveFileId: f.drive_file_id,
+    });
   };
 
   const signedLetter = async (id: string) => {
     const f = await repo.signedLetter(id);
     if (!f) throw createError(404, 'No signed offer letter yet', { code: 'NOT_FOUND' });
-    return { fileName: f.file_name, contentType: f.content_type, data: f.data };
+    return loadStoredFile({
+      fileName: f.file_name,
+      contentType: f.content_type,
+      data: f.data,
+      driveFileId: f.drive_file_id,
+    });
   };
 
   /** Save the negotiated terms; changing APPROVED terms sends them back to the HR Head. */
-  const saveOfferDraft = async (id: string, input: OfferDraftInput, actor: ActorContext) => {
+  const saveOfferDraft = async (
+    id: string,
+    input: OfferDraftInput,
+    actor: ActorContext,
+  ) => {
     const a = await find(id);
     assertTa(a, actor);
     if (input.joiningDate < localDateOf(new Date())) {
-      throw createError(422, 'The joining date cannot be in the past', { code: 'PAST_DATE' });
+      throw createError(422, 'The joining date cannot be in the past', {
+        code: 'PAST_DATE',
+      });
     }
     const head = await hrHead();
     const res = await repo.saveOfferDraft(
@@ -214,7 +249,9 @@ export const createHireService = (deps: {
     const a = await find(id);
     assertTa(a, actor);
     if (!(await repo.hasOfferLetter(id))) {
-      throw createError(422, 'Upload the draft offer letter first', { code: 'NO_OFFER_LETTER' });
+      throw createError(422, 'Upload the draft offer letter first', {
+        code: 'NO_OFFER_LETTER',
+      });
     }
     const head = await hrHead();
     if (!head) {
@@ -233,7 +270,8 @@ export const createHireService = (deps: {
         email: true,
       },
     ]);
-    if (!ok) throw wrongStage('Draft the CTC and joining date after every round has passed');
+    if (!ok)
+      throw wrongStage('Draft the CTC and joining date after every round has passed');
     return applications.one(id);
   };
 
@@ -251,9 +289,19 @@ export const createHireService = (deps: {
   ) => {
     await assertHrHead(actor);
     const a = await find(id);
-    if (a.stage !== 'decision') throw wrongStage('Only an offer waiting for approval is signed');
+    if (a.stage !== 'decision')
+      throw wrongStage('Only an offer waiting for approval is signed');
     const contentType = checkLetter(file);
-    await repo.saveSignedLetter(id, { ...file, contentType }, actor);
+    await withStoredFile(
+      DRIVE_FOLDERS.signedOffers,
+      {
+        fileName: `application-${id}-signed-${file.fileName}`,
+        contentType,
+        data: file.data,
+      },
+      (driveFileId) =>
+        repo.saveSignedLetter(id, { ...file, contentType, driveFileId }, actor),
+    );
     return applications.one(id);
   };
 
@@ -261,7 +309,9 @@ export const createHireService = (deps: {
     await assertHrHead(actor);
     const a = await find(id);
     if (!(await repo.hasSignedLetter(id))) {
-      throw createError(422, 'Upload the signed offer letter first', { code: 'NOT_SIGNED' });
+      throw createError(422, 'Upload the signed offer letter first', {
+        code: 'NOT_SIGNED',
+      });
     }
     const ok = await repo.approveOffer(id, actor, [
       {
@@ -314,7 +364,8 @@ export const createHireService = (deps: {
         },
       },
     ]);
-    if (!ok) throw wrongStage('Only an offer the HR Head approved and signed can be shared');
+    if (!ok)
+      throw wrongStage('Only an offer the HR Head approved and signed can be shared');
     return applications.one(id);
   };
 
@@ -341,7 +392,15 @@ export const createHireService = (deps: {
           ]
         : [];
     if (
-      !(await repo.endOffer(id, to, reason, a.position_id, POSITION_PROGRESS, actor, bells))
+      !(await repo.endOffer(
+        id,
+        to,
+        reason,
+        a.position_id,
+        POSITION_PROGRESS,
+        actor,
+        bells,
+      ))
     ) {
       throw wrongStage('Only an open offer can be declined or withdrawn');
     }
@@ -450,9 +509,13 @@ export const createHireService = (deps: {
     await assertHrbp(actor);
     const a = await find(id);
     if (a.joining_date && a.joining_date > localDateOf(new Date())) {
-      throw createError(409, `They join on ${a.joining_date} — confirm on or after that day`, {
-        code: 'NOT_YET',
-      });
+      throw createError(
+        409,
+        `They join on ${a.joining_date} — confirm on or after that day`,
+        {
+          code: 'NOT_YET',
+        },
+      );
     }
     const ok = await repo.confirmJoined(id, actor, [
       {

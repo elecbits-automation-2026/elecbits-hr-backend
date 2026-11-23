@@ -1,0 +1,51 @@
+name: Uptime check
+
+# Every 15 minutes, ask Production's readiness probe whether the API is up AND
+# the database answers. A failed run makes GitHub email the people who watch
+# this repository's Actions (Settings → Notifications → Actions: "Send
+# notifications for failed workflows only").
+#
+# Configure once: Settings → Secrets and variables → Actions → Variables →
+#   PROD_HEALTH_URL = https://<api host>/health/ready
+# Until the variable exists the job skips cleanly (green), so this file is safe
+# to merge before the URL is known.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe /health/ready
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PROD_HEALTH_URL: ${{ vars.PROD_HEALTH_URL }}
+    steps:
+      - name: Skip when no URL is configured
+        if: env.PROD_HEALTH_URL == ''
+        run: echo "PROD_HEALTH_URL is not set — nothing to check."
+
+      # Three tries 20 s apart, so one dropped packet or a deploy restart
+      # doesn't page anybody; a real outage fails all three.
+      - name: Check readiness
+        if: env.PROD_HEALTH_URL != ''
+        run: |
+          set -Eeuo pipefail
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o body.json -w '%{http_code}' --max-time 15 "$PROD_HEALTH_URL" || echo 000)
+            echo "attempt $attempt: HTTP $code $(cat body.json 2>/dev/null || true)"
+            if [[ "$code" == "200" ]]; then
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::Production readiness probe failed 3 times ($PROD_HEALTH_URL)"
+          exit 1

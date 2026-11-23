@@ -1,6 +1,7 @@
 import createError from 'http-errors';
 import { addDaysIso, localDateOf } from '../../shared/helpers/helpers.js';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type {
   ApplicationRow,
   CandidateRow,
@@ -348,7 +349,16 @@ export const createCandidatesService = (deps: {
       maxBytes: CV_MAX_BYTES,
       what: 'The CV',
     });
-    await repo.saveCv(id, { ...file, contentType: type }, actor);
+    await withStoredFile(
+      DRIVE_FOLDERS.cvs,
+      {
+        fileName: `candidate-${id}-${file.fileName}`,
+        contentType: type,
+        data: file.data,
+      },
+      (driveFileId) =>
+        repo.saveCv(id, { ...file, contentType: type, driveFileId }, actor),
+    );
     return candidate(id);
   };
 
@@ -368,7 +378,12 @@ export const createCandidatesService = (deps: {
     }
     const file = await repo.cv(id);
     if (!file) throw createError(404, 'No CV uploaded', { code: 'CV_NOT_FOUND' });
-    return { fileName: file.file_name, contentType: file.content_type, data: file.data };
+    return loadStoredFile({
+      fileName: file.file_name,
+      contentType: file.content_type,
+      data: file.data,
+      driveFileId: file.drive_file_id,
+    });
   };
 
   const one = async (applicationId: string) =>

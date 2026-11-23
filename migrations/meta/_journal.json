@@ -652,6 +652,20 @@
       "when": 1794998078867,
       "tag": "0092_concerns-owner-severity",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1795412070866,
+      "tag": "0093_parity-nov-23",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1795415345721,
+      "tag": "0094_e2e-report-fixes",
+      "breakpoints": true
     }
   ]
 }

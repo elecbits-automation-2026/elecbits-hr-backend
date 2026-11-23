@@ -80,7 +80,11 @@ export const createHiringJobsRepository = (db: DbClient) => ({
         [planning],
       );
       for (const b of bellsFor(released)) {
-        await insertNotifications(tx, b.to, { type: b.type, title: b.title, link: b.link });
+        await insertNotifications(tx, b.to, {
+          type: b.type,
+          title: b.title,
+          link: b.link,
+        });
       }
       return { released: released.length, carried: carried.length };
     }),
@@ -89,15 +93,13 @@ export const createHiringJobsRepository = (db: DbClient) => ({
   sendBells: async (items: QuarterlyBell[]): Promise<void> => {
     if (items.length === 0) return;
     await db.transaction(async (tx) => {
-      await tx.orm
-        .insert(remindersSent)
-        .values(
-          items.map((i) => ({
-            kind: i.kind,
-            subjectId: i.subjectId,
-            recipientId: i.recipientId,
-          })),
-        );
+      await tx.orm.insert(remindersSent).values(
+        items.map((i) => ({
+          kind: i.kind,
+          subjectId: i.subjectId,
+          recipientId: i.recipientId,
+        })),
+      );
       for (const i of items) {
         await insertNotifications(tx, [i.recipientId], {
           type: i.type,
@@ -205,9 +207,9 @@ export const createHiringJobsRepository = (db: DbClient) => ({
    * contact, notes, referrer, the CV and offer letters go; interview notes,
    * BGV notes and reasons are blanked; scores and stages stay.
    */
-  anonymise: (ids: string[]): Promise<number> =>
+  anonymise: (ids: string[]): Promise<{ count: number; driveFileIds: string[] }> =>
     db.transaction(async (tx) => {
-      if (ids.length === 0) return 0;
+      if (ids.length === 0) return { count: 0, driveFileIds: [] };
       const done = await tx.query<{ id: string }>(
         `UPDATE ta.candidates SET name = 'Anonymised candidate', email = NULL, phone = NULL,
             notes = NULL, referred_by = NULL, anonymised_at = now(), updated_at = now()
@@ -215,14 +217,16 @@ export const createHiringJobsRepository = (db: DbClient) => ({
         [ids],
       );
       const gone = done.map((d) => d.id);
-      if (gone.length === 0) return 0;
-      await tx.query(
-        `DELETE FROM ta.candidate_cvs WHERE candidate_id = ANY($1::uuid[])`,
+      if (gone.length === 0) return { count: 0, driveFileIds: [] };
+      // Files kept in the Shared Drive go too: the caller trashes these ids.
+      const cvs = await tx.query<{ drive_file_id: string | null }>(
+        `DELETE FROM ta.candidate_cvs WHERE candidate_id = ANY($1::uuid[]) RETURNING drive_file_id`,
         [gone],
       );
-      await tx.query(
+      const letters = await tx.query<{ drive_file_id: string | null }>(
         `DELETE FROM ta.offer_letters o USING ta.applications a
-          WHERE o.application_id = a.id AND a.candidate_id = ANY($1::uuid[])`,
+          WHERE o.application_id = a.id AND a.candidate_id = ANY($1::uuid[])
+          RETURNING o.drive_file_id`,
         [gone],
       );
       await tx.query(
@@ -242,7 +246,12 @@ export const createHiringJobsRepository = (db: DbClient) => ({
         subject: 'ta.candidates',
         detail: JSON.stringify({ count: gone.length }),
       });
-      return gone.length;
+      return {
+        count: gone.length,
+        driveFileIds: [...cvs, ...letters]
+          .map((r) => r.drive_file_id)
+          .filter((v): v is string => v !== null),
+      };
     }),
 
   // ── Hiring-goal carry-over ──────────────────────────────────────────────

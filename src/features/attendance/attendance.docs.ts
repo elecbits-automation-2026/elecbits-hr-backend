@@ -221,7 +221,13 @@ export const registerAttendanceDocs = (registry: OpenAPIRegistry): void => {
     summary: 'Request remote work for a date range (reason required; RM + HR approve)',
     security: bearer,
     request: { body: jsonBody(createWfhSchema) },
-    responses: { 201: jsonResponse('WfhRequest', wfhRequestSchema) },
+    responses: {
+      201: jsonResponse('WfhRequest', wfhRequestSchema),
+      409: errorResponse('WFH_OVERLAP — a live request already covers one of these days'),
+      422: errorResponse(
+        'WFH_IN_PAST — starts before today · WFH_TOO_LONG — longer than attendance.remoteWorkMaxDays',
+      ),
+    },
   });
 
   registry.registerPath({

@@ -1,5 +1,8 @@
+import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
+  check,
   customType,
   date,
   index,
@@ -19,6 +22,17 @@ export const bytea = customType<{ data: Buffer }>({
     return 'bytea';
   },
 });
+
+/**
+ * Every stored-file table keeps its bytes in exactly one place: the row's
+ * `data` (STORAGE_DRIVER=db) or the company Shared Drive (`drive_file_id`).
+ * Both may be set only for an instant during files:to-drive, which writes the
+ * id and clears the bytes in one UPDATE — so "at least one" is the invariant.
+ */
+export const storedFileCheck = (
+  name: string,
+  t: { data: AnyPgColumn; driveFileId: AnyPgColumn },
+) => check(name, sql`${t.data} IS NOT NULL OR ${t.driveFileId} IS NOT NULL`);
 
 /**
  * Policy library — one row per policy CODE; `version` is the CURRENT version.
@@ -61,21 +75,28 @@ export const policies = orgSchema.table('policies', {
  * through the API like any other read, so an external link can never go
  * stale or leak outside the login.
  */
-export const policyDocuments = orgSchema.table('policy_documents', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  policyId: uuid('policy_id')
-    .notNull()
-    .unique()
-    .references(() => policies.id),
-  fileName: text('file_name').notNull(),
-  contentType: text('content_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  data: bytea('data').notNull(),
-  uploadedBy: uuid('uploaded_by')
-    .notNull()
-    .references(() => employees.id),
-  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const policyDocuments = orgSchema.table(
+  'policy_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    policyId: uuid('policy_id')
+      .notNull()
+      .unique()
+      .references(() => policies.id),
+    fileName: text('file_name').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    // Bytes in the row (STORAGE_DRIVER=db) or only the Shared Drive id (drive);
+    // storedFileCheck keeps exactly one of them set.
+    data: bytea('data'),
+    driveFileId: text('drive_file_id'),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => employees.id),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [storedFileCheck('policy_documents_stored_ck', t)],
+);
 
 export const policyAcks = orgSchema.table(
   'policy_acks',

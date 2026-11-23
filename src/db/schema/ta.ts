@@ -15,7 +15,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { departments } from './departments.js';
 import { employees } from './employees.js';
-import { bytea } from './policies.js';
+import { bytea, storedFileCheck } from './policies.js';
 import {
   approvalDecisionEnum,
   applicationStageEnum,
@@ -304,19 +304,26 @@ export const candidates = taSchema.table(
 );
 
 /** The candidate's CV — one current file (replaced on re-upload), like leave certificates. */
-export const candidateCvs = taSchema.table('candidate_cvs', {
-  candidateId: uuid('candidate_id')
-    .primaryKey()
-    .references(() => candidates.id),
-  fileName: text('file_name').notNull(),
-  contentType: text('content_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  data: bytea('data').notNull(),
-  uploadedBy: uuid('uploaded_by')
-    .notNull()
-    .references(() => employees.id),
-  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const candidateCvs = taSchema.table(
+  'candidate_cvs',
+  {
+    candidateId: uuid('candidate_id')
+      .primaryKey()
+      .references(() => candidates.id),
+    fileName: text('file_name').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    // Bytes in the row (STORAGE_DRIVER=db) or only the Shared Drive id (drive);
+    // storedFileCheck keeps exactly one of them set.
+    data: bytea('data'),
+    driveFileId: text('drive_file_id'),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => employees.id),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [storedFileCheck('candidate_cvs_stored_ck', t)],
+);
 
 /**
  * A candidate for ONE position (TA Step D) — the "living form" of the TA
@@ -423,19 +430,26 @@ export const interviewScores = taSchema.table(
  * The offer letter (TA Step E) — made outside the HRMS for now and uploaded
  * here, one current file per application (replaced on re-upload).
  */
-export const offerLetters = taSchema.table('offer_letters', {
-  applicationId: uuid('application_id')
-    .primaryKey()
-    .references(() => applications.id),
-  fileName: text('file_name').notNull(),
-  contentType: text('content_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  data: bytea('data').notNull(),
-  uploadedBy: uuid('uploaded_by')
-    .notNull()
-    .references(() => employees.id),
-  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const offerLetters = taSchema.table(
+  'offer_letters',
+  {
+    applicationId: uuid('application_id')
+      .primaryKey()
+      .references(() => applications.id),
+    fileName: text('file_name').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    // Bytes in the row (STORAGE_DRIVER=db) or only the Shared Drive id (drive);
+    // storedFileCheck keeps exactly one of them set.
+    data: bytea('data'),
+    driveFileId: text('drive_file_id'),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => employees.id),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [storedFileCheck('offer_letters_stored_ck', t)],
+);
 
 /**
  * When a round of an application happens (learner, 2026-10-27): the
@@ -525,19 +539,26 @@ export const taActivities = taSchema.table(
 );
 
 /** The offer letter as signed by the HR Head — what TA shares with the candidate. */
-export const signedOfferLetters = taSchema.table('signed_offer_letters', {
-  applicationId: uuid('application_id')
-    .primaryKey()
-    .references(() => applications.id),
-  fileName: text('file_name').notNull(),
-  contentType: text('content_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  data: bytea('data').notNull(),
-  uploadedBy: uuid('uploaded_by')
-    .notNull()
-    .references(() => employees.id),
-  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const signedOfferLetters = taSchema.table(
+  'signed_offer_letters',
+  {
+    applicationId: uuid('application_id')
+      .primaryKey()
+      .references(() => applications.id),
+    fileName: text('file_name').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    // Bytes in the row (STORAGE_DRIVER=db) or only the Shared Drive id (drive);
+    // storedFileCheck keeps exactly one of them set.
+    data: bytea('data'),
+    driveFileId: text('drive_file_id'),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => employees.id),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [storedFileCheck('signed_offer_letters_stored_ck', t)],
+);
 
 /**
  * Documents asked of a candidate once every round passed (workflow deck

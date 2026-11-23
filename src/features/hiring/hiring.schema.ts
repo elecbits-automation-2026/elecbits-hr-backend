@@ -53,10 +53,7 @@ export const POSITION_STATUSES = [
 ] as const;
 
 const bullets = (what: string) =>
-  z
-    .array(z.string().trim().min(1).max(500))
-    .min(1, `Add at least one ${what}`)
-    .max(40);
+  z.array(z.string().trim().min(1).max(500)).min(1, `Add at least one ${what}`).max(40);
 
 /**
  * The JD, as per the company template (Test Portal JD, learner 2026-10-27):
@@ -120,7 +117,9 @@ export const scorecardContentSchema = z
   .refine(
     (v) =>
       v.rounds.every(
-        (r) => new Set(r.attributes.map((x) => x.name.toLowerCase())).size === r.attributes.length,
+        (r) =>
+          new Set(r.attributes.map((x) => x.name.toLowerCase())).size ===
+          r.attributes.length,
       ),
     { message: 'Attribute names must differ within a round', path: ['rounds'] },
   )
@@ -200,7 +199,11 @@ export const positionSchema = z
     openedAt: z.string().datetime().nullable(),
     /** On hold (TA RM / HRBP): nothing moves the seat forward until resumed. */
     onHold: z
-      .object({ at: z.string().datetime(), reason: z.string().nullable(), byName: z.string().nullable() })
+      .object({
+        at: z.string().datetime(),
+        reason: z.string().nullable(),
+        byName: z.string().nullable(),
+      })
       .nullable(),
     /** Its own JD + scorecard, written by its recruiter (learner, 2026-10-27). */
     documents: z.object({
@@ -352,7 +355,10 @@ const roundsInput = z
     'A round is listed twice',
   )
   // Round 1 is always the TA SPOC's screening call — the gate (workflow deck, 2026-10-27).
-  .refine((rs) => rs.some((r) => r.round === 'hr'), 'Round 1 (screening) is always included');
+  .refine(
+    (rs) => rs.some((r) => r.round === 'hr'),
+    'Round 1 (screening) is always included',
+  );
 
 /** The request details every new line carries (TA workflow deck, 2026-10-27). */
 const requestDetails = {

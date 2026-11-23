@@ -11,6 +11,7 @@ import {
   policyAcks,
   remindersSent,
 } from '../../db/schema/index.js';
+import { fileColumns } from '../storage/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import type { TemplateTask } from './onboarding.template.js';
 
@@ -225,7 +226,12 @@ export const createOnboardingRepository = (db: DbClient) => ({
   /** Store (or replace) the task's file and mark the task done, with audit, in one transaction. */
   saveTaskFile: async (
     task: TaskRow,
-    file: { fileName: string; contentType: string; data: Buffer },
+    file: {
+      fileName: string;
+      contentType: string;
+      data: Buffer;
+      driveFileId?: string | null;
+    },
     actor: ActorContext,
   ): Promise<void> => {
     await db.transaction(async (tx) => {
@@ -233,7 +239,7 @@ export const createOnboardingRepository = (db: DbClient) => ({
         fileName: file.fileName,
         contentType: file.contentType,
         sizeBytes: file.data.length,
-        data: file.data,
+        ...fileColumns(file),
         uploadedBy: actor.actorEmployeeId,
         uploadedAt: new Date(),
       };
@@ -249,7 +255,11 @@ export const createOnboardingRepository = (db: DbClient) => ({
         actorUserId: actor.actorUserId,
         action: 'onboarding.task_file_uploaded',
         subject: `onboarding_journeys:${task.journeyId}`,
-        detail: JSON.stringify({ taskKey: task.taskKey, fileName: file.fileName, bytes: file.data.length }),
+        detail: JSON.stringify({
+          taskKey: task.taskKey,
+          fileName: file.fileName,
+          bytes: file.data.length,
+        }),
       });
     });
   },
@@ -334,9 +344,13 @@ export const createOnboardingRepository = (db: DbClient) => ({
   ): Promise<void> => {
     await db.transaction(async (tx) => {
       const recipients = [...new Set(sends.flatMap((s) => s.to))];
-      await tx.orm
-        .insert(remindersSent)
-        .values(recipients.map((recipientId) => ({ kind: NUDGE_KIND, subjectId: journeyId, recipientId })));
+      await tx.orm.insert(remindersSent).values(
+        recipients.map((recipientId) => ({
+          kind: NUDGE_KIND,
+          subjectId: journeyId,
+          recipientId,
+        })),
+      );
       for (const s of sends) {
         await insertNotifications(tx, s.to, s.event, {
           email: true,

@@ -4,6 +4,7 @@ import createError from 'http-errors';
 import { LEAVE_TYPES } from '../../shared/constants/constants.js';
 import { isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
+import { privacyServiceFor } from '../privacy/index.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createLeavesRepository } from './leaves.repository.js';
 import type { CreateLeaveRequestInput, DecideLeaveInput } from './leaves.schema.js';
@@ -37,7 +38,9 @@ export const leavesController = {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid leave id');
     if (!Buffer.isBuffer(req.body)) {
-      throw createError(422, 'Send the file as the raw request body', { code: 'NOT_A_FILE' });
+      throw createError(422, 'Send the file as the raw request body', {
+        code: 'NOT_A_FILE',
+      });
     }
     const fileName = String(req.query.filename ?? 'certificate').slice(0, 200);
     const out = await service(req).uploadCertificate(
@@ -53,6 +56,13 @@ export const leavesController = {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid leave id');
     const file = await service(req).certificate(id, req.auth!.employeeId);
+    // Someone else's medical certificate: every look is in the audit log (DPDP, M12).
+    await privacyServiceFor(req.db).logRead({
+      actorUserId: req.auth!.userId,
+      actorEmployeeId: req.auth!.employeeId,
+      what: 'medical_certificate',
+      leaveId: id,
+    });
     res.setHeader('Content-Type', file.contentType);
     res.setHeader(
       'Content-Disposition',

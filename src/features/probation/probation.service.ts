@@ -384,6 +384,8 @@ export const createProbationService = (deps: {
           title: `${r.name}'s probation ended on ${r.due_on} — decide (it confirms by itself on ${addDaysIso(r.due_on, AUTO_AFTER_DAYS)})`,
           link: LINK_HR,
         },
+        email: true,
+        dedupeKey: `probation.overdue:${r.id}`,
       });
       reminded += 1;
     }
