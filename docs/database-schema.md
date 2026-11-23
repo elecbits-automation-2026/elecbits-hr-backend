@@ -6,13 +6,13 @@ PostgreSQL (AWS RDS testing instance). Generated from `src/db/schema/` — the
 TypeScript schema and `migrations/` are the source of truth; table purposes and
 how they connect are in [`technical-reference.md`](./technical-reference.md) §3.
 
-**94 tables · 71 enums.**
+**95 tables · 72 enums.**
 
 | Schema   | Tables | Holds                                                                                               |
 | -------- | ------ | --------------------------------------------------------------------------------------------------- |
 | `access` | 11     | Owner, modules, batches, grants, requests, audit log                                                |
 | `ops`    | 13     | Assets, custody, requests, gate passes, stock, reminder dedupe                                      |
-| `org`    | 51     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
+| `org`    | 52     | People, departments, seats, salary, leaves, attendance, payroll, performance, exits, probation, PIP |
 | `public` | 3      | Sign-in identities and refresh tokens                                                               |
 | `ta`     | 16     | Hiring: quarterly plans, requisitions, interview rounds, approvals                                  |
 
@@ -67,6 +67,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `onboarding_task_owner`     | `employee`, `hr`, `manager`, `admin`, `ops`, `payroll`                                                                                                                                 |
 | `open_door_booking_status`  | `booked`, `done`, `cancelled`, `no_show`                                                                                                                                               |
 | `open_door_request_status`  | `requested`, `offered`, `declined`, `cancelled`                                                                                                                                        |
+| `open_door_slot_type`       | `hr_open_door`, `dept_head`, `skip_level`                                                                                                                                              |
 | `payroll_run_status`        | `draft`, `finalized`, `paid`                                                                                                                                                           |
 | `payslip_correction_status` | `pending`, `applied`, `cancelled`                                                                                                                                                      |
 | `pip_checkin_rating`        | `on_track`, `at_risk`, `off_track`                                                                                                                                                     |
@@ -325,6 +326,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 - Index `assets_holder_idx` (`holder_id`)
 - Index `assets_zone_idx` (`zone_id`)
+- Unique index `assets_category_serial_uniq` (`category_id`, expr) where `… IS NOT NULL`
 - Check `assets_holder_matches_status`: `(… = 'assigned') = (… IS NOT NULL)`
 
 ### email_outbox
@@ -536,16 +538,19 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### claim_receipts
 
-| Column         | Type                     | Null | Default             | Notes                                    |
-| -------------- | ------------------------ | ---- | ------------------- | ---------------------------------------- |
-| `id`           | uuid                     |      | `gen_random_uuid()` | PK                                       |
-| `claim_id`     | uuid                     |      |                     | unique · → `org.reimbursement_claims.id` |
-| `file_name`    | text                     |      |                     |                                          |
-| `content_type` | text                     |      |                     |                                          |
-| `size_bytes`   | integer                  |      |                     |                                          |
-| `data`         | bytea                    |      |                     |                                          |
-| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`                     |
-| `uploaded_at`  | timestamp with time zone |      | `now()`             |                                          |
+| Column          | Type                     | Null | Default             | Notes                                    |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                                       |
+| `claim_id`      | uuid                     |      |                     | unique · → `org.reimbursement_claims.id` |
+| `file_name`     | text                     |      |                     |                                          |
+| `content_type`  | text                     |      |                     |                                          |
+| `size_bytes`    | integer                  |      |                     |                                          |
+| `data`          | bytea                    | yes  |                     |                                          |
+| `drive_file_id` | text                     | yes  |                     |                                          |
+| `uploaded_by`   | uuid                     |      |                     | → `org.employees.id`                     |
+| `uploaded_at`   | timestamp with time zone |      | `now()`             |                                          |
+
+- Check `claim_receipts_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### concern_notes
 
@@ -595,6 +600,10 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `owner_id`            | uuid                     | yes  |                     | → `org.employees.id` |
 | `owner_assigned_at`   | timestamp with time zone | yes  |                     |                      |
 | `severity`            | concern_severity         | yes  |                     |                      |
+| `ai_category`         | text                     | yes  |                     |                      |
+| `ai_severity`         | concern_severity         | yes  |                     |                      |
+| `ai_summary`          | text                     | yes  |                     |                      |
+| `ai_suggested_at`     | timestamp with time zone | yes  |                     |                      |
 | `created_at`          | timestamp with time zone |      | `now()`             |                      |
 | `updated_at`          | timestamp with time zone |      | `now()`             |                      |
 
@@ -830,16 +839,19 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### leave_certificates
 
-| Column         | Type                     | Null | Default             | Notes                              |
-| -------------- | ------------------------ | ---- | ------------------- | ---------------------------------- |
-| `id`           | uuid                     |      | `gen_random_uuid()` | PK                                 |
-| `leave_id`     | uuid                     |      |                     | unique · → `org.leave_requests.id` |
-| `file_name`    | text                     |      |                     |                                    |
-| `content_type` | text                     |      |                     |                                    |
-| `size_bytes`   | integer                  |      |                     |                                    |
-| `data`         | bytea                    |      |                     |                                    |
-| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`               |
-| `uploaded_at`  | timestamp with time zone |      | `now()`             |                                    |
+| Column          | Type                     | Null | Default             | Notes                              |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                                 |
+| `leave_id`      | uuid                     |      |                     | unique · → `org.leave_requests.id` |
+| `file_name`     | text                     |      |                     |                                    |
+| `content_type`  | text                     |      |                     |                                    |
+| `size_bytes`    | integer                  |      |                     |                                    |
+| `data`          | bytea                    | yes  |                     |                                    |
+| `drive_file_id` | text                     | yes  |                     |                                    |
+| `uploaded_by`   | uuid                     |      |                     | → `org.employees.id`               |
+| `uploaded_at`   | timestamp with time zone |      | `now()`             |                                    |
+
+- Check `leave_certificates_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### leave_requests
 
@@ -937,16 +949,19 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### onboarding_task_files
 
-| Column         | Type                     | Null | Default             | Notes                                |
-| -------------- | ------------------------ | ---- | ------------------- | ------------------------------------ |
-| `id`           | uuid                     |      | `gen_random_uuid()` | PK                                   |
-| `task_id`      | uuid                     |      |                     | unique · → `org.onboarding_tasks.id` |
-| `file_name`    | text                     |      |                     |                                      |
-| `content_type` | text                     |      |                     |                                      |
-| `size_bytes`   | integer                  |      |                     |                                      |
-| `data`         | bytea                    |      |                     |                                      |
-| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`                 |
-| `uploaded_at`  | timestamp with time zone |      | `now()`             |                                      |
+| Column          | Type                     | Null | Default             | Notes                                |
+| --------------- | ------------------------ | ---- | ------------------- | ------------------------------------ |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                                   |
+| `task_id`       | uuid                     |      |                     | unique · → `org.onboarding_tasks.id` |
+| `file_name`     | text                     |      |                     |                                      |
+| `content_type`  | text                     |      |                     |                                      |
+| `size_bytes`    | integer                  |      |                     |                                      |
+| `data`          | bytea                    | yes  |                     |                                      |
+| `drive_file_id` | text                     | yes  |                     |                                      |
+| `uploaded_by`   | uuid                     |      |                     | → `org.employees.id`                 |
+| `uploaded_at`   | timestamp with time zone |      | `now()`             |                                      |
+
+- Check `onboarding_task_files_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### onboarding_tasks
 
@@ -1014,6 +1029,7 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `start_time`   | time                     |      |                     |                      |
 | `end_time`     | time                     |      |                     |                      |
 | `capacity`     | integer                  |      | `1`                 |                      |
+| `slot_type`    | open_door_slot_type      |      | `hr_open_door`      |                      |
 | `note`         | text                     | yes  |                     |                      |
 | `cancelled_at` | timestamp with time zone | yes  |                     |                      |
 | `created_at`   | timestamp with time zone |      | `now()`             |                      |
@@ -1202,16 +1218,31 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### policy_documents
 
-| Column         | Type                     | Null | Default             | Notes                        |
-| -------------- | ------------------------ | ---- | ------------------- | ---------------------------- |
-| `id`           | uuid                     |      | `gen_random_uuid()` | PK                           |
-| `policy_id`    | uuid                     |      |                     | unique · → `org.policies.id` |
-| `file_name`    | text                     |      |                     |                              |
-| `content_type` | text                     |      |                     |                              |
-| `size_bytes`   | integer                  |      |                     |                              |
-| `data`         | bytea                    |      |                     |                              |
-| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`         |
-| `uploaded_at`  | timestamp with time zone |      | `now()`             |                              |
+| Column          | Type                     | Null | Default             | Notes                        |
+| --------------- | ------------------------ | ---- | ------------------- | ---------------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                           |
+| `policy_id`     | uuid                     |      |                     | unique · → `org.policies.id` |
+| `file_name`     | text                     |      |                     |                              |
+| `content_type`  | text                     |      |                     |                              |
+| `size_bytes`    | integer                  |      |                     |                              |
+| `data`          | bytea                    | yes  |                     |                              |
+| `drive_file_id` | text                     | yes  |                     |                              |
+| `uploaded_by`   | uuid                     |      |                     | → `org.employees.id`         |
+| `uploaded_at`   | timestamp with time zone |      | `now()`             |                              |
+
+- Check `policy_documents_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
+
+### privacy_acceptances
+
+| Column        | Type                     | Null | Default             | Notes                |
+| ------------- | ------------------------ | ---- | ------------------- | -------------------- |
+| `id`          | uuid                     |      | `gen_random_uuid()` | PK                   |
+| `employee_id` | uuid                     |      |                     | → `org.employees.id` |
+| `version`     | text                     |      |                     |                      |
+| `accepted_at` | timestamp with time zone |      | `now()`             |                      |
+
+- Unique index `privacy_acceptances_employee_version_uq` (`employee_id`, `version`)
+- Index `privacy_acceptances_employee_idx` (`employee_id`)
 
 ### probation_reviews
 
@@ -1371,16 +1402,19 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### training_certificates
 
-| Column         | Type                     | Null | Default             | Notes                         |
-| -------------- | ------------------------ | ---- | ------------------- | ----------------------------- |
-| `id`           | uuid                     |      | `gen_random_uuid()` | PK                            |
-| `training_id`  | uuid                     |      |                     | unique · → `org.trainings.id` |
-| `file_name`    | text                     |      |                     |                               |
-| `content_type` | text                     |      |                     |                               |
-| `size_bytes`   | integer                  |      |                     |                               |
-| `data`         | bytea                    |      |                     |                               |
-| `uploaded_by`  | uuid                     |      |                     | → `org.employees.id`          |
-| `uploaded_at`  | timestamp with time zone |      | `now()`             |                               |
+| Column          | Type                     | Null | Default             | Notes                         |
+| --------------- | ------------------------ | ---- | ------------------- | ----------------------------- |
+| `id`            | uuid                     |      | `gen_random_uuid()` | PK                            |
+| `training_id`   | uuid                     |      |                     | unique · → `org.trainings.id` |
+| `file_name`     | text                     |      |                     |                               |
+| `content_type`  | text                     |      |                     |                               |
+| `size_bytes`    | integer                  |      |                     |                               |
+| `data`          | bytea                    | yes  |                     |                               |
+| `drive_file_id` | text                     | yes  |                     |                               |
+| `uploaded_by`   | uuid                     |      |                     | → `org.employees.id`          |
+| `uploaded_at`   | timestamp with time zone |      | `now()`             |                               |
+
+- Check `training_certificates_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### trainings
 
@@ -1598,15 +1632,18 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 
 ### candidate_cvs
 
-| Column         | Type                     | Null | Default | Notes                     |
-| -------------- | ------------------------ | ---- | ------- | ------------------------- |
-| `candidate_id` | uuid                     |      |         | PK · → `ta.candidates.id` |
-| `file_name`    | text                     |      |         |                           |
-| `content_type` | text                     |      |         |                           |
-| `size_bytes`   | integer                  |      |         |                           |
-| `data`         | bytea                    |      |         |                           |
-| `uploaded_by`  | uuid                     |      |         | → `org.employees.id`      |
-| `uploaded_at`  | timestamp with time zone |      | `now()` |                           |
+| Column          | Type                     | Null | Default | Notes                     |
+| --------------- | ------------------------ | ---- | ------- | ------------------------- |
+| `candidate_id`  | uuid                     |      |         | PK · → `ta.candidates.id` |
+| `file_name`     | text                     |      |         |                           |
+| `content_type`  | text                     |      |         |                           |
+| `size_bytes`    | integer                  |      |         |                           |
+| `data`          | bytea                    | yes  |         |                           |
+| `drive_file_id` | text                     | yes  |         |                           |
+| `uploaded_by`   | uuid                     |      |         | → `org.employees.id`      |
+| `uploaded_at`   | timestamp with time zone |      | `now()` |                           |
+
+- Check `candidate_cvs_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### candidates
 
@@ -1716,9 +1753,12 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `file_name`      | text                     |      |         |                             |
 | `content_type`   | text                     |      |         |                             |
 | `size_bytes`     | integer                  |      |         |                             |
-| `data`           | bytea                    |      |         |                             |
+| `data`           | bytea                    | yes  |         |                             |
+| `drive_file_id`  | text                     | yes  |         |                             |
 | `uploaded_by`    | uuid                     |      |         | → `org.employees.id`        |
 | `uploaded_at`    | timestamp with time zone |      | `now()` |                             |
+
+- Check `offer_letters_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### positions
 
@@ -1799,9 +1839,12 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `file_name`      | text                     |      |         |                             |
 | `content_type`   | text                     |      |         |                             |
 | `size_bytes`     | integer                  |      |         |                             |
-| `data`           | bytea                    |      |         |                             |
+| `data`           | bytea                    | yes  |         |                             |
+| `drive_file_id`  | text                     | yes  |         |                             |
 | `uploaded_by`    | uuid                     |      |         | → `org.employees.id`        |
 | `uploaded_at`    | timestamp with time zone |      | `now()` |                             |
+
+- Check `signed_offer_letters_stored_ck`: `… IS NOT NULL OR … IS NOT NULL`
 
 ### source_activations
 

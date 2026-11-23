@@ -12,6 +12,7 @@ import {
   offerRequestSchema,
   requestsSchema,
   slotSchema,
+  updateSlotSchema,
 } from './openDoor.schema.js';
 
 const bearer = [{ bearerAuth: [] }];
@@ -47,7 +48,22 @@ export const registerOpenDoorDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       201: jsonResponse('Me', meSchema),
       403: errorResponse('NOT_A_PUBLISHER'),
-      422: errorResponse('PAST_SLOT'),
+      422: errorResponse('PAST_SLOT, HR_SLOT_TYPE (HR open door is HR only)'),
+    },
+  });
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/v1/open-door/slots/{id}',
+    tags,
+    summary:
+      'The owner changes a live slot type (HR open door / department head / skip level) or note',
+    security: bearer,
+    request: { body: jsonBody(updateSlotSchema) },
+    responses: {
+      200: jsonResponse('Me', meSchema),
+      404: errorResponse('Not your slot'),
+      409: errorResponse('SLOT_CANCELLED'),
+      422: errorResponse('HR_SLOT_TYPE'),
     },
   });
   registry.registerPath({

@@ -186,6 +186,23 @@ export const createConcernsRepository = (db: DbClient) => {
         return row;
       }),
 
+    /**
+     * Store the AI triage suggestion (no status change, no bell). Audited
+     * without an actor and without the suggestion itself — ids only.
+     */
+    setAiSuggestion: async (
+      id: string,
+      s: Pick<ConcernInsert, 'aiCategory' | 'aiSeverity' | 'aiSummary'>,
+    ): Promise<void> =>
+      db.transaction(async (tx) => {
+        const rows = await tx.orm
+          .update(concerns)
+          .set({ ...s, aiSuggestedAt: new Date() })
+          .where(eq(concerns.id, id))
+          .returning();
+        if (rows[0]) await audit(tx, null, rows[0], 'ai_suggested');
+      }),
+
     /** A note on its own (no status change) + bells. */
     addNote: async (
       concern: ConcernRow,

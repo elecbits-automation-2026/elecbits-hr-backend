@@ -205,7 +205,6 @@ export const createAssetsRepository = (db: DbClient) => ({
       });
       return true;
     }),
-
 });
 
 /**

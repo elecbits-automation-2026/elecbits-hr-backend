@@ -48,16 +48,16 @@ export const employeeSchema = z
  */
 export const createEmployeeSchema = z
   .object({
-    firstName: z.string().min(1),
-    middleName: z.string().optional(),
-    lastName: z.string().optional(),
+    firstName: z.string().trim().min(1).max(60),
+    middleName: z.string().trim().max(60).optional(),
+    lastName: z.string().trim().max(60).optional(),
     // Exactly a 10-digit mobile number (user decision) — no +91, no spaces.
     phone: z
       .string()
       .regex(/^\d{10}$/, 'Phone must be exactly 10 digits')
       .optional(),
-    employeeCode: z.string().min(1),
-    email: z.string().email(),
+    employeeCode: z.string().trim().min(1).max(30),
+    email: z.string().email().max(200),
     departmentId: z.string().uuid().optional(),
     // Where the person is based (a punch zone) — drives their work schedule
     // and lets HR filter attendance by location.
@@ -67,15 +67,23 @@ export const createEmployeeSchema = z
     // HR sets the placement + terms; only active/inactive is HR-settable —
     // `invited` and `exiting` belong to the claim and exits flows.
     status: z.enum(['active', 'inactive']).optional(),
-    designation: z.string().optional(),
+    designation: z.string().trim().max(120).optional(),
     employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
     dateOfJoining: z.string().date().optional(),
     offerDate: z.string().date().optional(),
     confirmationDate: z.string().date().optional(),
     noticeDays: z.number().int().min(0).optional(),
     // Personal workday, overriding the base zone's hours.
-    workStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm').nullable().optional(),
-    workEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm').nullable().optional(),
+    workStart: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm')
+      .nullable()
+      .optional(),
+    workEnd: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm')
+      .nullable()
+      .optional(),
   })
   .strict()
   .openapi('CreateEmployee');
@@ -93,8 +101,8 @@ export const updateEmployeeSchema = createEmployeeSchema
  */
 export const inviteEmployeeSchema = z
   .object({
-    email: z.string().email(),
-    name: z.string().min(1),
+    email: z.string().email().max(200),
+    name: z.string().trim().min(1).max(180),
     reportsTo: z.string().uuid(),
     baseZoneId: z.string().uuid().optional(),
     level: z.enum(LEVELS),
@@ -125,7 +133,16 @@ export const updateSalarySchema = z
     payrollCostCenter: z.string().nullable().optional(),
     salaryCurrency: z.string().min(3).max(3).optional(),
     salaryMode: z.string().nullable().optional(),
-    panNumber: z.string().nullable().optional(),
+    panNumber: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(
+        /^[A-Z]{5}[0-9]{4}[A-Z]$/,
+        'PAN: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F)',
+      )
+      .nullable()
+      .optional(),
     uanNumber: z
       .string()
       .trim()
@@ -277,7 +294,10 @@ export const updateBankDetailsSchema = z
     ifscCode: z
       .string()
       .trim()
-      .regex(/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/, 'IFSC: 4 letters, 0, then 6 letters or digits')
+      .regex(
+        /^[A-Za-z]{4}0[A-Za-z0-9]{6}$/,
+        'IFSC: 4 letters, 0, then 6 letters or digits',
+      )
       .nullable()
       .optional(),
   })

@@ -107,6 +107,20 @@ export const teamMemberSchema = z
   })
   .openapi('TeamMember');
 
+/** Someone between 14 and 100 years old today (catches typos like 2030 or 1890). */
+const dateOfBirth = z
+  .string()
+  .date()
+  .refine(
+    (d) => {
+      const today = new Date().toLocaleDateString('en-CA');
+      const shift = (years: number) =>
+        `${Number(today.slice(0, 4)) - years}${today.slice(4)}`;
+      return d <= shift(14) && d >= shift(100);
+    },
+    { message: 'Date of birth must make you 14 to 100 years old' },
+  );
+
 /**
  * Self-serve profile edit (decision D3): personal identity fields only.
  * Code, level, manager, department, designation and every other org-controlled
@@ -116,18 +130,18 @@ export const teamMemberSchema = z
 export const updateMeSchema = z
   .object({
     salutation: z.string().max(20).nullable().optional(),
-    firstName: z.string().min(1).optional(),
-    middleName: z.string().nullable().optional(),
-    lastName: z.string().nullable().optional(),
+    firstName: z.string().trim().min(1).max(60).optional(),
+    middleName: z.string().trim().max(60).nullable().optional(),
+    lastName: z.string().trim().max(60).nullable().optional(),
     gender: z.string().max(40).nullable().optional(),
-    dateOfBirth: z.string().date().nullable().optional(),
+    dateOfBirth: dateOfBirth.nullable().optional(),
     // Exactly a 10-digit mobile number (user decision) — no +91, no spaces.
     phone: z
       .string()
       .regex(/^\d{10}$/, 'Phone must be exactly 10 digits')
       .nullable()
       .optional(),
-    personalEmail: z.string().email().nullable().optional(),
+    personalEmail: z.string().email().max(200).nullable().optional(),
     preferredContactEmail: z.enum(['company', 'personal']).nullable().optional(),
     unsubscribed: z.boolean().optional(),
     currentAddress: z.string().max(1000).nullable().optional(),
@@ -211,7 +225,14 @@ export const myExitSchema = z
   .object({
     id: z.string().uuid(),
     kind: z.enum(['resignation', 'termination']),
-    status: z.enum(['submitted', 'accepted', 'relieved', 'settled', 'withdrawn', 'cancelled']),
+    status: z.enum([
+      'submitted',
+      'accepted',
+      'relieved',
+      'settled',
+      'withdrawn',
+      'cancelled',
+    ]),
     noticeStartOn: z.string(),
     lastWorkingDay: z.string(),
     interviewAt: z.string().datetime().nullable(),

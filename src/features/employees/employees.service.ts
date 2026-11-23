@@ -92,7 +92,10 @@ export const createEmployeesService = (deps: {
    * is already committed, so a failure here is logged, never surfaced — the
    * journey still auto-creates on the joiner's first visit.
    */
-  const startOnboarding = async (employeeId: string, actor: ActorContext): Promise<void> => {
+  const startOnboarding = async (
+    employeeId: string,
+    actor: ActorContext,
+  ): Promise<void> => {
     if (!onboarding) return;
     try {
       await onboarding.ensureForNewHire(employeeId, actor);
@@ -136,8 +139,7 @@ export const createEmployeesService = (deps: {
     employeeCode: await repo.nextEmployeeCode(),
   });
 
-  const newHirePolicy = () =>
-    settings.effectiveMany(['people.newHireDefaults'] as const);
+  const newHirePolicy = () => settings.effectiveMany(['people.newHireDefaults'] as const);
 
   const list = async () => {
     const rows = await repo.list();
@@ -161,7 +163,17 @@ export const createEmployeesService = (deps: {
   ): string =>
     [first, middle, last].filter((p): p is string => Boolean(p && p.trim())).join(' ');
 
+  /** Sign-in is company-email only (§5.4), so a record off that domain could never be claimed. */
+  const assertCompanyEmail = (email: string) => {
+    if (!isCompanyEmail(email, env.auth.companyEmailDomain)) {
+      throw createError(422, `Email must be @${env.auth.companyEmailDomain}`, {
+        code: 'NOT_COMPANY_EMAIL',
+      });
+    }
+  };
+
   const create = async (input: CreateEmployeeInput, actor: ActorContext) => {
+    assertCompanyEmail(input.email);
     await assertHomeUnit(input.departmentId);
     const rm = await repo.findById(input.reportsTo);
     if (!rm) {
@@ -215,6 +227,7 @@ export const createEmployeesService = (deps: {
 
   /** The Admin invite door (D1–D4): access-first counterpart to `create`. */
   const invite = async (input: InviteEmployeeInput, actor: ActorContext) => {
+    assertCompanyEmail(input.email);
     await assertHomeUnit(input.departmentId);
     const rm = await repo.findById(input.reportsTo);
     if (!rm) {
@@ -527,7 +540,9 @@ export const createEmployeesService = (deps: {
       const basic = Number(
         ('basicPercent' in input ? input.basicPercent : current.basicPercent) ?? 50,
       );
-      const hra = Number(('hraPercent' in input ? input.hraPercent : current.hraPercent) ?? 25);
+      const hra = Number(
+        ('hraPercent' in input ? input.hraPercent : current.hraPercent) ?? 25,
+      );
       if (basic <= 0 || basic + hra + 10 > 100) {
         throw createError(422, 'Basic + HRA + LTA (10%) cannot exceed 100%', {
           code: 'BAD_SALARY_SPLIT',

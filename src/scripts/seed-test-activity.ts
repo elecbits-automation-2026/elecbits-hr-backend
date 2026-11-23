@@ -2,7 +2,13 @@ import { eq, inArray } from 'drizzle-orm';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { db } from '../db/index.js';
-import { attendance, goals, reviewCycles, workUpdates } from '../db/schema/index.js';
+import {
+  attendance,
+  goals,
+  reviewCycles,
+  wfhRequests,
+  workUpdates,
+} from '../db/schema/index.js';
 import { createAuthzRepository } from '../features/access/authz.repository.js';
 import { createAttendanceRepository } from '../features/attendance/attendance.repository.js';
 import { createAttendanceService } from '../features/attendance/attendance.service.js';
@@ -65,6 +71,33 @@ const FEMALE = new Set([
   'EB-0019',
   'EB-0020',
 ]);
+
+/**
+ * The roles above are keyed by the codes the roster got on the testing RDS.
+ * A fresh database numbers people differently, so each roster email maps to
+ * its RDS code and the script keys on that ("seed key"), wherever it runs.
+ */
+const SEED_KEYS: Record<string, string> = {
+  'priya.pr@elecbits.in': 'EB-0008',
+  'rahul.manager@elecbits.in': 'EB-0009',
+  'asha.eng@elecbits.in': 'EB-0010',
+  'vikram.eng@elecbits.in': 'EB-0011',
+  'neha.intern@elecbits.in': 'EB-0012',
+  'meera.hrbp@elecbits.in': 'EB-0013',
+  'kiran.ops@elecbits.in': 'EB-0014',
+  'sanjay.sales@elecbits.in': 'EB-0015',
+  'divya.sales@elecbits.in': 'EB-0016',
+  'arjun.eng@elecbits.in': 'EB-0017',
+  'rohan.lab@elecbits.in': 'EB-0018',
+  'fatima.hr@elecbits.in': 'EB-0019',
+  'pooja.ta@elecbits.in': 'EB-0020',
+};
+
+/** A minimal valid PDF, enough to pass the receipt magic-byte check. */
+const SEED_RECEIPT = Buffer.from(
+  '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n' +
+    '2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+);
 
 type Actor = { actorUserId: string; actorEmployeeId: string };
 
@@ -238,8 +271,9 @@ async function main() {
     rm: string | null;
     user_id: string;
     gender: string | null;
+    email: string;
   }>(
-    `select e.id, e.employee_code code, e.name, e.level, d.name dept,
+    `select e.id, e.employee_code code, e.email, e.name, e.level, d.name dept,
             e.date_of_joining::text doj, e.confirmation_date::text confirmation,
             coalesce(e.leave_approver, e.reports_to) rm, u.id user_id, e.gender
        from org.employees e
@@ -249,13 +283,18 @@ async function main() {
       where e.status = 'active' and o.employee_id is null
       order by e.employee_code`,
   );
-  const owner = await db.query<{ id: string }>(
-    `select employee_id id from access.org_owner`,
+  const owner = await db.query<{ id: string; user_id: string | null }>(
+    `select o.employee_id id, u.id user_id from access.org_owner o
+       left join public.users u on u.employee_id = o.employee_id`,
   );
   const ownerId = owner[0]?.id ?? null;
+  const ownerActor: Actor | null = owner[0]?.user_id
+    ? { actorUserId: owner[0].user_id, actorEmployeeId: owner[0].id }
+    : null;
   const people: Person[] = rows.map((r) => ({
     id: r.id,
-    code: r.code,
+    // Seed key (see SEED_KEYS), not always the real code on a fresh DB.
+    code: SEED_KEYS[r.email] ?? r.code,
     name: r.name,
     level: r.level,
     dept: r.dept,
@@ -281,7 +320,7 @@ async function main() {
   for (const r of rows) {
     if (r.gender) continue;
     await db.query(`update org.employees set gender = $1 where id = $2`, [
-      FEMALE.has(r.code) ? 'Female' : 'Male',
+      FEMALE.has(SEED_KEYS[r.email] ?? r.code) ? 'Female' : 'Male',
       r.id,
     ]);
     count('gender set');
@@ -368,7 +407,9 @@ async function main() {
     if (onProbation(p)) {
       // Probation: only sick leave — one waiting on the RM.
       const d = nextWeekday(addDays(END, -4));
-      if (d > from) {
+      // A recent joiner has accrued too little sick leave for a second day.
+      const recentJoiner = (p.doj ?? START) > addDays(today(), -75);
+      if (d > from && !(recentJoiner && sickDay < END)) {
         const l = await raiseLeave(p, 'sick', d, d, 'Migraine since morning.');
         if (l) count('leave sick pending');
       }
@@ -413,8 +454,9 @@ async function main() {
         );
       if (l) count('leave unpaid declined');
     }
-    // Planned earned leave in November: approved / RM-only / pending, by turn.
-    const ns = nextWeekday(addDays('2026-11-09', (i % 3) * 7));
+    // Planned earned leave 2–4 weeks out (earned needs 7 days' notice):
+    // approved / RM-only / pending, by turn.
+    const ns = nextWeekday(addDays(today(), 14 + (i % 3) * 7));
     const l = await raiseLeave(
       p,
       'earned',
@@ -449,28 +491,23 @@ async function main() {
     if (i % 2 === 0) {
       const s = nextWeekday(addDays('2026-09-14', i % 5));
       if (s > startFor(p)) {
-        const w = await attempt(`remote ${p.code}`, () =>
-          attendanceSvc.raiseWfh(
-            p.id,
-            {
-              startDate: s,
-              endDate: s,
-              reason: 'Client visit at their plant for integration testing.',
-            },
-            actor(p),
-          ),
-        );
-        if (w) {
-          const rm = rmOf(p);
-          if (rm)
-            await attempt(`remote rm ${p.code}`, () =>
-              attendanceSvc.decideWfh(w.id, { decision: 'approve' }, actor(rm)),
-            );
-          await attempt(`remote hr ${p.code}`, () =>
-            attendanceSvc.decideWfh(w.id, { decision: 'approve' }, actor(hrFor(p))),
-          );
-          count('remote approved');
-        }
+        // A past day: the service refuses those (WFH_IN_PAST), so history is
+        // inserted directly, already decided by the RM (HR when self-governed).
+        const decider = rmOf(p) ?? hrFor(p);
+        const decidedAt = new Date(`${addDays(s, -2)}T10:00:00+05:30`);
+        await db.orm.insert(wfhRequests).values({
+          employeeId: p.id,
+          startDate: s,
+          endDate: s,
+          reason: 'Client visit at their plant for integration testing.',
+          status: 'approved',
+          rmApprovedBy: decider.id,
+          rmApprovedAt: decidedAt,
+          decidedBy: decider.id,
+          decidedAt,
+          createdAt: new Date(`${addDays(s, -3)}T10:00:00+05:30`),
+        });
+        count('remote approved');
       }
     }
     if (i % 3 === 0) {
@@ -923,7 +960,8 @@ async function main() {
       description: string;
       amount: number;
     },
-    steps: Array<'rm' | 'payroll' | 'decline'>,
+    // Claims go Employee → PR → Admin (the Owner); a PR person's own → Admin.
+    steps: Array<'pr' | 'admin' | 'decline'>,
   ) => {
     if (!p) return;
     const c = await attempt(`claim ${p.code}`, () =>
@@ -931,22 +969,30 @@ async function main() {
     );
     if (!c) return;
     count('claims');
+    // Approval needs a receipt file (RECEIPT_REQUIRED): attach a tiny PDF.
+    if (steps.some((s) => s !== 'decline'))
+      await attempt(`receipt ${p.code}`, () =>
+        claims.uploadReceipt(
+          c.id,
+          { fileName: 'receipt.pdf', contentType: 'application/pdf', data: SEED_RECEIPT },
+          actor(p),
+        ),
+      );
     for (const s of steps) {
-      const rm = rmOf(p);
-      if (s === 'rm' && rm)
-        await attempt(`claim rm ${p.code}`, () =>
-          claims.decide(c.id, { decision: 'approve' }, actor(rm)),
-        );
-      if (s === 'payroll')
-        await attempt(`claim payroll ${p.code}`, () =>
+      if (s === 'pr' && p.id !== payroll.id)
+        await attempt(`claim pr ${p.code}`, () =>
           claims.decide(c.id, { decision: 'approve' }, actor(payroll)),
+        );
+      if (s === 'admin' && ownerActor)
+        await attempt(`claim admin ${p.code}`, () =>
+          claims.decide(c.id, { decision: 'approve' }, ownerActor),
         );
       if (s === 'decline')
         await attempt(`claim decline ${p.code}`, () =>
           claims.decide(
             c.id,
             { decision: 'decline', reason: 'Not a business expense — personal travel.' },
-            actor(rm ?? payroll),
+            p.id === payroll.id && ownerActor ? ownerActor : actor(payroll),
           ),
         );
     }
@@ -959,7 +1005,7 @@ async function main() {
       description: 'Cab to the vendor for the board pickup',
       amount: 1450,
     },
-    ['rm', 'payroll'],
+    ['pr', 'admin'],
   );
   await claim(
     vikram,
@@ -969,7 +1015,7 @@ async function main() {
       description: 'Team dinner during the release crunch',
       amount: 620,
     },
-    ['rm'],
+    ['pr'],
   );
   await claim(
     neha,
@@ -999,7 +1045,7 @@ async function main() {
       description: 'Client site visit — train tickets',
       amount: 2100,
     },
-    ['rm', 'payroll'],
+    ['pr', 'admin'],
   );
   await claim(
     rahul,

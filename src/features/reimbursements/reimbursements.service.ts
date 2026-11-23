@@ -1,5 +1,6 @@
 import createError from 'http-errors';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import { buildBankFile } from './reimbursements.export.js';
 import type {
@@ -240,9 +241,20 @@ export const createReimbursementsService = (deps: {
       });
     }
     const type = checkUpload(file, ['pdf', 'jpg', 'png'], { what: 'The receipt' });
-    await repo.upsertReceipt(
-      { claimId: id, fileName: file.fileName, contentType: type, data: file.data },
-      actor,
+    await withStoredFile(
+      DRIVE_FOLDERS.claims,
+      { fileName: `claim-${id}-${file.fileName}`, contentType: type, data: file.data },
+      (driveFileId) =>
+        repo.upsertReceipt(
+          {
+            claimId: id,
+            fileName: file.fileName,
+            contentType: type,
+            data: file.data,
+            driveFileId,
+          },
+          actor,
+        ),
     );
     return reload(id);
   };
@@ -260,10 +272,20 @@ export const createReimbursementsService = (deps: {
     }
     const file = await repo.getReceipt(id);
     if (!file) throw createError(404, 'Receipt not found', { code: 'RECEIPT_NOT_FOUND' });
-    return file;
+    return loadStoredFile(file);
   };
 
-  return { mine, queue, create, decide, bankFile, markPaid, cancel, uploadReceipt, receipt };
+  return {
+    mine,
+    queue,
+    create,
+    decide,
+    bankFile,
+    markPaid,
+    cancel,
+    uploadReceipt,
+    receipt,
+  };
 };
 
 export type ReimbursementsService = ReturnType<typeof createReimbursementsService>;

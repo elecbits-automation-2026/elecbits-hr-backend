@@ -132,6 +132,11 @@ export const createRunSchema = z
   .strict()
   .openapi('CreatePayrollRun');
 
+/** `early: true` = the PR person confirmed finalizing before the month is over. */
+export const finalizeRunSchema = z
+  .preprocess((v) => v ?? {}, z.object({ early: z.boolean().optional() }).strict())
+  .openapi('FinalizePayrollRun');
+
 /**
  * Draft-only overrides — exactly what a human types on the ERP sheet. PF and
  * PT are computed, never accepted; totals always recompute server-side.
@@ -173,7 +178,11 @@ export const compensationPersonSchema = z
  */
 export const tdsEstimateSchema = z
   .object({
-    employee: z.object({ id: z.string().uuid(), name: z.string(), employeeCode: z.string() }),
+    employee: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      employeeCode: z.string(),
+    }),
     ctc: z.number(),
     dateOfJoining: z.string().nullable(),
     fyClose: z.string(),
@@ -286,7 +295,11 @@ export const generateRunResultSchema = z
 export const payslipCorrectionSchema = z
   .object({
     id: z.string().uuid(),
-    employee: z.object({ id: z.string().uuid(), name: z.string(), employeeCode: z.string() }),
+    employee: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      employeeCode: z.string(),
+    }),
     sourcePayslipId: z.string().uuid(),
     sourceMonth: z.string(),
     amount: z.number(),
@@ -316,6 +329,7 @@ export type CreateCorrectionInput = z.infer<typeof createCorrectionSchema>;
 export type PayslipDto = z.infer<typeof payslipSchema>;
 export type MyPayslipDto = z.infer<typeof myPayslipSchema>;
 export type CreateRunInput = z.infer<typeof createRunSchema>;
+export type FinalizeRunInput = z.infer<typeof finalizeRunSchema>;
 export type UpdatePayslipInput = z.infer<typeof updatePayslipSchema>;
 export type TdsEstimateDto = z.infer<typeof tdsEstimateSchema>;
 export type CompensationPersonDto = z.infer<typeof compensationPersonSchema>;

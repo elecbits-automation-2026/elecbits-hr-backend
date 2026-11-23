@@ -54,5 +54,11 @@ export const registerPipDocs = (registry: OpenAPIRegistry): void => {
     pipSchema,
     pipOutcomeSchema,
   );
-  p('post', '/api/v1/pips/{id}/cancel', 'Withdraw (the RM or HR)', pipSchema, cancelPipSchema);
+  p(
+    'post',
+    '/api/v1/pips/{id}/cancel',
+    'Withdraw (the RM or HR)',
+    pipSchema,
+    cancelPipSchema,
+  );
 };

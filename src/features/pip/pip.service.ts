@@ -304,6 +304,9 @@ export const createPipService = (deps: {
 
   const cancel = async (id: string, input: CancelPipInput, actor: Actor) => {
     const { p, dto } = await load(id, actor);
+    if (p.status !== 'active') {
+      throw createError(409, 'This PIP is already closed', { code: 'PIP_CLOSED' });
+    }
     if (!dto.can.cancel) throw createError(403, 'Not allowed', { code: 'FORBIDDEN' });
     await repo.transition(
       id,

@@ -34,3 +34,13 @@ export const fileStorageFor = (): FileStorage => {
   shared ??= createFileStorage({ driver: drive ? 'drive' : 'db', drive });
   return shared;
 };
+
+export {
+  DRIVE_FOLDERS,
+  discardDriveFiles,
+  fileColumns,
+  loadStoredFile,
+  withStoredFile,
+  type DriveFolder,
+  type StoredFileRow,
+} from './files.js';

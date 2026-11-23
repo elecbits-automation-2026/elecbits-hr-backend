@@ -384,7 +384,11 @@ export const createQuarterReportsService = (deps: {
     hr: PeopleScope,
   ): Promise<QuarterReportDto[]> => {
     const all = (await repo.listReports({ employeeId })).map(toReport);
-    if (viewerId === employeeId || viewerId === currentRmId || reachesIn(hr, employeeId)) {
+    if (
+      viewerId === employeeId ||
+      viewerId === currentRmId ||
+      reachesIn(hr, employeeId)
+    ) {
       return all;
     }
     return all.filter((r) => r.rm?.id === viewerId);

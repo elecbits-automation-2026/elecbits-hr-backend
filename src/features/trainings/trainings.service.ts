@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import createError from 'http-errors';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import { reachesIn, type HrDoor } from '../access/index.js';
 import type {
@@ -330,7 +331,15 @@ export const createTrainingsService = (deps: {
       maxBytes: CERT_MAX_BYTES,
       what: 'The certificate',
     });
-    await repo.upsertCertificate({ trainingId: id, ...file, contentType }, actor);
+    await withStoredFile(
+      DRIVE_FOLDERS.trainings,
+      { fileName: `training-${id}-${file.fileName}`, contentType, data: file.data },
+      (driveFileId) =>
+        repo.upsertCertificate(
+          { trainingId: id, ...file, contentType, driveFileId },
+          actor,
+        ),
+    );
     return dto(id);
   };
 
@@ -347,7 +356,7 @@ export const createTrainingsService = (deps: {
     }
     const file = await repo.certificate(id);
     if (!file) throw createError(404, 'No certificate', { code: 'CERT_NOT_FOUND' });
-    return file;
+    return loadStoredFile(file);
   };
 
   /** The `training-reminders` job: once when due soon, once when overdue. */
@@ -369,6 +378,8 @@ export const createTrainingsService = (deps: {
             title: `“${t.title}” is due ${days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`}`,
             link: LINK_MINE,
           },
+          email: true,
+          dedupeKey: `training.due_soon:${t.id}`,
         });
         dueSoon += 1;
       }
@@ -380,6 +391,8 @@ export const createTrainingsService = (deps: {
             title: `“${t.title}” is overdue (was due ${t.due_on})`,
             link: LINK_MINE,
           },
+          email: true,
+          dedupeKey: `training.overdue:${t.id}`,
         });
         overdue += 1;
       }

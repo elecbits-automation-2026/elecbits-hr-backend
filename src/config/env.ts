@@ -124,6 +124,17 @@ export const env = {
     companyEmailDomain: required('COMPANY_EMAIL_DOMAIN', 'elecbits.in'),
     // The only email that may claim the org as Owner, once (§5.2).
     ownerClaimEmail: required('OWNER_CLAIM_EMAIL', 'admin@elecbits.in'),
+    // Brute-force guard on sign-in / claim / anonymous follow-up (per IP and,
+    // for sign-in, per email). Off only for automated test runs that sign in
+    // many times from one address — never turn it off in production.
+    rateLimit: {
+      enabled: isProduction || process.env.AUTH_RATE_LIMIT !== 'off',
+      windowMinutes: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MIN ?? 15),
+      // Failed sign-ins allowed per email per window (successes don't count).
+      perEmail: Number(process.env.AUTH_RATE_LIMIT_PER_EMAIL ?? 10),
+      // All attempts per IP per window (an office shares one IP, so generous).
+      perIp: Number(process.env.AUTH_RATE_LIMIT_PER_IP ?? 100),
+    },
   },
 
   // --- App ------------------------------------------------------------------

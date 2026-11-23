@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, ne } from 'drizzle-orm';
 import type { DbClient } from '../../db/client.js';
 import {
   auditLog,
@@ -189,6 +189,25 @@ export const createAuthRepository = (db: DbClient) => ({
       await tx.orm.insert(refreshTokens).values(next);
       return true;
     });
+  },
+
+  /**
+   * True once the family was ended on purpose (logout, deactivation, reuse):
+   * any row revoked for a reason other than routine rotation.
+   */
+  isFamilyEnded: async (familyId: string): Promise<boolean> => {
+    const rows = await db.orm
+      .select({ id: refreshTokens.id })
+      .from(refreshTokens)
+      .where(
+        and(
+          eq(refreshTokens.familyId, familyId),
+          isNotNull(refreshTokens.revokedAt),
+          ne(refreshTokens.revokedReason, 'rotated'),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
   },
 
   revokeFamily: async (familyId: string, reason: string): Promise<void> => {

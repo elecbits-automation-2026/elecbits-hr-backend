@@ -187,7 +187,9 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
     request: { params: idParam, body: jsonBody(endApplicationSchema) },
     responses: {
       200: jsonResponse('Restored', applicationSchema),
-      409: errorResponse('Not ended, position closed or on hold, or candidate anonymised'),
+      409: errorResponse(
+        'Not ended, position closed or on hold, or candidate anonymised',
+      ),
     },
   });
 
@@ -243,7 +245,7 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
       200: jsonResponse('Scored', applicationSchema),
       403: errorResponse('Not this round’s interviewer'),
       409: errorResponse('Not in interviews, or already scored'),
-      422: errorResponse('Attributes do not match the round\'s sheet'),
+      422: errorResponse("Attributes do not match the round's sheet"),
     },
   });
 
@@ -300,7 +302,8 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
     method: 'get',
     path: '/api/v1/hiring/board',
     tags,
-    summary: 'The Hiring board: approved lines and every candidate on their positions (TA)',
+    summary:
+      'The Hiring board: approved lines and every candidate on their positions (TA)',
     security,
     responses: { 200: jsonResponse('Board', hiringBoardSchema) },
   });
@@ -309,7 +312,8 @@ export const registerCandidatesDocs = (registry: OpenAPIRegistry): void => {
     method: 'post',
     path: '/api/v1/hiring/applications/{id}/rounds/{round}/schedule',
     tags,
-    summary: "Schedule (or move) a round with its interviewer — the position's recruiter or TA RM",
+    summary:
+      "Schedule (or move) a round with its interviewer — the position's recruiter or TA RM",
     security,
     request: { params: roundParam, body: jsonBody(scheduleInterviewSchema) },
     responses: {

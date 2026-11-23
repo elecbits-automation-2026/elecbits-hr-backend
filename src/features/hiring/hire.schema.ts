@@ -43,7 +43,11 @@ export const endOfferSchema = z
   .strict()
   .openapi('EndOffer');
 
-export const CANDIDATE_DOC_STATUSES = ['requested', 'received', 'not_applicable'] as const;
+export const CANDIDATE_DOC_STATUSES = [
+  'requested',
+  'received',
+  'not_applicable',
+] as const;
 
 export const candidateDocumentSchema = z
   .object({

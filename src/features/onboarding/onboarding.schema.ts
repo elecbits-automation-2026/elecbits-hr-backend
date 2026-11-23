@@ -1,7 +1,14 @@
 import { z } from '../../shared/zod.js';
 
 export const ONBOARDING_PHASES = ['before_start', 'week_one', 'first_30'] as const;
-export const TASK_OWNERS = ['employee', 'hr', 'manager', 'admin', 'ops', 'payroll'] as const;
+export const TASK_OWNERS = [
+  'employee',
+  'hr',
+  'manager',
+  'admin',
+  'ops',
+  'payroll',
+] as const;
 
 /** OPS / payroll: the joiner tasks waiting on their team. */
 export const teamTaskSchema = z
@@ -64,7 +71,11 @@ export const onboardingTaskSchema = z
     /** May the viewer tick it (plain step) or upload it (document step) — its owner only. */
     canAct: z.boolean(),
     file: z
-      .object({ fileName: z.string(), sizeBytes: z.number().int(), uploadedAt: z.string().datetime() })
+      .object({
+        fileName: z.string(),
+        sizeBytes: z.number().int(),
+        uploadedAt: z.string().datetime(),
+      })
       .nullable(),
   })
   .openapi('OnboardingTask');
@@ -102,6 +113,8 @@ export const queueRowSchema = z
     progress: z.object({ done: z.number().int(), total: z.number().int() }),
     /** Days until dueOn; negative = overdue. */
     daysLeft: z.number().int(),
+    /** The phase of the first open step (phase order); null once every step is done. */
+    currentPhase: z.enum(ONBOARDING_PHASES).nullable(),
     /** HR already nudged this journey today (one nudge a day). */
     nudgedToday: z.boolean(),
   })

@@ -17,6 +17,7 @@ import type { OpenDoorService } from '../open-door/index.js';
 import type { ProbationService } from '../probation/index.js';
 import type { PipService } from '../pip/index.js';
 import type { TrainingsService } from '../trainings/index.js';
+import type { PrivacyService } from '../privacy/index.js';
 import type { HiringJobsService } from '../hiring/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import type { JobRunRow, JobsRepository, ReminderToSend } from './jobs.repository.js';
@@ -63,9 +64,21 @@ export const createJobsService = (deps: {
   pip: PipService;
   hiring: HiringJobsService;
   trainings: Pick<TrainingsService, 'daily'>;
+  privacy: Pick<PrivacyService, 'retentionRun'>;
 }) => {
-  const { repo, authz, settings, concerns, openDoor, exits, probation, pip, hiring, trainings } =
-    deps;
+  const {
+    repo,
+    authz,
+    settings,
+    concerns,
+    openDoor,
+    exits,
+    probation,
+    pip,
+    hiring,
+    trainings,
+    privacy,
+  } = deps;
 
   const approvalReminders = async (now: Date): Promise<Record<string, number>> => {
     const today = localDate(now);
@@ -428,7 +441,8 @@ export const createJobsService = (deps: {
       authz.listBroadHolders('pr.payroll', 'update'),
       authz.ownerId(),
     ]);
-    const money = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const money = (n: number) =>
+      `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
     const toPay =
       counts.approved > 0
         ? ` · ${counts.approved} approved (${money(counts.approvedTotal)}) to pay`
@@ -445,9 +459,61 @@ export const createJobsService = (deps: {
       });
     };
     for (const id of pr) add(id, counts.pendingPr, '/hr/payroll?tab=reimbursements');
-    if (owner) add(owner, counts.pendingPr + counts.pendingAdmin, '/admin/reimbursements');
+    if (owner)
+      add(owner, counts.pendingPr + counts.pendingAdmin, '/admin/reimbursements');
     await repo.sendReminders(out);
-    return { sent: out.length, pendingPr: counts.pendingPr, pendingAdmin: counts.pendingAdmin };
+    return {
+      sent: out.length,
+      pendingPr: counts.pendingPr,
+      pendingAdmin: counts.pendingAdmin,
+    };
+  };
+
+  /**
+   * manager-digest (email service, 2026-11-23): on the first working day of
+   * each week, every manager with requests waiting on them gets ONE summary
+   * (bell + email) — leave, remote work, attendance fixes and late work
+   * updates still open on their side. Nothing waiting, nothing sent.
+   */
+  const managerDigest = async (now: Date): Promise<Record<string, number>> => {
+    const today = localDate(now);
+    const weekday = (new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7; // Mon = 0
+    const kind = `manager_digest:${addDays(today, -weekday)}`;
+    const [leaves, remote, fixes, late, last] = await Promise.all([
+      repo.pendingLeaves(),
+      repo.pendingRemoteWork(),
+      repo.pendingRegularizations(),
+      repo.pendingLateUpdates(),
+      repo.lastReminders(),
+    ]);
+    const tally = new Map<string, Record<string, number>>();
+    const add = (rm: string | null, ownerId: string, what: string) => {
+      if (!rm || rm === ownerId) return;
+      const t = tally.get(rm) ?? {};
+      t[what] = (t[what] ?? 0) + 1;
+      tally.set(rm, t);
+    };
+    for (const l of leaves) if (l.rm_open) add(l.effective_rm, l.employee_id, 'leave');
+    for (const w of remote)
+      if (w.rm_open) add(w.effective_rm, w.employee_id, 'remote work');
+    for (const r of fixes) add(r.effective_rm, r.employee_id, 'attendance fix');
+    for (const u of late) add(u.effective_rm, u.employee_id, 'late work update');
+
+    const out: ReminderToSend[] = [];
+    for (const [rm, t] of tally) {
+      if (last.has(`${kind}:${rm}:${rm}`)) continue;
+      const total = Object.values(t).reduce((a, b) => a + b, 0);
+      const parts = Object.entries(t).map(([k, n]) => `${n} ${k}`);
+      out.push({
+        kind,
+        subjectId: rm,
+        recipientId: rm,
+        title: `This week: ${total} request${total === 1 ? '' : 's'} waiting for you (${parts.join(', ')})`,
+        link: '/my-team',
+      });
+    }
+    await repo.sendReminders(out);
+    return { sent: out.length };
   };
 
   /** Registry: what each job is, when it is due, and what one run does. */
@@ -470,6 +536,12 @@ export const createJobsService = (deps: {
         'On the digest day of each month (Payroll setting, default the 25th; or the first working day after), one bell to PR and the Admin account: claims waiting for them and approved claims to pay.',
       schedule: `Monthly from the digest day at ${env.scheduler.dailyAt}`,
       run: reimbursementDigest,
+    },
+    'manager-digest': {
+      description:
+        'On the first working day of each week, one summary (bell + email) to every manager with requests waiting on them: leave, remote work, attendance fixes, late work updates.',
+      schedule: `Weekly, first working day at ${env.scheduler.dailyAt}`,
+      run: managerDigest,
     },
     'concern-deadlines': {
       description: 'Rings the handlers of concerns past their deadline.',
@@ -529,6 +601,12 @@ export const createJobsService = (deps: {
         'Anonymises candidates 6 months after they were last considered, when nothing is in play and they were never hired: name, contact, CV, notes and offer letters go; the counts stay.',
       schedule: `Working days at ${env.scheduler.dailyAt}`,
       run: (now) => hiring.retention(now),
+    },
+    'privacy-retention': {
+      description:
+        'When Automatic data purge is on (Admin setting, off by default): removes check-in GPS locations, medical certificates and long-gone ex-employees’ personal contact details past the Data retention periods. Payroll, tax and PF records are never touched.',
+      schedule: `Working days at ${env.scheduler.dailyAt}`,
+      run: (now) => privacy.retentionRun(now),
     },
     'hiring-goals': {
       description:

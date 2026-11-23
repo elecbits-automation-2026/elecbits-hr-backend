@@ -2,7 +2,7 @@ import { date, index, integer, text, timestamp, uuid } from 'drizzle-orm/pg-core
 import { orgSchema } from './departments.js';
 import { trainingStatusEnum, trainingStreamEnum } from './enums.js';
 import { employees } from './employees.js';
-import { bytea } from './policies.js';
+import { bytea, storedFileCheck } from './policies.js';
 
 /**
  * Trainings (learner, 2026-11-16): a manager assigns to their own reports,
@@ -42,18 +42,25 @@ export const trainings = orgSchema.table(
 );
 
 /** The proof a person attached when completing a training (one per training). */
-export const trainingCertificates = orgSchema.table('training_certificates', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  trainingId: uuid('training_id')
-    .notNull()
-    .unique()
-    .references(() => trainings.id),
-  fileName: text('file_name').notNull(),
-  contentType: text('content_type').notNull(),
-  sizeBytes: integer('size_bytes').notNull(),
-  data: bytea('data').notNull(),
-  uploadedBy: uuid('uploaded_by')
-    .notNull()
-    .references(() => employees.id),
-  uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const trainingCertificates = orgSchema.table(
+  'training_certificates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    trainingId: uuid('training_id')
+      .notNull()
+      .unique()
+      .references(() => trainings.id),
+    fileName: text('file_name').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    // Bytes in the row (STORAGE_DRIVER=db) or only the Shared Drive id (drive);
+    // storedFileCheck keeps exactly one of them set.
+    data: bytea('data'),
+    driveFileId: text('drive_file_id'),
+    uploadedBy: uuid('uploaded_by')
+      .notNull()
+      .references(() => employees.id),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [storedFileCheck('training_certificates_stored_ck', t)],
+);

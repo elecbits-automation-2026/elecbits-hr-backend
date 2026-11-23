@@ -39,7 +39,10 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 /** At risk = under 40% with under 30 days to the due date (incl. overdue). */
 const AT_RISK_PROGRESS = 40;
 const AT_RISK_DAYS = 30;
-export const isAtRisk = (g: Pick<GoalRow, 'progress' | 'dueOn'>, today: string): boolean =>
+export const isAtRisk = (
+  g: Pick<GoalRow, 'progress' | 'dueOn'>,
+  today: string,
+): boolean =>
   g.progress < AT_RISK_PROGRESS &&
   (Date.parse(g.dueOn) - Date.parse(today)) / DAY_MS < AT_RISK_DAYS;
 
@@ -49,7 +52,9 @@ type ScoredGoal = Pick<GoalRow, 'progress' | 'weight' | 'category'>;
 export const CATEGORY_WEIGHTS = { fundamental: 50, corporate: 25, general: 25 } as const;
 
 /** Σ(progress×weight)/Σweight inside one set of goals; null without weight. */
-const weightedProgress = (rows: Array<Pick<GoalRow, 'progress' | 'weight'>>): number | null => {
+const weightedProgress = (
+  rows: Array<Pick<GoalRow, 'progress' | 'weight'>>,
+): number | null => {
   const totalWeight = rows.reduce((acc, g) => acc + Number(g.weight), 0);
   if (totalWeight === 0) return null;
   return rows.reduce((acc, g) => acc + g.progress * Number(g.weight), 0) / totalWeight;
@@ -61,7 +66,11 @@ export const categoryAttainment = (rows: ScoredGoal[]) => {
     const v = weightedProgress(rows.filter((g) => g.category === c));
     return v === null ? null : Math.round(v);
   };
-  return { fundamental: of('fundamental'), corporate: of('corporate'), general: of('general') };
+  return {
+    fundamental: of('fundamental'),
+    corporate: of('corporate'),
+    general: of('general'),
+  };
 };
 
 /**
@@ -159,9 +168,13 @@ export const createPerformanceService = (deps: {
    */
   const refuseHiringGoal = (goal: GoalRow): void => {
     if (goal.positionId) {
-      throw createError(409, 'This is a hiring goal — it follows its position in Hiring', {
-        code: 'HIRING_GOAL',
-      });
+      throw createError(
+        409,
+        'This is a hiring goal — it follows its position in Hiring',
+        {
+          code: 'HIRING_GOAL',
+        },
+      );
     }
   };
 
@@ -185,7 +198,9 @@ export const createPerformanceService = (deps: {
       repo.findLines([employeeId]),
       settings.effective('performance.departmentTargets'),
     ]);
-    return targets.departments.find((t) => t.departmentId === line?.departmentId)?.kpi || null;
+    return (
+      targets.departments.find((t) => t.departmentId === line?.departmentId)?.kpi || null
+    );
   };
 
   const myGoalsFor = async (employeeId: string): Promise<MyGoalsDto> => {
@@ -244,6 +259,26 @@ export const createPerformanceService = (deps: {
     return (await repo.listUpdates(employeeId, from)).map(toUpdate);
   };
 
+  /** A person's goal weights in one quarter add up to 100 at most. */
+  const requireWeightRoom = async (
+    employeeId: string,
+    cycleId: string,
+    weight: number,
+    exceptGoalId?: string,
+  ): Promise<void> => {
+    const others = (await repo.listGoals(employeeId, cycleId)).filter(
+      (g) => g.id !== exceptGoalId,
+    );
+    const used = others.reduce((acc, g) => acc + Number(g.weight), 0);
+    if (used + weight > 100 + 1e-9) {
+      throw createError(
+        422,
+        `Goal weights would total ${round1(used + weight)}; they can add up to 100 at most (${round1(Math.max(0, 100 - used))} left)`,
+        { code: 'WEIGHT_OVER_100' },
+      );
+    }
+  };
+
   const createGoal = async (
     input: CreateGoalInput,
     actor: ActorContext,
@@ -268,6 +303,7 @@ export const createPerformanceService = (deps: {
     }
     const cycle = await currentCycle();
     requireOpen(cycle);
+    await requireWeightRoom(input.employeeId, cycle.id, input.weight);
     const row = await repo.insertGoal(
       {
         employeeId: input.employeeId,
@@ -331,6 +367,9 @@ export const createPerformanceService = (deps: {
     const goal = await repo.findGoal(goalId);
     if (!goal) throw createError(404, 'Goal not found', { code: 'GOAL_NOT_FOUND' });
     await requireGoalEditor(goal, actor);
+    if (input.weight !== undefined) {
+      await requireWeightRoom(goal.employeeId, goal.cycleId, input.weight, goal.id);
+    }
     const row = await repo.updateGoal(
       goalId,
       {
@@ -369,9 +408,13 @@ export const createPerformanceService = (deps: {
     }
     const cycle = await currentCycle();
     if (goal.cycleId !== cycle.id || cycle.closedAt) {
-      throw createError(409, 'This quarter is closed — its goals are frozen in the report', {
-        code: 'CYCLE_CLOSED',
-      });
+      throw createError(
+        409,
+        'This quarter is closed — its goals are frozen in the report',
+        {
+          code: 'CYCLE_CLOSED',
+        },
+      );
     }
     const row = await repo.updateProgress(goalId, input.progress, actor);
     return toGoal(row!, new Map());
@@ -399,8 +442,7 @@ export const createPerformanceService = (deps: {
     });
   };
 
-  const updatePolicy = () =>
-    settings.effectiveMany(['attendance.workWeek'] as const);
+  const updatePolicy = () => settings.effectiveMany(['attendance.workWeek'] as const);
 
   /** Every date from `from` to `to` inclusive (YYYY-MM-DD, UTC-safe). */
   const datesBetween = (from: string, to: string): string[] => {

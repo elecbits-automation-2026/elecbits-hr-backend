@@ -19,6 +19,7 @@ export const registerAuthDocs = (registry: OpenAPIRegistry): void => {
       200: jsonResponse('Session', sessionSchema),
       401: errorResponse('Invalid credentials'),
       403: errorResponse('Not a company email'),
+      429: errorResponse('Too many attempts (TOO_MANY_ATTEMPTS) — wait and retry'),
     },
   });
 
@@ -30,8 +31,11 @@ export const registerAuthDocs = (registry: OpenAPIRegistry): void => {
     request: { body: jsonBody(claimRecordSchema) },
     responses: {
       201: jsonResponse('Session', sessionSchema),
-      404: errorResponse('No employee record for this email'),
-      409: errorResponse('Already claimed'),
+      403: errorResponse(
+        'Invite link invalid, expired or used (same answer when no record exists)',
+      ),
+      409: errorResponse('Already claimed (only with a valid invite token)'),
+      429: errorResponse('Too many attempts (TOO_MANY_ATTEMPTS) — wait and retry'),
     },
   });
 
@@ -45,6 +49,7 @@ export const registerAuthDocs = (registry: OpenAPIRegistry): void => {
       201: jsonResponse('Session', sessionSchema),
       403: errorResponse('Email may not claim the organization'),
       410: errorResponse('Claim path already closed'),
+      429: errorResponse('Too many attempts (TOO_MANY_ATTEMPTS) — wait and retry'),
     },
   });
 

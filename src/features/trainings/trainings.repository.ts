@@ -7,6 +7,7 @@ import {
   trainings,
 } from '../../db/schema/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
+import { fileColumns } from '../storage/index.js';
 import type { TrainingStream } from './trainings.schema.js';
 
 export type TrainingRow = typeof trainings.$inferSelect;
@@ -176,7 +177,13 @@ export const createTrainingsRepository = (db: DbClient) => ({
     }),
 
   upsertCertificate: (
-    file: { trainingId: string; fileName: string; contentType: string; data: Buffer },
+    file: {
+      trainingId: string;
+      fileName: string;
+      contentType: string;
+      data: Buffer;
+      driveFileId?: string | null;
+    },
     actor: ActorContext,
   ) =>
     db.transaction(async (tx) => {
@@ -185,7 +192,7 @@ export const createTrainingsRepository = (db: DbClient) => ({
         fileName: file.fileName,
         contentType: file.contentType,
         sizeBytes: file.data.length,
-        data: file.data,
+        ...fileColumns(file),
         uploadedBy: actor.actorEmployeeId!,
       };
       await tx.orm

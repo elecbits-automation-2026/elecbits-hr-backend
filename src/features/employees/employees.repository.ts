@@ -70,6 +70,16 @@ const nextEmployeeCode = async (db: DbClient): Promise<string> => {
   return `EB-${String((maxRows[0]?.max ?? 0) + 1).padStart(4, '0')}`;
 };
 
+/** 'Asha K Gupta' -> first Asha, middle K, last Gupta; one word is a first name only. */
+const splitName = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] ?? name.trim(),
+    middleName: parts.length > 2 ? parts.slice(1, -1).join(' ') : null,
+    lastName: parts.length > 1 ? parts[parts.length - 1]! : null,
+  };
+};
+
 /**
  * Insert one invited record: next free employee code, the Employee batch plus
  * any pre-attached batches, the audit row and optional bell rows — one
@@ -89,6 +99,8 @@ const insertInvitedRow = async (
       .insert(employees)
       .values({
         name: input.name,
+        // The person can correct these in Profile; HR sees them filled meanwhile.
+        ...splitName(input.name),
         email: input.email,
         employeeCode,
         level: input.level,
@@ -353,7 +365,9 @@ export const createEmployeesRepository = (db: DbClient) => ({
       .select({ id: departments.id, name: departments.name, kind: departments.kind })
       .from(departments);
     return new Map(
-      rows.filter((r) => r.kind !== 'chapter').map((r) => [r.name.trim().toLowerCase(), r.id]),
+      rows
+        .filter((r) => r.kind !== 'chapter')
+        .map((r) => [r.name.trim().toLowerCase(), r.id]),
     );
   },
 
@@ -443,7 +457,11 @@ export const createEmployeesRepository = (db: DbClient) => ({
       const row = rows[0];
       if (!row) return undefined;
       if (before) {
-        await recordLevelChange(tx, { employeeId: id, from: before.level, to: row.level }, actor);
+        await recordLevelChange(
+          tx,
+          { employeeId: id, from: before.level, to: row.level },
+          actor,
+        );
       }
       await tx.orm.insert(auditLog).values({
         actorUserId: actor.actorUserId,

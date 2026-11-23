@@ -23,6 +23,7 @@ import type {
   RequestDto,
   RequestsDto,
   SlotDto,
+  UpdateSlotInput,
 } from './openDoor.schema.js';
 
 const LINK = '/grievances?tab=open-door';
@@ -64,12 +65,36 @@ export const createOpenDoorService = (deps: {
     return deps.concerns;
   };
 
-  const canPublish = async (employeeId: string): Promise<boolean> => {
-    const me = await repo.findEmployee(employeeId);
-    if (me && (me.level === 'L5' || me.level === 'L6')) return true;
+  /** HR for open door: holds hrbp.grievances update. */
+  const isHr = async (employeeId: string): Promise<boolean> => {
     const access = await authz.resolveAccess(employeeId, 'hrbp.grievances', 'update');
     return access.bypass || access.scopes.length > 0;
   };
+
+  const canPublish = async (employeeId: string): Promise<boolean> => {
+    const me = await repo.findEmployee(employeeId);
+    if (me && (me.level === 'L5' || me.level === 'L6')) return true;
+    return isHr(employeeId);
+  };
+
+  /**
+   * The slot type a publisher may use: "HR open door" is HR's label only;
+   * with none given, HR publish HR open door and department heads dept_head.
+   */
+  const slotTypeFor = async (
+    employeeId: string,
+    asked: SlotRow['slotType'] | undefined,
+  ): Promise<SlotRow['slotType']> => {
+    const hr = await isHr(employeeId);
+    if (asked === 'hr_open_door' && !hr) {
+      throw createError(422, 'Only HR publish HR open-door slots', {
+        code: 'HR_SLOT_TYPE',
+      });
+    }
+    return asked ?? (hr ? 'hr_open_door' : 'dept_head');
+  };
+
+  type OwnerCards = Awaited<ReturnType<OpenDoorRepository['ownerCards']>>;
 
   const started = (s: SlotRow) =>
     s.date < today() || (s.date === today() && hhmm(s.startTime) <= nowHhmm());
@@ -79,13 +104,21 @@ export const createOpenDoorService = (deps: {
     names: Map<string, string>,
     bookings: BookingRow[],
     viewerId: string,
+    cards: OwnerCards,
   ): SlotDto => {
     const mine = bookings.find(
       (b) => b.slotId === s.id && b.employeeId === viewerId && b.status !== 'cancelled',
     );
+    const card = cards.get(s.ownerId);
     return {
       id: s.id,
-      owner: { id: s.ownerId, name: names.get(s.ownerId) ?? '' },
+      owner: {
+        id: s.ownerId,
+        name: names.get(s.ownerId) ?? '',
+        designation: card?.designation ?? null,
+        department: card?.department ?? null,
+      },
+      slotType: s.slotType,
       date: s.date,
       startTime: hhmm(s.startTime),
       endTime: hhmm(s.endTime),
@@ -105,11 +138,13 @@ export const createOpenDoorService = (deps: {
     const rows = (await repo.slotsBetween(today(), addDaysIso(today(), horizon))).filter(
       (s) => s.ownerId !== viewerId && !started(s),
     );
-    const [names, bookings] = await Promise.all([
-      repo.namesByIds([...new Set(rows.map((s) => s.ownerId))]),
+    const ownerIds = [...new Set(rows.map((s) => s.ownerId))];
+    const [names, bookings, cards] = await Promise.all([
+      repo.namesByIds(ownerIds),
       repo.bookingsFor(rows.map((s) => s.id)),
+      repo.ownerCards(ownerIds),
     ]);
-    return rows.map((s) => toSlot(s, names, bookings, viewerId));
+    return rows.map((s) => toSlot(s, names, bookings, viewerId, cards));
   };
 
   const me = async (viewerId: string): Promise<OpenDoorMeDto> => {
@@ -125,6 +160,8 @@ export const createOpenDoorService = (deps: {
     );
     const allSlots = [...mySlots, ...ownRaw];
     const allBookings = await repo.bookingsFor(allSlots.map((s) => s.id));
+    const ownerIds = [...new Set(allSlots.map((s) => s.ownerId))];
+    const cards = await repo.ownerCards(ownerIds);
     const names = await repo.namesByIds([
       ...new Set([
         ...allSlots.map((s) => s.ownerId),
@@ -138,7 +175,7 @@ export const createOpenDoorService = (deps: {
           id: b.id,
           status: b.status,
           topic: b.topic,
-          slot: toSlot(s, names, allBookings, viewerId),
+          slot: toSlot(s, names, allBookings, viewerId, cards),
         };
       })
       .sort((a, b) =>
@@ -147,7 +184,7 @@ export const createOpenDoorService = (deps: {
         ),
       );
     const slotsOut: OwnerSlotDto[] = ownRaw.map((s) => ({
-      ...toSlot(s, names, allBookings, viewerId),
+      ...toSlot(s, names, allBookings, viewerId, cards),
       bookings: allBookings
         .filter((b) => b.slotId === s.id)
         .map((b) => ({
@@ -157,7 +194,20 @@ export const createOpenDoorService = (deps: {
           status: b.status,
         })),
     }));
-    return { canPublish: publish, horizonDays: horizon, bookings, slots: slotsOut };
+    // The types this person may publish, their default first (empty if they cannot).
+    const hr = publish && (await isHr(viewerId));
+    const slotTypes: SlotRow['slotType'][] = !publish
+      ? []
+      : hr
+        ? ['hr_open_door', 'dept_head', 'skip_level']
+        : ['dept_head', 'skip_level'];
+    return {
+      canPublish: publish,
+      slotTypes,
+      horizonDays: horizon,
+      bookings,
+      slots: slotsOut,
+    };
   };
 
   const createSlot = async (input: CreateSlotInput, actor: ActorContext) => {
@@ -172,6 +222,7 @@ export const createOpenDoorService = (deps: {
     ) {
       throw createError(422, 'Pick a time in the future', { code: 'PAST_SLOT' });
     }
+    const slotType = await slotTypeFor(actor.actorEmployeeId, input.slotType);
     await repo.insertSlot(
       {
         ownerId: actor.actorEmployeeId,
@@ -179,10 +230,29 @@ export const createOpenDoorService = (deps: {
         startTime: input.startTime,
         endTime: input.endTime,
         capacity: input.capacity ?? 1,
+        slotType,
         note: input.note ?? null,
       },
       actor,
     );
+    return me(actor.actorEmployeeId);
+  };
+
+  /** The owner changes a live slot's type or note (times stay — cancel and republish). */
+  const updateSlot = async (id: string, input: UpdateSlotInput, actor: ActorContext) => {
+    const s = await repo.findSlot(id);
+    if (!s || s.ownerId !== actor.actorEmployeeId) {
+      throw createError(404, 'Slot not found', { code: 'SLOT_NOT_FOUND' });
+    }
+    if (s.cancelledAt)
+      throw createError(409, 'Already cancelled', { code: 'SLOT_CANCELLED' });
+    const patch: Partial<Pick<SlotRow, 'slotType' | 'note'>> = {};
+    if (input.slotType !== undefined) {
+      patch.slotType = await slotTypeFor(actor.actorEmployeeId, input.slotType);
+    }
+    if (input.note !== undefined) patch.note = input.note || null;
+    const row = await repo.updateSlot(id, patch, actor);
+    if (!row) throw createError(409, 'Already cancelled', { code: 'SLOT_CANCELLED' });
     return me(actor.actorEmployeeId);
   };
 
@@ -313,6 +383,9 @@ export const createOpenDoorService = (deps: {
       slotRows.filter((s): s is SlotRow => !!s).map((s) => [s.id, s]),
     );
     const bookings = await repo.bookingsFor([...slotsById.keys()]);
+    const cards = await repo.ownerCards([
+      ...new Set([...slotsById.values()].map((s) => s.ownerId)),
+    ]);
     const names = await repo.namesByIds([
       ...new Set(
         all
@@ -335,7 +408,7 @@ export const createOpenDoorService = (deps: {
         preferredTo: r.preferredTo,
         topic: r.topic,
         status: r.status,
-        slot: s ? toSlot(s, names, bookings, r.employeeId) : null,
+        slot: s ? toSlot(s, names, bookings, r.employeeId, cards) : null,
         declineReason: r.declineReason,
         decidedBy: person(r.decidedBy),
         createdAt: r.createdAt.toISOString(),
@@ -469,6 +542,7 @@ export const createOpenDoorService = (deps: {
         startTime: input.startTime,
         endTime: input.endTime,
         note: input.note ?? null,
+        slotType: await slotTypeFor(actor.actorEmployeeId, undefined),
       },
       actor,
       {
@@ -559,6 +633,7 @@ export const createOpenDoorService = (deps: {
     slots,
     me,
     createSlot,
+    updateSlot,
     cancelSlot,
     book,
     cancelBooking,

@@ -2,11 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { pipController } from './pip.controller.js';
-import {
-  cancelPipSchema,
-  createPipSchema,
-  pipOutcomeSchema,
-} from './pip.schema.js';
+import { cancelPipSchema, createPipSchema, pipOutcomeSchema } from './pip.schema.js';
 
 /**
  * PIPs — mounted at /api/v1/pips. The person, their RM and HR (hrbp.people

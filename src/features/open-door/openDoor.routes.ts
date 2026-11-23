@@ -9,6 +9,7 @@ import {
   declineRequestSchema,
   markSchema,
   offerRequestSchema,
+  updateSlotSchema,
 } from './openDoor.schema.js';
 
 /**
@@ -17,6 +18,7 @@ import {
  *   GET  /slots                   bookable slots (today → the horizon, not your own)
  *   GET  /me                      my bookings, canPublish, my slots with their bookings
  *   POST /slots                   publish (HR or a department head — service-gated)
+ *   PATCH /slots/:id              the owner changes the slot type / note
  *   POST /slots/:id/cancel        the owner cancels; bookers are told
  *   POST /slots/:id/book          take a seat (capacity locked in the transaction)
  *   POST /bookings/:id/cancel     cancel my booking before the slot starts
@@ -40,6 +42,11 @@ openDoorRoutes.post(
   '/slots',
   validateBody(createSlotSchema),
   openDoorController.createSlot,
+);
+openDoorRoutes.patch(
+  '/slots/:id',
+  validateBody(updateSlotSchema),
+  openDoorController.updateSlot,
 );
 openDoorRoutes.post('/slots/:id/cancel', openDoorController.cancelSlot);
 openDoorRoutes.post('/slots/:id/book', validateBody(bookSchema), openDoorController.book);

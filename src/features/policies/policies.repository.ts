@@ -9,6 +9,7 @@ import {
   policyAcks,
   policyDocuments,
 } from '../../db/schema/index.js';
+import { fileColumns } from '../storage/index.js';
 import { insertNotifications, type NotificationEvent } from '../notifications/index.js';
 import type { CreatePolicyInput } from './policies.schema.js';
 
@@ -189,7 +190,12 @@ export const createPoliciesRepository = (db: DbClient) => ({
    */
   upsertDocument: async (
     policy: PolicyRow,
-    doc: { fileName: string; contentType: string; data: Buffer },
+    doc: {
+      fileName: string;
+      contentType: string;
+      data: Buffer;
+      driveFileId?: string | null;
+    },
     actor: ActorContext,
   ): Promise<void> => {
     await db.transaction(async (tx) => {
@@ -200,7 +206,7 @@ export const createPoliciesRepository = (db: DbClient) => ({
           fileName: doc.fileName,
           contentType: doc.contentType,
           sizeBytes: doc.data.length,
-          data: doc.data,
+          ...fileColumns(doc),
           uploadedBy: actor.actorEmployeeId,
         })
         .onConflictDoUpdate({
@@ -209,7 +215,7 @@ export const createPoliciesRepository = (db: DbClient) => ({
             fileName: doc.fileName,
             contentType: doc.contentType,
             sizeBytes: doc.data.length,
-            data: doc.data,
+            ...fileColumns(doc),
             uploadedBy: actor.actorEmployeeId,
             uploadedAt: new Date(),
           },

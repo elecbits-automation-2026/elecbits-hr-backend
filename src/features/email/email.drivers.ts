@@ -42,8 +42,26 @@ interface ServiceAccountKey {
 
 /** The key is the JSON itself or a path to the file (env GOOGLE_SERVICE_ACCOUNT_KEY). */
 const loadKey = (raw: string): ServiceAccountKey => {
-  const json = raw.trim().startsWith('{') ? raw : readFileSync(raw, 'utf8');
-  const key = JSON.parse(json) as Partial<ServiceAccountKey>;
+  const inline = raw.trim().startsWith('{');
+  let json: string;
+  try {
+    json = inline ? raw : readFileSync(raw, 'utf8');
+  } catch {
+    // On a server the value is usually pasted from a laptop .env as a local
+    // path (e.g. D:\key.json) that does not exist inside the container.
+    throw new Error(
+      'GOOGLE_SERVICE_ACCOUNT_KEY is a file path that does not exist on this server — paste the key JSON itself (on one line) instead',
+    );
+  }
+  let key: Partial<ServiceAccountKey>;
+  try {
+    key = JSON.parse(json) as Partial<ServiceAccountKey>;
+  } catch {
+    // Never echo the parse error: it quotes part of the private key.
+    throw new Error(
+      'GOOGLE_SERVICE_ACCOUNT_KEY is not valid JSON — paste the whole key file content on one line',
+    );
+  }
   if (!key.client_email || !key.private_key) {
     throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is not a service-account key');
   }

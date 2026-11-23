@@ -71,7 +71,7 @@ export const createPipRepository = (db: DbClient) => {
       if (unique.length === 0) return new Map<string, PersonRow>();
       const rows = await db.query<PersonRow>(
         `SELECT e.id, e.name, e.employee_code, e.designation, e.status,
-                coalesce(e.leave_approver, e.reports_to) AS rm_id
+                e.reports_to AS rm_id
            FROM org.employees e WHERE e.id = ANY($1::uuid[])`,
         [unique],
       );

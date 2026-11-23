@@ -43,6 +43,7 @@ import { registerSettingsDocs } from '../features/settings/index.js';
 import { registerNotificationsDocs } from '../features/notifications/index.js';
 import { registerJobsDocs } from '../features/jobs/index.js';
 import { registerEmailDocs } from '../features/email/index.js';
+import { registerPrivacyDocs } from '../features/privacy/index.js';
 import { registerConcernsDocs } from '../features/concerns/index.js';
 import { registerAssistantDocs } from '../features/assistant/index.js';
 import { registerOpenDoorDocs } from '../features/open-door/index.js';
@@ -109,6 +110,7 @@ export const buildOpenApiDocument = () => {
   registerNotificationsDocs(registry);
   registerJobsDocs(registry);
   registerEmailDocs(registry);
+  registerPrivacyDocs(registry);
   registerConcernsDocs(registry);
   registerOpenDoorDocs(registry);
   registerAssistantDocs(registry);

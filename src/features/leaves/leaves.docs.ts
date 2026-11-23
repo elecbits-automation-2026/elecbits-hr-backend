@@ -40,7 +40,8 @@ export const registerLeavesDocs = (registry: OpenAPIRegistry): void => {
     method: 'get',
     path: '/api/v1/leaves/approval-route',
     tags: ['Leaves'],
-    summary: 'Who a request of this type would go to (the form preview; same rule as raising)',
+    summary:
+      'Who a request of this type would go to (the form preview; same rule as raising)',
     security: [{ bearerAuth: [] }],
     request: { query: z.object({ type: z.enum(LEAVE_TYPES) }) },
     responses: {

@@ -41,12 +41,7 @@ export const createSettingsService = (deps: {
     const holds = (moduleKey: string, action: Action): Promise<boolean> => {
       const k = `${moduleKey}:${action}`;
       if (!memo.has(k)) {
-        memo.set(
-          k,
-          authz
-            .resolveAccess(callerId, moduleKey, action)
-            .then(hasOrgScope),
-        );
+        memo.set(k, authz.resolveAccess(callerId, moduleKey, action).then(hasOrgScope));
       }
       return memo.get(k)!;
     };

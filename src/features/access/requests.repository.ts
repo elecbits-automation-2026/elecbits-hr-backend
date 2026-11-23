@@ -127,7 +127,10 @@ export const createRequestsRepository = (db: DbClient) => ({
         subject: `grant_requests:${request.id}`,
         detail: JSON.stringify({ employeeId: input.employeeId, items: input.items }),
       });
-      await insertNotifications(tx, notify.recipientIds, notify.event);
+      await insertNotifications(tx, notify.recipientIds, notify.event, {
+        email: true,
+        dedupeKey: `access.request_created:${request.id}`,
+      });
       return request;
     });
   },
@@ -206,7 +209,10 @@ export const createRequestsRepository = (db: DbClient) => ({
           reason: decision.reason,
         }),
       });
-      await insertNotifications(tx, notify.recipientIds, notify.event);
+      await insertNotifications(tx, notify.recipientIds, notify.event, {
+        email: true,
+        dedupeKey: `access.request_decided:${request.id}`,
+      });
       return updated;
     });
   },

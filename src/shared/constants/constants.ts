@@ -118,7 +118,11 @@ export const accruedAllocation = (
 ): number => {
   const now = opts.now ?? new Date();
   const monthly =
-    type === 'earned' ? EL_MONTHLY_ACCRUAL : type === 'menstrual' ? MENSTRUAL_MONTHLY_ACCRUAL : null;
+    type === 'earned'
+      ? EL_MONTHLY_ACCRUAL
+      : type === 'menstrual'
+        ? MENSTRUAL_MONTHLY_ACCRUAL
+        : null;
   if (monthly === null) {
     if (!opts.joinedOn) return LEAVE_YEARLY_QUOTAS[type];
     if (type === 'compassionate') {
@@ -126,7 +130,8 @@ export const accruedAllocation = (
     }
     return proratedQuota(LEAVE_YEARLY_QUOTAS[type], year, opts.joinedOn);
   }
-  const lastMonth = year < now.getFullYear() ? 12 : year > now.getFullYear() ? 0 : now.getMonth() + 1;
+  const lastMonth =
+    year < now.getFullYear() ? 12 : year > now.getFullYear() ? 0 : now.getMonth() + 1;
   const joinedYear = opts.joinedOn ? Number(opts.joinedOn.slice(0, 4)) : null;
   if (joinedYear !== null && joinedYear > year) return 0;
   const firstMonth = joinedYear === year ? Number(opts.joinedOn!.slice(5, 7)) : 1;
@@ -150,9 +155,19 @@ export type RightsLevel = keyof typeof RIGHTS_LEVELS;
 export const AWARD_TYPES = {
   spot: { name: 'Spot Award', cadence: 'any', valueInr: 2500, team: false },
   owner: { name: 'Ownership Award', cadence: 'monthly', valueInr: 5000, team: false },
-  customer: { name: 'Customer Champion', cadence: 'monthly', valueInr: 5000, team: false },
+  customer: {
+    name: 'Customer Champion',
+    cadence: 'monthly',
+    valueInr: 5000,
+    team: false,
+  },
   innov: { name: 'Innovation Award', cadence: 'quarterly', valueInr: 10000, team: false },
-  team: { name: 'Team of the Quarter', cadence: 'quarterly', valueInr: 25000, team: true },
+  team: {
+    name: 'Team of the Quarter',
+    cadence: 'quarterly',
+    valueInr: 25000,
+    team: true,
+  },
 } as const;
 export type AwardType = keyof typeof AWARD_TYPES;
 
@@ -165,11 +180,31 @@ export const BAND_LADDER: Record<
   Level,
   { name: string; next: Level | null; expects: string }
 > = {
-  L1: { name: 'Associate', next: 'L2', expects: 'Executes defined tasks with supervision. Owns quality of their own output.' },
-  L2: { name: 'Engineer / Executive', next: 'L3', expects: 'Owns a workstream end to end. Raises risks before they land.' },
-  L3: { name: 'Senior Engineer / Specialist', next: 'L4', expects: "Owns a subsystem. Reviews others' work. Unblocks juniors." },
-  L4: { name: 'Lead', next: 'L5', expects: 'Owns delivery across a team. Answers for outcomes, not effort.' },
-  L5: { name: 'Department Head', next: 'L6', expects: 'Owns a function: its people, its plan and its budget.' },
+  L1: {
+    name: 'Associate',
+    next: 'L2',
+    expects: 'Executes defined tasks with supervision. Owns quality of their own output.',
+  },
+  L2: {
+    name: 'Engineer / Executive',
+    next: 'L3',
+    expects: 'Owns a workstream end to end. Raises risks before they land.',
+  },
+  L3: {
+    name: 'Senior Engineer / Specialist',
+    next: 'L4',
+    expects: "Owns a subsystem. Reviews others' work. Unblocks juniors.",
+  },
+  L4: {
+    name: 'Lead',
+    next: 'L5',
+    expects: 'Owns delivery across a team. Answers for outcomes, not effort.',
+  },
+  L5: {
+    name: 'Department Head',
+    next: 'L6',
+    expects: 'Owns a function: its people, its plan and its budget.',
+  },
   L6: { name: 'Leadership', next: null, expects: 'Owns the direction of the company.' },
 };
 
@@ -194,7 +229,10 @@ export const INVITE_LINK_DAYS = 7;
 /** Days back a punch may be regularized or a late work update entered. */
 export const REGULARIZE_WINDOW_DAYS = 14;
 /** Waiting approvals ring after / repeat every this many working days. */
-export const APPROVAL_REMINDERS = { afterWorkingDays: 2, repeatEveryWorkingDays: 2 } as const;
+export const APPROVAL_REMINDERS = {
+  afterWorkingDays: 2,
+  repeatEveryWorkingDays: 2,
+} as const;
 /**
  * Reimbursements are approved once a month (learner, 2026-11-05): PR and the
  * Admin account get one bell on this day — or the first working day after it.
@@ -206,4 +244,7 @@ export const REIMBURSEMENT_DIGEST_DAY = 25;
  */
 export const SICK_CERT_AFTER_DAYS = 3;
 /** Overdue lab loans / gate passes: ask again every N, escalate after M working days. */
-export const RETURN_REMINDERS = { repeatEveryWorkingDays: 2, escalateAfterWorkingDays: 5 } as const;
+export const RETURN_REMINDERS = {
+  repeatEveryWorkingDays: 2,
+  escalateAfterWorkingDays: 5,
+} as const;

@@ -146,11 +146,7 @@ hiringRoutes.put(
   validateBody(saveScorecardSchema),
   hiringController.saveDocument,
 );
-hiringRoutes.post(
-  '/positions/:id/jd/submit',
-  taWrites,
-  hiringController.submitDocument,
-);
+hiringRoutes.post('/positions/:id/jd/submit', taWrites, hiringController.submitDocument);
 hiringRoutes.post(
   '/positions/:id/scorecard/submit',
   taWrites,
@@ -338,7 +334,11 @@ hiringRoutes.put(
   validateBody(offerDraftSchema),
   hireController.saveOfferDraft,
 );
-hiringRoutes.post('/applications/:id/offer/submit', taUpdates, hireController.submitOffer);
+hiringRoutes.post(
+  '/applications/:id/offer/submit',
+  taUpdates,
+  hireController.submitOffer,
+);
 // The HR Head approves and signs (a relationship — the hiring HR department's head).
 hiringRoutes.get('/offers/pending', hireController.pendingOffers);
 hiringRoutes.put(

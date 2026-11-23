@@ -107,7 +107,8 @@ export const createReportsService = (deps: {
       location: r.location,
       noticeDays: r.notice_days,
       joiningDate: r.joining_date,
-      scoreTotal: totals.find((t) => t.application_id === r.application_id)?.total ?? null,
+      scoreTotal:
+        totals.find((t) => t.application_id === r.application_id)?.total ?? null,
       addedOn: localDateOf(new Date(r.created_at)),
       email: internal ? r.email : null,
       phone: internal ? r.phone : null,

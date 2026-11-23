@@ -30,7 +30,9 @@ const sniff = (data: Buffer): UploadKind | 'zip' | null => {
 
 const listLabels = (kinds: UploadKind[]) => {
   const labels = [...new Set(kinds.map((k) => KIND[k].label))];
-  return labels.length === 1 ? labels[0]! : `${labels.slice(0, -1).join(', ')} or ${labels.at(-1)}`;
+  return labels.length === 1
+    ? labels[0]!
+    : `${labels.slice(0, -1).join(', ')} or ${labels.at(-1)}`;
 };
 
 /**
@@ -50,9 +52,13 @@ export const checkUpload = (
     throw createError(422, `${what} is empty`, { code: 'BAD_FILE_SIZE' });
   }
   if (file.data.length > maxBytes) {
-    throw createError(422, `${what} must be under ${Math.round(maxBytes / (1024 * 1024))} MB`, {
-      code: 'BAD_FILE_SIZE',
-    });
+    throw createError(
+      422,
+      `${what} must be under ${Math.round(maxBytes / (1024 * 1024))} MB`,
+      {
+        code: 'BAD_FILE_SIZE',
+      },
+    );
   }
   // No extension (an API caller without ?filename=) → the bytes alone decide.
   const name = file.fileName.toLowerCase();
@@ -64,7 +70,9 @@ export const checkUpload = (
       (sniffed === k || (k === 'docx' && sniffed === 'zip')),
   );
   if (!kind) {
-    throw createError(422, `Upload a ${listLabels(kinds)} file`, { code: 'BAD_FILE_TYPE' });
+    throw createError(422, `Upload a ${listLabels(kinds)} file`, {
+      code: 'BAD_FILE_TYPE',
+    });
   }
   return KIND[kind].type;
 };

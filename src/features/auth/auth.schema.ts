@@ -6,7 +6,9 @@ import { z } from '../../shared/zod.js';
 export const loginSchema = z
   .object({
     email: z.string().email(),
-    password: z.string().min(8),
+    // No length rule here: a short wrong password must get the same 401 as
+    // any other wrong password (the 8-char minimum applies when one is set).
+    password: z.string().min(1).max(200),
   })
   .strict()
   .openapi('Login');

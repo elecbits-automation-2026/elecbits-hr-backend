@@ -1,5 +1,6 @@
 import createError from 'http-errors';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type {
   ActorContext,
   PoliciesRepository,
@@ -254,7 +255,7 @@ export const createPoliciesService = (deps: { repo: PoliciesRepository }) => {
         code: 'DOCUMENT_NOT_FOUND',
       });
     }
-    return doc;
+    return loadStoredFile(doc);
   };
 
   /** Store/replace the PDF; the external link is cleared in the same act. */
@@ -269,7 +270,16 @@ export const createPoliciesService = (deps: { repo: PoliciesRepository }) => {
       maxBytes: 20 * 1024 * 1024,
       what: 'The policy document',
     });
-    await repo.upsertDocument(policy, { ...doc, contentType }, actor);
+    await withStoredFile(
+      DRIVE_FOLDERS.policies,
+      {
+        fileName: `${policy.code} v${policy.version}-${doc.fileName}`,
+        contentType,
+        data: doc.data,
+      },
+      (driveFileId) =>
+        repo.upsertDocument(policy, { ...doc, contentType, driveFileId }, actor),
+    );
     const updated = await requireRow(policyId);
     return toPolicy(updated, await repo.documentPolicyIds());
   };

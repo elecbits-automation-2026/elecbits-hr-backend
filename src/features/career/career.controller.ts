@@ -4,7 +4,11 @@ import { isUuid } from '../../shared/helpers/helpers.js';
 import { createAuthzRepository } from '../access/authz.repository.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createCareerRepository } from './career.repository.js';
-import type { AddTrackNoteInput, CloseTrackInput, OpenTrackInput } from './career.schema.js';
+import type {
+  AddTrackNoteInput,
+  CloseTrackInput,
+  OpenTrackInput,
+} from './career.schema.js';
 import { createCareerService } from './career.service.js';
 
 /** Composition root: request-scoped service. */

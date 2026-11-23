@@ -56,16 +56,25 @@ export const createDailyKpiService = (deps: {
   const build = async (people: KpiPerson[], date: string): Promise<DailyKpiDto> => {
     const today = localDate();
     const ids = people.map((p) => p.id);
-    const who = people.map((p) => ({ id: p.id, name: p.name, employeeCode: p.employeeCode }));
+    const who = people.map((p) => ({
+      id: p.id,
+      name: p.name,
+      employeeCode: p.employeeCode,
+    }));
     // The 7-day hours window can start in the previous month.
     const weekStart = localDate(new Date(Date.parse(`${date}T12:00:00`) - 6 * DAY_MS));
     const crosses = weekStart.slice(0, 7) !== date.slice(0, 7);
-    const [months, before, perf, targets, rules] = await Promise.all([
+    // The day in server-local time, the same clock `localDate` reads.
+    const dayStart = new Date(`${date}T00:00:00`);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const [months, before, perf, targets, rules, moved] = await Promise.all([
       attendance.peopleMonth(who, date.slice(0, 7)),
       crosses ? attendance.peopleMonth(who, weekStart.slice(0, 7)) : Promise.resolve([]),
       performance.dailyKpiInputs(ids, date),
       settings.effective('performance.departmentTargets'),
       settings.effective('attendance.hourRules'),
+      repo.goalsMoved(ids, dayStart, dayEnd),
     ]);
     const { cycle } = perf;
     const mid =
@@ -94,7 +103,10 @@ export const createDailyKpiService = (deps: {
         done: recent.filter((s) => WRITTEN.has(s.status)).length,
         workingDays: recent.length,
       };
-      const goals = inputs?.goals ?? { count: 0, atRisk: 0, attainment: null };
+      const goals = {
+        ...(inputs?.goals ?? { count: 0, atRisk: 0, attainment: null }),
+        moved: moved.get(p.id) ?? 0,
+      };
       // Average hours over the 7 days up to the date (days with hours only).
       const week = [...before, ...months]
         .filter((m) => m.employee.id === p.id)

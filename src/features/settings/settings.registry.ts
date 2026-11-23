@@ -1,5 +1,8 @@
 import { env } from '../../config/env.js';
-import { AWARD_TYPES, REIMBURSEMENT_DIGEST_DAY } from '../../shared/constants/constants.js';
+import {
+  AWARD_TYPES,
+  REIMBURSEMENT_DIGEST_DAY,
+} from '../../shared/constants/constants.js';
 import { z } from '../../shared/zod.js';
 
 /**
@@ -46,6 +49,39 @@ const awardEntry = z.object({
   team: z.boolean().default(false),
 });
 
+/**
+ * The default privacy notice (DPDP Act 2023, report M12). Plain language on
+ * purpose; HR replaces the [placeholders] before go-live.
+ */
+const DEFAULT_PRIVACY_NOTICE = `How Elecbits HR uses your personal data
+
+Elecbits ("we") uses this HR system to run your employment. This notice explains what we collect, why, and your rights under the Digital Personal Data Protection Act, 2023.
+
+What we collect
+• Identity and contact details: name, employee code, company and personal email, phone, addresses, date of birth, gender.
+• Employment details: role, department, manager, joining date, level, goals, work updates, reviews, awards, trainings.
+• Attendance: check-in and check-out times and, when your browser shares it, the location of each punch.
+• Leave, including medical certificates you upload.
+• Pay: salary, bank account, PAN, UAN / PF and ESIC numbers, payslips, loans and expense claims.
+• Concerns and open-door requests you raise.
+
+Why we use it
+To pay you correctly, meet tax, PF, ESIC and labour-law duties, manage attendance and leave, support your performance and growth, keep company assets safe, and handle concerns. We do not sell your data or use it for advertising.
+
+Who can see it
+Only people whose role needs it: you, your reporting manager for team matters, HR, Payroll for pay, and Operations for assets. Salary, bank details and medical certificates are restricted further, and every time someone other than you opens them it is recorded. Service providers that host the system (our cloud provider, Google for email) process data only on our instructions.
+
+How long we keep it
+While you work here, and afterwards only as long as the law or a genuine need requires. Punch locations are removed after 12 months and medical certificates 24 months after the leave. After you leave, your personal contact details are removed 8 years after your relieving date; payroll, tax and PF records are kept as the law requires.
+
+Your rights
+You can see and download your data (My profile → Download my data), ask us to correct or update it, ask us to erase data we no longer need, nominate someone to exercise these rights for you, and raise a grievance. If we do not resolve your grievance, you may complain to the Data Protection Board of India.
+
+Contact
+Grievance officer: [Name], [designation] — [email@elecbits.in], [phone].
+
+By selecting "I accept" you confirm you have read this notice.`;
+
 /** Saturday pattern for the work week (Sundays are always off). */
 export const SATURDAY_PATTERNS = ['all_working', 'all_off', 'first_third_off'] as const;
 
@@ -61,13 +97,29 @@ export const LOGO_MAX_BYTES = 60 * 1024;
  */
 const logoDataUrl = z
   .string()
-  .regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/, 'Logo must be a PNG or JPEG image')
-  .refine((v) => {
-    const data = Buffer.from(v.slice(v.indexOf(',') + 1), 'base64');
-    const png = data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    const jpg = data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
-    return (png || jpg) && data.length <= LOGO_MAX_BYTES;
-  }, `Logo must be a real PNG or JPEG under ${LOGO_MAX_BYTES / 1024} KB`);
+  .regex(
+    /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/,
+    'Logo must be a PNG or JPEG image',
+  )
+  .refine(
+    (v) => {
+      const data = Buffer.from(v.slice(v.indexOf(',') + 1), 'base64');
+      const png = data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const jpg = data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+      return (png || jpg) && data.length <= LOGO_MAX_BYTES;
+    },
+    `Logo must be a real PNG or JPEG under ${LOGO_MAX_BYTES / 1024} KB`,
+  );
+
+/** A folder link for the page to open — https only, so it can never be a script URL. */
+const httpsLinkOrBlank = z
+  .string()
+  .trim()
+  .max(500)
+  .refine(
+    (v) => v === '' || /^https:\/\/[^\s]+$/i.test(v),
+    'Links must start with https://',
+  );
 
 const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const toMin = (hm: string): number => {
@@ -168,6 +220,15 @@ const definitions = {
     schema: z.number().int().min(0).max(5000),
     default: 100 as number,
   },
+  'attendance.remoteWorkMaxDays': {
+    area: 'attendance',
+    live: true,
+    label: 'Longest remote-work request (calendar days)',
+    description:
+      'One remote-work request may cover at most this many calendar days, first to last day. Longer stretches are raised as several requests so the RM looks at them again.',
+    schema: z.number().int().min(1).max(366),
+    default: 30 as number,
+  },
   'payroll.payslipHeader': {
     area: 'payroll',
     live: true,
@@ -187,7 +248,7 @@ const definitions = {
     live: true,
     label: 'Professional tax by state',
     description:
-      'Each state lists the punch zones that belong to it (an employee\'s base zone name contains one of them, case-insensitive) and its monthly slabs: from a prorated monthly salary, the monthly PT, and the February amount where the state charges more that month. A state not listed (Delhi, for example) charges no PT. Draft payslips pick up a change when edited or finalized; finalized slips never change.',
+      "Each state lists the punch zones that belong to it (an employee's base zone name contains one of them, case-insensitive) and its monthly slabs: from a prorated monthly salary, the monthly PT, and the February amount where the state charges more that month. A state not listed (Delhi, for example) charges no PT. Draft payslips pick up a change when edited or finalized; finalized slips never change.",
     schema: z.object({
       states: z
         .array(
@@ -213,7 +274,9 @@ const definitions = {
         {
           state: 'Karnataka',
           zoneNames: ['Bangalore'] as string[],
-          slabs: [{ fromMonthly: 25_000, amount: 200, februaryAmount: 300 as number | null }],
+          slabs: [
+            { fromMonthly: 25_000, amount: 200, februaryAmount: 300 as number | null },
+          ],
         },
       ],
     },
@@ -248,7 +311,12 @@ const definitions = {
       wageCeiling: z.number().int().min(0),
       lowWageDaily: z.number().min(0),
     }),
-    default: { employeePct: 0.75, employerPct: 3.25, wageCeiling: 21000, lowWageDaily: 176 },
+    default: {
+      employeePct: 0.75,
+      employerPct: 3.25,
+      wageCeiling: 21000,
+      lowWageDaily: 176,
+    },
   },
   'payroll.reimbursementDigestDay': {
     area: 'payroll',
@@ -271,6 +339,18 @@ const definitions = {
       .refine((v) => new Set(v).size === v.length, 'Each leave type at most once'),
     default: ['earned'] as (typeof AUTO_COVER_LEAVE_TYPES)[number][],
   },
+  'payroll.filingFolders': {
+    area: 'payroll',
+    live: true,
+    label: 'Where the proofs live',
+    description:
+      'Links to the Drive folders that hold the filed returns and paid challans: one for PF & ESIC, one for PT. Shown on the Statutory tab. Blank = not set. Links must start with https://.',
+    schema: z.object({
+      pfEsic: httpsLinkOrBlank,
+      pt: httpsLinkOrBlank,
+    }),
+    default: { pfEsic: '', pt: '' },
+  },
   'people.newHireDefaults': {
     area: 'people',
     live: true,
@@ -292,7 +372,7 @@ const definitions = {
     public: true,
     label: 'Promotion self-request minimums',
     description:
-      'What an employee needs before they can ask for a promotion conversation themselves: months in their current band (from their last level change, else their joining date), last quarter\'s goal attainment (blank = not required; a quarter with no goals is not held against them), and days to wait after a conversation was closed without a promotion. A manager or HR opening the conversation skips all three.',
+      "What an employee needs before they can ask for a promotion conversation themselves: months in their current band (from their last level change, else their joining date), last quarter's goal attainment (blank = not required; a quarter with no goals is not held against them), and days to wait after a conversation was closed without a promotion. A manager or HR opening the conversation skips all three.",
     schema: z.object({
       minMonthsInBand: z.number().int().min(0).max(60),
       minAttainment: z.number().int().min(0).max(100).nullable(),
@@ -414,7 +494,7 @@ const definitions = {
     live: true,
     label: 'Email delivery',
     description:
-      'The master switch for HR emails (leave decisions, payslip ready, invites …). While off, no email is queued or sent (switching on later does not send a backlog); switch it on once the sender is set up and the test email on Admin → Jobs arrives. Bells in the app are not affected.',
+      'The master switch for HR emails (leave decisions, payslip ready, invites …). While off, no email is queued or sent (switching on later does not send a backlog); switch it on once the sender is set up and the test email on Admin → Settings → Email delivery arrives. Bells in the app are not affected.',
     schema: z.object({ enabled: z.boolean() }),
     default: { enabled: false },
   },
@@ -425,6 +505,49 @@ const definitions = {
     label: 'HR Assistant',
     description:
       'The chat assistant for HR and managers. It answers questions from the HRMS through read-only tools that keep each person to what their access already covers; nothing is changed and chats are not stored. Payroll, salary and concern contents are never available to it. Needs the Anthropic API key on the server.',
+    schema: z.object({ enabled: z.boolean() }),
+    default: { enabled: false },
+  },
+  'concerns.aiTriage': {
+    area: 'access',
+    live: true,
+    label: 'AI suggestion on new concerns',
+    description:
+      'When a concern is raised, its text (never who raised it) is read once by Claude for a suggested category, severity and a short neutral summary. Only the people handling the case see the suggestion, and nothing changes until one of them applies it. The raiser never sees it. Needs the Anthropic API key on the server.',
+    schema: z.object({ enabled: z.boolean() }),
+    default: { enabled: false },
+  },
+  'privacy.notice': {
+    area: 'people',
+    live: true,
+    label: 'Privacy notice',
+    description:
+      'The notice everyone must read and accept before using Elecbits HR (DPDP Act 2023). Edit the text, then change the version — everyone is asked to accept the new version at their next sign-in. Replace the contact placeholders before go-live.',
+    schema: z.object({
+      version: z.string().trim().min(1).max(40),
+      text: z.string().trim().min(50).max(20_000),
+    }),
+    default: { version: '2026-11-23', text: DEFAULT_PRIVACY_NOTICE },
+  },
+  'privacy.retention': {
+    area: 'access',
+    live: true,
+    label: 'Data retention periods',
+    description:
+      'How long personal data is kept before the privacy-retention job removes it: check-in GPS locations (months), medical certificates after the leave ended (months), and an ex-employee’s personal contact details after they were relieved (years — payroll, tax and PF records are always kept). Rejected candidates are handled by the talent-pool job (6 months).',
+    schema: z.object({
+      gpsMonths: z.number().int().min(1).max(120),
+      medicalCertificateMonths: z.number().int().min(1).max(120),
+      exEmployeeYears: z.number().int().min(1).max(20),
+    }),
+    default: { gpsMonths: 12, medicalCertificateMonths: 24, exEmployeeYears: 8 },
+  },
+  'privacy.purge': {
+    area: 'access',
+    live: true,
+    label: 'Automatic data purge',
+    description:
+      'When on, the daily privacy-retention job permanently removes the data past the retention periods above. Check “What would be removed” on Admin → Settings → Data privacy first. Off by default.',
     schema: z.object({ enabled: z.boolean() }),
     default: { enabled: false },
   },

@@ -1,4 +1,9 @@
 import { Router } from 'express';
+import {
+  authIpLimit,
+  claimEmailLimit,
+  loginEmailLimit,
+} from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { authController } from './auth.controller.js';
 import { claimOrgSchema, claimRecordSchema, loginSchema } from './auth.schema.js';
@@ -16,9 +21,27 @@ import { claimOrgSchema, claimRecordSchema, loginSchema } from './auth.schema.js
  */
 export const authRoutes = Router();
 
-authRoutes.post('/login', validateBody(loginSchema), authController.login);
-authRoutes.post('/claim', validateBody(claimRecordSchema), authController.claimRecord);
-authRoutes.post('/claim-org', validateBody(claimOrgSchema), authController.claimOrg);
+// Brute-force guards: per IP for every attempt, per email for failed ones.
+authRoutes.post(
+  '/login',
+  authIpLimit,
+  loginEmailLimit,
+  validateBody(loginSchema),
+  authController.login,
+);
+authRoutes.post(
+  '/claim',
+  authIpLimit,
+  claimEmailLimit,
+  validateBody(claimRecordSchema),
+  authController.claimRecord,
+);
+authRoutes.post(
+  '/claim-org',
+  authIpLimit,
+  validateBody(claimOrgSchema),
+  authController.claimOrg,
+);
 authRoutes.post('/refresh', authController.refresh);
 authRoutes.post('/logout', authController.logout);
 

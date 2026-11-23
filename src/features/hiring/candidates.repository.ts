@@ -1,6 +1,7 @@
 import type { DbClient } from '../../db/client.js';
 import { auditLog } from '../../db/schema/index.js';
 import { insertNotifications } from '../notifications/index.js';
+import { fileColumns } from '../storage/index.js';
 import type { ActorContext, Bell, PositionStatus } from './hiring.repository.js';
 import type { ApplicationStage, CandidateSource } from './candidates.schema.js';
 import type { InterviewRound } from './hiring.schema.js';
@@ -365,24 +366,31 @@ export const createCandidatesRepository = (db: DbClient) => ({
 
   saveCv: (
     candidateId: string,
-    file: { fileName: string; contentType: string; data: Buffer },
+    file: {
+      fileName: string;
+      contentType: string;
+      data: Buffer;
+      driveFileId?: string | null;
+    },
     actor: ActorContext,
   ): Promise<void> =>
     db.transaction(async (tx) => {
       await tx.query(
-        `INSERT INTO ta.candidate_cvs (candidate_id, file_name, content_type, size_bytes, data, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO ta.candidate_cvs (candidate_id, file_name, content_type, size_bytes, data, uploaded_by, drive_file_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (candidate_id) DO UPDATE SET
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
+           drive_file_id = EXCLUDED.drive_file_id,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
         [
           candidateId,
           file.fileName,
           file.contentType,
           file.data.length,
-          file.data,
+          fileColumns(file).data,
           actor.actorEmployeeId,
+          fileColumns(file).driveFileId,
         ],
       );
       await audit(tx, actor, 'candidate.cv_uploaded', `candidates:${candidateId}`, {
@@ -392,8 +400,13 @@ export const createCandidatesRepository = (db: DbClient) => ({
 
   cv: async (candidateId: string) =>
     (
-      await db.query<{ file_name: string; content_type: string; data: Buffer }>(
-        `SELECT file_name, content_type, data FROM ta.candidate_cvs WHERE candidate_id = $1`,
+      await db.query<{
+        file_name: string;
+        content_type: string;
+        data: Buffer | null;
+        drive_file_id: string | null;
+      }>(
+        `SELECT file_name, content_type, data, drive_file_id FROM ta.candidate_cvs WHERE candidate_id = $1`,
         [candidateId],
       )
     )[0],
@@ -595,7 +608,8 @@ export const createCandidatesRepository = (db: DbClient) => ({
             RETURNING round, interviewer_id, recommendation, scores, notes`,
           [id],
         );
-        const round = (removed[0] as { round?: InterviewRound } | undefined)?.round ?? null;
+        const round =
+          (removed[0] as { round?: InterviewRound } | undefined)?.round ?? null;
         await tx.query(
           `UPDATE ta.applications SET stage = 'interviewing', current_round = $2::interview_round,
                   updated_at = now()

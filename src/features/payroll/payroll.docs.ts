@@ -13,6 +13,7 @@ import {
   annexureQuerySchema,
   createCorrectionSchema,
   createRunSchema,
+  finalizeRunSchema,
   generateRunResultSchema,
   myPayslipSchema,
   payrollRunSchema,
@@ -51,12 +52,40 @@ export const registerPayrollDocs = (registry: OpenAPIRegistry): void => {
       },
     });
   loanPath('get', '/api/v1/payroll/loans', 'Loan register', z.array(loanSchema));
-  loanPath('get', '/api/v1/payroll/loans/{loanId}', 'Loan with repayments and schedule', loanDetailSchema);
-  loanPath('post', '/api/v1/payroll/loans', 'Record a loan or salary advance', loanDetailSchema, createLoanSchema);
-  loanPath('patch', '/api/v1/payroll/loans/{loanId}', 'Change rate / months left', loanDetailSchema, updateLoanSchema);
-  loanPath('post', '/api/v1/payroll/loans/{loanId}/close', 'Close (settled outside payroll)', loanDetailSchema, closeLoanSchema);
+  loanPath(
+    'get',
+    '/api/v1/payroll/loans/{loanId}',
+    'Loan with repayments and schedule',
+    loanDetailSchema,
+  );
+  loanPath(
+    'post',
+    '/api/v1/payroll/loans',
+    'Record a loan or salary advance',
+    loanDetailSchema,
+    createLoanSchema,
+  );
+  loanPath(
+    'patch',
+    '/api/v1/payroll/loans/{loanId}',
+    'Change rate / months left',
+    loanDetailSchema,
+    updateLoanSchema,
+  );
+  loanPath(
+    'post',
+    '/api/v1/payroll/loans/{loanId}/close',
+    'Close (settled outside payroll)',
+    loanDetailSchema,
+    closeLoanSchema,
+  );
   loanPath('get', '/api/v1/payroll/loans/mine', 'My loans', z.array(loanSchema));
-  loanPath('get', '/api/v1/payroll/loans/mine/{loanId}', 'One of my loans', loanDetailSchema);
+  loanPath(
+    'get',
+    '/api/v1/payroll/loans/mine/{loanId}',
+    'One of my loans',
+    loanDetailSchema,
+  );
 
   registry.registerPath({
     method: 'get',
@@ -143,10 +172,11 @@ export const registerPayrollDocs = (registry: OpenAPIRegistry): void => {
     tags: ['Payroll'],
     summary: 'Lock the numbers and publish payslips to employees',
     security: bearer,
+    request: { body: jsonBody(finalizeRunSchema) },
     responses: {
       200: jsonResponse('Run', payrollRunSchema),
       409: errorResponse(
-        'Run is not a draft, requests still partially approved, a recovery exceeds the pay, or corrections changed since the draft was built',
+        'MONTH_NOT_OVER (send early: true to confirm), run is not a draft, requests still partially approved, a recovery exceeds the pay, or corrections changed since the draft was built',
       ),
     },
   });
@@ -269,7 +299,9 @@ export const registerPayrollDocs = (registry: OpenAPIRegistry): void => {
 
   const pdfResponse = {
     description: 'The payslip as an A4 PDF (attachment)',
-    content: { 'application/pdf': { schema: { type: 'string' as const, format: 'binary' } } },
+    content: {
+      'application/pdf': { schema: { type: 'string' as const, format: 'binary' } },
+    },
   };
 
   registry.registerPath({
@@ -278,14 +310,18 @@ export const registerPayrollDocs = (registry: OpenAPIRegistry): void => {
     tags: ['Payroll'],
     summary: 'Download one of your own published payslips as a PDF (me scope)',
     security: bearer,
-    responses: { 200: pdfResponse, 404: errorResponse('Not your payslip, or not published yet') },
+    responses: {
+      200: pdfResponse,
+      404: errorResponse('Not your payslip, or not published yet'),
+    },
   });
 
   registry.registerPath({
     method: 'get',
     path: '/api/v1/payroll/runs/{id}/payslips/{payslipId}/pdf',
     tags: ['Payroll'],
-    summary: 'Download any payslip of a run as a PDF — drafts carry a DRAFT watermark (pr.payroll read)',
+    summary:
+      'Download any payslip of a run as a PDF — drafts carry a DRAFT watermark (pr.payroll read)',
     security: bearer,
     responses: { 200: pdfResponse, 404: errorResponse('Payslip not found in this run') },
   });

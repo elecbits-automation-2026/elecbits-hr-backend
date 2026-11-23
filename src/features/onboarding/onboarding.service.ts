@@ -17,8 +17,14 @@ import type {
   QueueRowDto,
   StartJourneyInput,
 } from './onboarding.schema.js';
-import { AUTO_TASK_KEYS, FILE_TASK_KEYS, ONBOARDING_TEMPLATE } from './onboarding.template.js';
+import { ONBOARDING_PHASES } from './onboarding.schema.js';
+import {
+  AUTO_TASK_KEYS,
+  FILE_TASK_KEYS,
+  ONBOARDING_TEMPLATE,
+} from './onboarding.template.js';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import type { TeamTaskDto, ToggleTaskInput } from './onboarding.schema.js';
 import { hasOrgScope } from '../../shared/helpers/helpers.js';
 
@@ -34,6 +40,12 @@ const plusDays = (date: string, days: number): string =>
   new Date(Date.parse(date) + days * DAY_MS).toISOString().slice(0, 10);
 const daysBetween = (from: string, to: string): number =>
   Math.round((Date.parse(to) - Date.parse(from)) / DAY_MS);
+
+/** "You are here": the earliest phase that still has an open step (hr-tool parity). */
+const currentPhaseOf = (
+  tasks: Array<Pick<OnboardingTaskDto, 'phase' | 'done'>>,
+): OnboardingTaskDto['phase'] | null =>
+  ONBOARDING_PHASES.find((p) => tasks.some((t) => t.phase === p && !t.done)) ?? null;
 
 /**
  * Onboarding rules (adopted from the hr-tool review, user decisions; owner
@@ -115,8 +127,11 @@ export const createOnboardingService = (deps: {
       // The payroll and account steps finish on their own from the records.
       const isAuto = AUTO_TASK_KEYS.has(t.taskKey);
       const autoDone =
-        (t.taskKey === 'payroll' && auto.payroll) || (t.taskKey === 'claim' && auto.claim);
-      const done = t.policyCode ? (policy?.acked ?? false) : t.doneAt !== null || autoDone;
+        (t.taskKey === 'payroll' && auto.payroll) ||
+        (t.taskKey === 'claim' && auto.claim);
+      const done = t.policyCode
+        ? (policy?.acked ?? false)
+        : t.doneAt !== null || autoDone;
       return {
         id: t.id,
         seq: t.seq,
@@ -138,7 +153,11 @@ export const createOnboardingService = (deps: {
         file: (() => {
           const f = files.get(t.id);
           return f
-            ? { fileName: f.fileName, sizeBytes: f.sizeBytes, uploadedAt: f.uploadedAt.toISOString() }
+            ? {
+                fileName: f.fileName,
+                sizeBytes: f.sizeBytes,
+                uploadedAt: f.uploadedAt.toISOString(),
+              }
             : null;
         })(),
       };
@@ -151,7 +170,10 @@ export const createOnboardingService = (deps: {
     viewerId?: string,
   ): Promise<JourneyDto> => {
     const person = viewerId ? await repo.findEmployee(row.employeeId) : undefined;
-    const may = viewerId && person ? await ownersFor(viewerId, person) : new Set<TaskRow['owner']>();
+    const may =
+      viewerId && person
+        ? await ownersFor(viewerId, person)
+        : new Set<TaskRow['owner']>();
     const tasks = await buildTasks(row.employeeId, await repo.listTasks(row.id), may);
     const done = tasks.filter((t) => t.done).length;
     return {
@@ -231,7 +253,10 @@ export const createOnboardingService = (deps: {
     if (!employee || employee.status === 'inactive' || employee.dateOfJoining === null) {
       return false;
     }
-    if (daysBetween(employee.dateOfJoining, localDate()) > ONBOARDING_AUTO_CREATE_WINDOW_DAYS) {
+    if (
+      daysBetween(employee.dateOfJoining, localDate()) >
+      ONBOARDING_AUTO_CREATE_WINDOW_DAYS
+    ) {
       return false;
     }
     if (await repo.findJourneyByEmployee(employeeId)) return false;
@@ -280,7 +305,10 @@ export const createOnboardingService = (deps: {
   };
 
   /** One journey by employee — the HR drill-in (route gated hrbp.people read). */
-  const forEmployee = async (employeeId: string, viewerId: string): Promise<JourneyDto> => {
+  const forEmployee = async (
+    employeeId: string,
+    viewerId: string,
+  ): Promise<JourneyDto> => {
     const employee = await repo.findEmployee(employeeId);
     if (!employee)
       throw createError(404, 'Employee record not found', { code: 'EMPLOYEE_NOT_FOUND' });
@@ -360,7 +388,9 @@ export const createOnboardingService = (deps: {
     const ticking = task.doneAt === null;
     const note = input.note?.trim() ?? '';
     if (ticking && note.length < 3) {
-      throw createError(422, 'Add a short note of what was done', { code: 'NOTE_REQUIRED' });
+      throw createError(422, 'Add a short note of what was done', {
+        code: 'NOTE_REQUIRED',
+      });
     }
 
     await repo.setTaskDone(task, ticking, ticking ? note : null, actor);
@@ -395,12 +425,25 @@ export const createOnboardingService = (deps: {
     if (!(await ownersFor(actor.actorEmployeeId, employee)).has(task.owner)) {
       throw createError(
         403,
-        task.owner === 'hr' ? 'HR uploads this document' : 'Only the joiner uploads this document',
+        task.owner === 'hr'
+          ? 'HR uploads this document'
+          : 'Only the joiner uploads this document',
         { code: 'NOT_TASK_OWNER' },
       );
     }
-    const contentType = checkUpload(file, ['pdf', 'jpg', 'png'], { what: 'The document' });
-    await repo.saveTaskFile(task, { ...file, contentType }, actor);
+    const contentType = checkUpload(file, ['pdf', 'jpg', 'png'], {
+      what: 'The document',
+    });
+    await withStoredFile(
+      DRIVE_FOLDERS.onboarding,
+      {
+        fileName: `${employee.employeeCode ?? employee.id} ${task.taskKey}-${file.fileName}`,
+        contentType,
+        data: file.data,
+      },
+      (driveFileId) =>
+        repo.saveTaskFile(task, { ...file, contentType, driveFileId }, actor),
+    );
     const dto = await toJourney(
       journey,
       { id: employee.id, name: employee.name, employeeCode: employee.employeeCode },
@@ -412,12 +455,20 @@ export const createOnboardingService = (deps: {
   /** Open the uploaded document: the joiner, or HR whose people grant reaches them. */
   const taskFile = async (taskId: string, viewerId: string) => {
     const { employee } = await loadFileTask(taskId);
-    if (viewerId !== employee.id && !(await authz.reaches(viewerId, 'hrbp.people', 'read', employee.id))) {
+    if (
+      viewerId !== employee.id &&
+      !(await authz.reaches(viewerId, 'hrbp.people', 'read', employee.id))
+    ) {
       throw createError(404, 'No document step with this id', { code: 'TASK_NOT_FOUND' });
     }
     const f = await repo.findTaskFile(taskId);
     if (!f) throw createError(404, 'Nothing uploaded yet', { code: 'NO_FILE' });
-    return { fileName: f.fileName, contentType: f.contentType, data: f.data };
+    return loadStoredFile({
+      fileName: f.fileName,
+      contentType: f.contentType,
+      data: f.data,
+      driveFileId: f.driveFileId,
+    });
   };
 
   /** HR queue: progress + days-left per journey, open and overdue first. */
@@ -450,6 +501,7 @@ export const createOnboardingService = (deps: {
           status: r.row.status,
           progress: { done: built.filter((t) => t.done).length, total: built.length },
           daysLeft: daysBetween(today, r.row.dueOn),
+          currentPhase: currentPhaseOf(built),
           nudgedToday: localDate(nudges.get(r.row.id) ?? new Date(0)) === today,
         };
       }),
@@ -489,29 +541,42 @@ export const createOnboardingService = (deps: {
    * joiner, their manager, OPS, payroll. HR's own steps are the sender's to
    * do, so HR and Admin are not nudged. Once a day per journey.
    */
-  const nudge = async (employeeId: string, actor: ActorContext): Promise<{ recipients: number }> => {
+  const nudge = async (
+    employeeId: string,
+    actor: ActorContext,
+  ): Promise<{ recipients: number }> => {
     const journey = await repo.findJourneyByEmployee(employeeId);
-    if (!journey) throw createError(404, 'No onboarding journey', { code: 'JOURNEY_NOT_FOUND' });
+    if (!journey)
+      throw createError(404, 'No onboarding journey', { code: 'JOURNEY_NOT_FOUND' });
     if (journey.status === 'done') {
-      throw createError(409, 'This onboarding is already complete', { code: 'JOURNEY_DONE' });
+      throw createError(409, 'This onboarding is already complete', {
+        code: 'JOURNEY_DONE',
+      });
     }
     const today = localDate();
     const last = (await repo.lastNudgesFor([journey.id])).get(journey.id);
     if (last && localDate(last) === today) {
-      throw createError(409, 'Already nudged today — try again tomorrow', { code: 'NUDGED_TODAY' });
+      throw createError(409, 'Already nudged today — try again tomorrow', {
+        code: 'NUDGED_TODAY',
+      });
     }
     const [employee, rows] = await Promise.all([
       repo.findEmployee(employeeId),
       repo.listTasks(journey.id),
     ]);
     const open = (await buildTasks(employeeId, rows)).filter((t) => !t.done);
-    const countOf = (owner: TaskRow['owner']) => open.filter((t) => t.owner === owner).length;
+    const countOf = (owner: TaskRow['owner']) =>
+      open.filter((t) => t.owner === owner).length;
     const name = employee?.name ?? 'A new joiner';
     const steps = (n: number) => `${n} ${n === 1 ? 'step' : 'steps'}`;
     const due = journey.dueOn;
     const [ops, payroll] = await Promise.all([
-      countOf('ops') > 0 ? authz.listBroadHolders('ops.assets', 'update') : Promise.resolve([]),
-      countOf('payroll') > 0 ? authz.listBroadHolders('pr.payroll', 'update') : Promise.resolve([]),
+      countOf('ops') > 0
+        ? authz.listBroadHolders('ops.assets', 'update')
+        : Promise.resolve([]),
+      countOf('payroll') > 0
+        ? authz.listBroadHolders('pr.payroll', 'update')
+        : Promise.resolve([]),
     ]);
     const manager = employee?.reportsTo ?? null;
     const candidates: Array<{ to: string[]; title: string; link: string } | null> = [
@@ -553,15 +618,24 @@ export const createOnboardingService = (deps: {
       }))
       .filter((s) => s.to.length > 0);
     if (sends.length === 0) {
-      throw createError(409, 'Nothing open for anyone but HR', { code: 'NOTHING_TO_NUDGE' });
+      throw createError(409, 'Nothing open for anyone but HR', {
+        code: 'NOTHING_TO_NUDGE',
+      });
     }
     await repo.nudge(journey.id, employeeId, today, sends, actor);
     return { recipients: new Set(sends.flatMap((s) => s.to)).size };
   };
 
   /** OPS / payroll: the joiner tasks waiting on their team (org grant). */
-  const teamTasks = async (owner: 'ops' | 'payroll', actor: ActorContext): Promise<TeamTaskDto[]> => {
-    const access = await authz.resolveAccess(actor.actorEmployeeId, TEAM_GRANT[owner], 'read');
+  const teamTasks = async (
+    owner: 'ops' | 'payroll',
+    actor: ActorContext,
+  ): Promise<TeamTaskDto[]> => {
+    const access = await authz.resolveAccess(
+      actor.actorEmployeeId,
+      TEAM_GRANT[owner],
+      'read',
+    );
     if (!hasOrgScope(access)) {
       throw createError(403, 'Joiner tasks are for the OPS and payroll teams', {
         code: 'FORBIDDEN',

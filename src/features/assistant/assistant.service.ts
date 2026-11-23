@@ -6,13 +6,27 @@ import { logger } from '../../config/logger.js';
 import { hasOrgScope } from '../../shared/helpers/helpers.js';
 import type { AuthzRepository, ResolvedAccess } from '../access/authz.repository.js';
 import type { SettingsReader } from '../settings/index.js';
+import { ACTION_TOOLS, isCardResult, type AssistantCard } from './assistant.actions.js';
 import { FALLBACK_REPLY, SYSTEM_PROMPT, requestContext } from './assistant.prompt.js';
+import {
+  QUICK_LABEL,
+  QUICK_TOOLS,
+  quickText,
+  type QuickQuestion,
+} from './assistant.quick.js';
 import type { AssistantRepository } from './assistant.repository.js';
 import type { ChatTurn } from './assistant.schema.js';
-import { TOOLS, type AnyTool, type Caller, type ToolServices } from './assistant.tools.js';
+import {
+  TOOLS,
+  type AnyTool,
+  type Caller,
+  type ToolServices,
+} from './assistant.tools.js';
 
 /** Messages per user per day (design: a hard ceiling on cost). */
 export const DAILY_MESSAGE_LIMIT = 40;
+/** Read tools and the propose-only action tools, as the model sees them. */
+const ALL_TOOLS = [...TOOLS, ...ACTION_TOOLS];
 /** Model round trips per message — a confused loop stops here. */
 const MAX_STEPS = 6;
 
@@ -21,7 +35,9 @@ export type AssistantEvent =
   | { type: 'tool'; name: string; label: string }
   | { type: 'text'; delta: string }
   | { type: 'done'; tools: string[] }
-  | { type: 'error'; code: string; message: string };
+  | { type: 'error'; code: string; message: string }
+  // Phase 2: a proposal to confirm, or a draft note (see assistant.actions.ts).
+  | AssistantCard;
 
 export interface AssistantCaller extends Caller {
   name: string;
@@ -38,9 +54,10 @@ const inputSchemaOf = (input: z.ZodObject): Anthropic.Beta.BetaTool.InputSchema 
 };
 
 /**
- * The HR Assistant (phase 1, read-only). The model never reaches the
- * database: it asks for tools, each a service call made as the signed-in
- * user. Chats are not stored — the browser sends the text turns each time
+ * The HR Assistant (phase 2). The model never reaches the database: it asks
+ * for tools, each a service call made as the signed-in user. Action tools
+ * only PROPOSE — the user confirms on a card, which calls the existing
+ * endpoint with their own session. Chats are not stored — the browser sends the text turns each time
  * and earlier tool results are never accepted back from it.
  */
 export const createAssistantService = (deps: {
@@ -59,17 +76,24 @@ export const createAssistantService = (deps: {
     return !scope.all && scope.ids.size <= 1 ? null : scope;
   };
 
-  const callerOf = async (userId: string, employeeId: string): Promise<AssistantCaller> => {
-    const [manager, people, attendance, policies, name] = await Promise.all([
-      repo.hasReports(employeeId),
-      authz.resolveAccess(employeeId, 'hrbp.people', 'read'),
-      authz.resolveAccess(employeeId, 'hrbp.attendance', 'read'),
-      authz.resolveAccess(employeeId, 'hrbp.policies', 'read'),
-      repo.employeeName(employeeId),
-    ]);
-    const [hrPeople, hrAttendance] = await Promise.all([
+  const callerOf = async (
+    userId: string,
+    employeeId: string,
+  ): Promise<AssistantCaller> => {
+    const [manager, people, attendance, policies, peopleWrite, deptHead, name] =
+      await Promise.all([
+        repo.hasReports(employeeId),
+        authz.resolveAccess(employeeId, 'hrbp.people', 'read'),
+        authz.resolveAccess(employeeId, 'hrbp.attendance', 'read'),
+        authz.resolveAccess(employeeId, 'hrbp.policies', 'read'),
+        authz.resolveAccess(employeeId, 'hrbp.people', 'update'),
+        repo.isDeptHead(employeeId),
+        repo.employeeName(employeeId),
+      ]);
+    const [hrPeople, hrAttendance, hrPeopleWrite] = await Promise.all([
       hrReach(employeeId, people),
       hrReach(employeeId, attendance),
+      hrReach(employeeId, peopleWrite),
     ]);
     const caller: Caller = {
       userId,
@@ -79,6 +103,9 @@ export const createAssistantService = (deps: {
       hrPeopleOrg: people.bypass || people.scopes.includes('org'),
       hrAttendance,
       hrPoliciesOrg: hasOrgScope(policies),
+      hrPeopleWrite,
+      hrPeopleWriteOrg: hasOrgScope(peopleWrite),
+      deptHead,
     };
     const roles = [
       ...(manager ? ['manager'] : []),
@@ -92,28 +119,50 @@ export const createAssistantService = (deps: {
    * answer as ordinary JSON errors: the Admin switch, the server key, the
    * caller being HR or a manager, and the daily cap.
    */
-  const gate = async (userId: string, employeeId: string): Promise<AssistantCaller> => {
+  const requireOn = async (): Promise<void> => {
     const { enabled } = await settings.effective('assistant.enabled');
     if (!enabled) {
-      throw createError(403, 'The HR Assistant is switched off', { code: 'ASSISTANT_OFF' });
-    }
-    if (!client) {
-      throw createError(503, 'The HR Assistant is not set up on the server', {
-        code: 'ASSISTANT_NOT_CONFIGURED',
+      throw createError(403, 'The HR Assistant is switched off', {
+        code: 'ASSISTANT_OFF',
       });
     }
+  };
+
+  const allowedCaller = async (
+    userId: string,
+    employeeId: string,
+  ): Promise<AssistantCaller> => {
     const caller = await callerOf(userId, employeeId);
     if (caller.roles.length === 0) {
       throw createError(403, 'The HR Assistant is for HR and managers', {
         code: 'ASSISTANT_NOT_ALLOWED',
       });
     }
+    return caller;
+  };
+
+  const gate = async (userId: string, employeeId: string): Promise<AssistantCaller> => {
+    await requireOn();
+    // Who may use it comes first: a plain employee gets the 403, not a 503
+    // about server setup that is none of their business.
+    const caller = await allowedCaller(userId, employeeId);
+    if (!client) {
+      // `expose`: a deliberate 5xx whose message is safe and actionable.
+      throw createError(503, 'The HR Assistant is not set up on the server', {
+        code: 'ASSISTANT_NOT_CONFIGURED',
+        expose: true,
+      });
+    }
     const since = new Date();
     since.setHours(0, 0, 0, 0);
     if ((await repo.messagesSince(userId, since)) >= DAILY_MESSAGE_LIMIT) {
-      throw createError(429, `You've used today's ${DAILY_MESSAGE_LIMIT} assistant messages`, {
-        code: 'ASSISTANT_LIMIT',
-      });
+      throw createError(
+        429,
+        `You've used today's ${DAILY_MESSAGE_LIMIT} assistant messages`,
+        {
+          code: 'ASSISTANT_LIMIT',
+        },
+      );
     }
     return caller;
   };
@@ -137,10 +186,28 @@ export const createAssistantService = (deps: {
     if (!parsed.success) return fail(`Invalid input: ${parsed.error.message}`);
 
     emit({ type: 'tool', name: t.name, label: t.label });
-    await repo.logToolCall(caller.userId, caller.employeeId, t.name, parsed.data);
+    await repo.logToolCall(
+      caller.userId,
+      caller.employeeId,
+      t.name,
+      t.audit ? t.audit(parsed.data) : parsed.data,
+    );
     try {
       const result = await t.run(caller, parsed.data, services);
-      return { type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) };
+      if (isCardResult(result)) {
+        // A proposal / draft goes to the drawer; the model only hears that it was shown.
+        emit(result.card);
+        return {
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(result.forModel),
+        };
+      }
+      return {
+        type: 'tool_result',
+        tool_use_id: block.id,
+        content: JSON.stringify(result),
+      };
     } catch (err) {
       // An access refusal inside a service reads as "can't see", never a stack.
       const status = (err as { status?: number }).status;
@@ -156,7 +223,7 @@ export const createAssistantService = (deps: {
     emit: (e: AssistantEvent) => void,
     signal: AbortSignal,
   ): Promise<void> => {
-    const tools = TOOLS.filter((t) => t.allowed(caller)).sort((a, b) =>
+    const tools = ALL_TOOLS.filter((t) => t.allowed(caller)).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
     const apiTools: Anthropic.Beta.BetaTool[] = tools.map((t) => ({
@@ -243,7 +310,10 @@ export const createAssistantService = (deps: {
         err instanceof Anthropic.AuthenticationError ||
         err instanceof Anthropic.PermissionDeniedError
       ) {
-        logger.error({ status: err.status, requestId: err.requestID }, 'assistant API key rejected');
+        logger.error(
+          { status: err.status, requestId: err.requestID },
+          'assistant API key rejected',
+        );
         emit({
           type: 'error',
           code: 'ASSISTANT_KEY_INVALID',
@@ -268,7 +338,10 @@ export const createAssistantService = (deps: {
           message: 'The assistant is busy right now — try again in a minute.',
         });
       } else if (err instanceof Anthropic.APIError) {
-        logger.warn({ status: err.status, requestId: err.requestID }, 'assistant API error');
+        logger.warn(
+          { status: err.status, requestId: err.requestID },
+          'assistant API error',
+        );
         emit({ type: 'error', code: 'ASSISTANT_UPSTREAM', message: FALLBACK_REPLY });
       } else {
         logger.error({ err }, 'assistant chat failed');
@@ -282,7 +355,38 @@ export const createAssistantService = (deps: {
     }
   };
 
-  return { gate, chat };
+  /**
+   * The offline buttons: the same access gating as chat minus the server key
+   * (and the daily cap — no model is called), then ONE whitelisted read tool
+   * run directly, written out as plain text.
+   */
+  const quick = async (
+    userId: string,
+    employeeId: string,
+    question: QuickQuestion,
+  ): Promise<{ question: QuickQuestion; label: string; tool: string; text: string }> => {
+    await requireOn();
+    const caller = await allowedCaller(userId, employeeId);
+    const t = QUICK_TOOLS[question]
+      .map((name) => TOOLS.find((x) => x.name === name)!)
+      .find((x) => x.allowed(caller));
+    if (!t) {
+      throw createError(403, 'This quick answer is not available with your access', {
+        code: 'ASSISTANT_QUICK_NOT_ALLOWED',
+      });
+    }
+    const input = t.input.parse({});
+    await repo.logToolCall(userId, employeeId, t.name, { quick: true });
+    const result = await t.run(caller, input, services);
+    return {
+      question,
+      label: QUICK_LABEL[question],
+      tool: t.label,
+      text: quickText(t.name, result),
+    };
+  };
+
+  return { gate, chat, quick };
 };
 
 export type AssistantService = ReturnType<typeof createAssistantService>;

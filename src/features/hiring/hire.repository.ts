@@ -1,6 +1,7 @@
 import type { DbClient } from '../../db/client.js';
 import { auditLog } from '../../db/schema/index.js';
 import { insertNotifications } from '../notifications/index.js';
+import { fileColumns } from '../storage/index.js';
 import type { ActorContext, Bell, PositionStatus } from './hiring.repository.js';
 import type { CandidateDocStatus } from './hire.schema.js';
 
@@ -81,7 +82,13 @@ const movePosition = async (
   );
 };
 
-type LetterFile = { fileName: string; contentType: string; data: Buffer };
+/** driveFileId set = the bytes are in the Shared Drive and `data` stays NULL. */
+type LetterFile = {
+  fileName: string;
+  contentType: string;
+  data: Buffer;
+  driveFileId?: string | null;
+};
 
 /** DB access for documents, the HR Head-approved offer and the hire (TA, 2026-10-27). */
 export const createHireRepository = (db: DbClient) => ({
@@ -183,19 +190,21 @@ export const createHireRepository = (db: DbClient) => ({
   saveOfferLetter: (id: string, file: LetterFile, actor: ActorContext): Promise<void> =>
     db.transaction(async (tx) => {
       await tx.query(
-        `INSERT INTO ta.offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO ta.offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by, drive_file_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (application_id) DO UPDATE SET
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
+           drive_file_id = EXCLUDED.drive_file_id,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
         [
           id,
           file.fileName,
           file.contentType,
           file.data.length,
-          file.data,
+          fileColumns(file).data,
           actor.actorEmployeeId,
+          fileColumns(file).driveFileId,
         ],
       );
       await audit(tx, actor, 'application.offer_letter', id, { bytes: file.data.length });
@@ -203,8 +212,13 @@ export const createHireRepository = (db: DbClient) => ({
 
   offerLetter: async (id: string) =>
     (
-      await db.query<{ file_name: string; content_type: string; data: Buffer }>(
-        `SELECT file_name, content_type, data FROM ta.offer_letters WHERE application_id = $1`,
+      await db.query<{
+        file_name: string;
+        content_type: string;
+        data: Buffer | null;
+        drive_file_id: string | null;
+      }>(
+        `SELECT file_name, content_type, data, drive_file_id FROM ta.offer_letters WHERE application_id = $1`,
         [id],
       )
     )[0],
@@ -216,19 +230,21 @@ export const createHireRepository = (db: DbClient) => ({
   saveSignedLetter: (id: string, file: LetterFile, actor: ActorContext): Promise<void> =>
     db.transaction(async (tx) => {
       await tx.query(
-        `INSERT INTO ta.signed_offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO ta.signed_offer_letters (application_id, file_name, content_type, size_bytes, data, uploaded_by, drive_file_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (application_id) DO UPDATE SET
            file_name = EXCLUDED.file_name, content_type = EXCLUDED.content_type,
            size_bytes = EXCLUDED.size_bytes, data = EXCLUDED.data,
+           drive_file_id = EXCLUDED.drive_file_id,
            uploaded_by = EXCLUDED.uploaded_by, uploaded_at = now()`,
         [
           id,
           file.fileName,
           file.contentType,
           file.data.length,
-          file.data,
+          fileColumns(file).data,
           actor.actorEmployeeId,
+          fileColumns(file).driveFileId,
         ],
       );
       await audit(tx, actor, 'application.signed_offer_letter', id, {
@@ -238,8 +254,13 @@ export const createHireRepository = (db: DbClient) => ({
 
   signedLetter: async (id: string) =>
     (
-      await db.query<{ file_name: string; content_type: string; data: Buffer }>(
-        `SELECT file_name, content_type, data FROM ta.signed_offer_letters WHERE application_id = $1`,
+      await db.query<{
+        file_name: string;
+        content_type: string;
+        data: Buffer | null;
+        drive_file_id: string | null;
+      }>(
+        `SELECT file_name, content_type, data, drive_file_id FROM ta.signed_offer_letters WHERE application_id = $1`,
         [id],
       )
     )[0],

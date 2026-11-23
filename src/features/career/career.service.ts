@@ -1,6 +1,11 @@
 import createError from 'http-errors';
 import { BAND_LADDER, LEVELS, type Level } from '../../shared/constants/constants.js';
-import { addMonthsIso } from '../../shared/helpers/helpers.js';
+import {
+  addDaysIso,
+  addMonthsIso,
+  isWeekendDay,
+  localDateOf,
+} from '../../shared/helpers/helpers.js';
 import type { AuthzRepository } from '../access/authz.repository.js';
 import { attainmentOf, quarterOf } from '../performance/index.js';
 import type { SettingsReader } from '../settings/index.js';
@@ -79,12 +84,14 @@ export const createCareerService = (deps: {
   /** The effective RM, or HR whose grant reaches them — who runs a roadmap. */
   const requireRmOrHr = async (
     actorId: string,
-    target: { id: string; leaveApprover: string | null; reportsTo: string | null } | undefined,
+    target:
+      { id: string; leaveApprover: string | null; reportsTo: string | null } | undefined,
     message: string,
   ): Promise<void> => {
     const effectiveRm = target ? (target.leaveApprover ?? target.reportsTo) : null;
     const hr =
-      target !== undefined && (await authz.reaches(actorId, 'hrbp.people', 'update', target.id));
+      target !== undefined &&
+      (await authz.reaches(actorId, 'hrbp.people', 'update', target.id));
     if (actorId !== effectiveRm && !hr) {
       throw createError(403, message, { code: 'NOT_AN_APPROVER' });
     }
@@ -185,14 +192,38 @@ export const createCareerService = (deps: {
       throw createError(404, 'Employee record not found', { code: 'EMPLOYEE_NOT_FOUND' });
     const from = new Date(Date.now() - 30 * DAY_MS).toISOString().slice(0, 10);
     const quarter = quarterOf();
-    const [punchedDays30, recog, appreciationNotes, track, attainment] =
-      await Promise.all([
-        repo.punchedDaysSince(me.id, from),
-        repo.approvedRecognitionsFor([me.id]),
-        repo.appreciationNotesCount(me.id),
-        repo.findOpenTrack(me.id),
-        attainmentIn(me.id, quarter.name),
-      ]);
+    // Work updates: the 30 days ending YESTERDAY (today isn't over, so it
+    // can't be a miss), working days only, none before the joining date.
+    const yesterday = addDaysIso(localDateOf(new Date()), -1);
+    const windowFrom = addDaysIso(yesterday, -29);
+    const [
+      punchedDays30,
+      recog,
+      appreciationNotes,
+      track,
+      attainment,
+      workWeek,
+      holidays,
+      written,
+    ] = await Promise.all([
+      repo.punchedDaysSince(me.id, from),
+      repo.approvedRecognitionsFor([me.id]),
+      repo.appreciationNotesCount(me.id),
+      repo.findOpenTrack(me.id),
+      attainmentIn(me.id, quarter.name),
+      settings.effective('attendance.workWeek'),
+      repo.holidaysBetween(windowFrom, yesterday),
+      repo.workUpdateDatesBetween(me.id, windowFrom, yesterday),
+    ]);
+    const workingDays: string[] = [];
+    for (let d = windowFrom; d <= yesterday; d = addDaysIso(d, 1)) {
+      if (me.dateOfJoining && d < me.dateOfJoining) continue;
+      if (!isWeekendDay(d, workWeek) && !holidays.has(d)) workingDays.push(d);
+    }
+    const updateDays30 = {
+      withUpdate: workingDays.filter((d) => written.has(d)).length,
+      workingDays: workingDays.length,
+    };
     const { history, notes, lastChangeAt } = await historyAndNotes(me.id, track);
     return {
       ladder: LADDER,
@@ -200,6 +231,7 @@ export const createCareerService = (deps: {
       next: BAND_LADDER[me.level].next,
       evidence: {
         punchedDays30,
+        updateDays30,
         recognitions: recog.get(me.id)?.count ?? 0,
         appreciationNotes,
         quarter: { name: quarter.name, attainment },
@@ -214,6 +246,7 @@ export const createCareerService = (deps: {
   const openTrack = async (
     input: { employeeId: string; targetBand?: Level; note?: string },
     actor: ActorContext,
+    notify?: Parameters<CareerRepository['insertTrack']>[2],
   ): Promise<CareerTrackDto> => {
     const target = await repo.findEmployee(input.employeeId);
     if (!target || target.status === 'inactive') {
@@ -240,6 +273,7 @@ export const createCareerService = (deps: {
           note: input.note ?? null,
         },
         actor,
+        notify,
       );
       return (await trackWithName(row))!;
     } catch (err) {
@@ -278,7 +312,22 @@ export const createCareerService = (deps: {
         blockers: check.blockers,
       });
     }
-    return openTrack({ employeeId: me.id, note: 'Requested by the employee' }, actor);
+    // The manager who runs the roadmap hears at once (bell + email) — the
+    // effective RM, or HR whose grant reaches them when there is no RM.
+    const rm = me.leaveApprover ?? me.reportsTo;
+    const recipientIds = (
+      rm ? [rm] : await authz.listBroadHolders('hrbp.people', 'update', me.id)
+    ).filter((id) => id !== me.id);
+    const next = BAND_LADDER[me.level].next;
+    return openTrack({ employeeId: me.id, note: 'Requested by the employee' }, actor, {
+      recipientIds,
+      event: {
+        type: 'career.requested',
+        title: `${me.name} asked for a roadmap conversation (${me.level} → ${next ?? '—'})`,
+        body: 'They meet the self-request minimums. Open Career path → My team to add notes and plan the next step.',
+        link: rm ? '/growth?tab=team' : '/hr/people',
+      },
+    });
   };
 
   /** RM-or-HR opens a track for one of their people — never for themselves. */

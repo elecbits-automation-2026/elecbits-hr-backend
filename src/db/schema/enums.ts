@@ -116,7 +116,11 @@ export const recognitionStatusEnum = pgEnum('recognition_status', [
 
 // A career track is an OPEN CONVERSATION about the next band, never a
 // promotion record: `met` closes it well, `closed` just ends it.
-export const careerTrackStatusEnum = pgEnum('career_track_status', ['open', 'met', 'closed']);
+export const careerTrackStatusEnum = pgEnum('career_track_status', [
+  'open',
+  'met',
+  'closed',
+]);
 
 export const attendanceSourceEnum = pgEnum('attendance_source', [
   'office',
@@ -175,13 +179,21 @@ export const reimbursementStatusEnum = pgEnum('reimbursement_status', [
 
 // CGP goal categories (Performance & Appraisal Policy §6/§8): the quarter
 // score weighs Fundamental 50%, Corporate 25%, General 25%.
-export const goalCategoryEnum = pgEnum('goal_category', ['fundamental', 'corporate', 'general']);
+export const goalCategoryEnum = pgEnum('goal_category', [
+  'fundamental',
+  'corporate',
+  'general',
+]);
 
 // Batch 4 — concerns: three policy tracks (Dispute Resolution Framework,
 // Equal Opportunity / anti-bullying complaints, Whistleblower — removed
 // 2026-11-05, the value stays for history only). POSH is never
 // stored: it belongs to the Internal Committee.
-export const concernTrackEnum = pgEnum('concern_track', ['dispute', 'complaint', 'whistleblower']);
+export const concernTrackEnum = pgEnum('concern_track', [
+  'dispute',
+  'complaint',
+  'whistleblower',
+]);
 export const concernStatusEnum = pgEnum('concern_status', [
   'open',
   'acknowledged',
@@ -191,9 +203,20 @@ export const concernStatusEnum = pgEnum('concern_status', [
   'closed',
   'declined',
 ]);
-export const concernNoteKindEnum = pgEnum('concern_note_kind', ['note', 'reply', 'decision', 'system']);
+export const concernNoteKindEnum = pgEnum('concern_note_kind', [
+  'note',
+  'reply',
+  'decision',
+  'system',
+]);
 /** HR's internal triage of a case — never shown to the raiser. */
 export const concernSeverityEnum = pgEnum('concern_severity', ['low', 'medium', 'high']);
+/** What kind of open door a slot is (old tool's three modes; parity 2026-11-23). */
+export const openDoorSlotTypeEnum = pgEnum('open_door_slot_type', [
+  'hr_open_door',
+  'dept_head',
+  'skip_level',
+]);
 export const openDoorBookingStatusEnum = pgEnum('open_door_booking_status', [
   'booked',
   'done',
@@ -314,8 +337,16 @@ export const probationOutcomeEnum = pgEnum('probation_outcome', ['confirm', 'end
 // one-month loan. Closed = repaid (or settled outside payroll);
 // recovered_at_exit = the balance went into the F&F.
 export const loanKindEnum = pgEnum('loan_kind', ['loan', 'advance']);
-export const loanStatusEnum = pgEnum('loan_status', ['active', 'closed', 'recovered_at_exit']);
-export const loanRepaymentKindEnum = pgEnum('loan_repayment_kind', ['emi', 'fnf', 'outside']);
+export const loanStatusEnum = pgEnum('loan_status', [
+  'active',
+  'closed',
+  'recovered_at_exit',
+]);
+export const loanRepaymentKindEnum = pgEnum('loan_repayment_kind', [
+  'emi',
+  'fnf',
+  'outside',
+]);
 
 // PIP (close-out): pending_hr → active → passed | not_passed; HR may decline
 // (cancelled); extension keeps it active with a later end date.
@@ -438,7 +469,12 @@ export const applicationStageEnum = pgEnum('application_stage', [
   'joined',
 ]);
 // The offer's terms, approved and signed by the HR Head before TA shares them.
-export const offerStatusEnum = pgEnum('offer_status', ['draft', 'pending', 'approved', 'returned']);
+export const offerStatusEnum = pgEnum('offer_status', [
+  'draft',
+  'pending',
+  'approved',
+  'returned',
+]);
 // A document asked of the candidate after the last round.
 export const candidateDocStatusEnum = pgEnum('candidate_doc_status', [
   'requested',
@@ -451,9 +487,18 @@ export const interviewRecommendationEnum = pgEnum('interview_recommendation', [
 ]);
 // TA Step 4 (2026-10-27): when and how a round happens. A round is scheduled,
 // then done (scored), cancelled (or rescheduled), or the candidate did not show.
-export const interviewModeEnum = pgEnum('interview_mode', ['in_person', 'video', 'phone']);
+export const interviewModeEnum = pgEnum('interview_mode', [
+  'in_person',
+  'video',
+  'phone',
+]);
 // TA workflow deck (2026-10-27): every contact with a candidate is logged.
-export const taActivityKindEnum = pgEnum('ta_activity_kind', ['call', 'email', 'whatsapp', 'meeting']);
+export const taActivityKindEnum = pgEnum('ta_activity_kind', [
+  'call',
+  'email',
+  'whatsapp',
+  'meeting',
+]);
 export const taActivityOutcomeEnum = pgEnum('ta_activity_outcome', [
   'connected',
   'no_answer',
@@ -468,7 +513,12 @@ export const interviewSlotStatusEnum = pgEnum('interview_slot_status', [
   'no_show',
 ]);
 // Background verification with the previous employer (TA Step E), in parallel with the offer.
-export const bgvStatusEnum = pgEnum('bgv_status', ['not_started', 'in_progress', 'clear', 'failed']);
+export const bgvStatusEnum = pgEnum('bgv_status', [
+  'not_started',
+  'in_progress',
+  'clear',
+  'failed',
+]);
 
 // Trainings (learner, 2026-11-16).
 /** The four learning streams (carried over from the previous HR tool). */

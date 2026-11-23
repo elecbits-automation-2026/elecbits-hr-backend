@@ -31,7 +31,9 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
 
   const http = isHttpError(err);
   const statusCode = http ? err.statusCode : FALLBACK_STATUS;
-  // 4xx messages are safe to surface; 5xx (and unknown errors) are not.
+  // 4xx messages are safe to surface; 5xx (and unknown errors) are not —
+  // unless the code built that 5xx on purpose with `{ expose: true }`
+  // (e.g. "the HR Assistant is not set up on the server").
   const expose = http ? err.expose : false;
   const code = errorCode(err, http, statusCode);
   const message = expose && err instanceof Error ? err.message : statusText(statusCode);

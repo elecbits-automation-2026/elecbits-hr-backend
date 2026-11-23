@@ -31,4 +31,5 @@ export * from './trainings.js';
 export * from './performance.js';
 export * from './settings.js';
 export * from './notifications.js';
+export * from './privacy.js';
 export * from './ta.js';

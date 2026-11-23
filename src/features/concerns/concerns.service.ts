@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import createError from 'http-errors';
+import { logger } from '../../config/logger.js';
 import {
   addDaysIso,
   addWorkingDays,
@@ -34,6 +35,7 @@ import {
   type QueueSummaryDto,
   type ResolveInput,
 } from './concerns.schema.js';
+import { suggestTriage } from './concerns.triage.js';
 
 const PREFIX = { dispute: 'DSP', complaint: 'CMP' } as const;
 const CATEGORIES: Record<CreateConcernInput['track'], readonly string[]> = {
@@ -234,6 +236,15 @@ export const createConcernsService = (deps: {
       owner:
         triage && c.ownerId ? { id: c.ownerId, name: names.get(c.ownerId) ?? '' } : null,
       severity: triage ? c.severity : null,
+      aiSuggestion:
+        triage && c.aiSuggestedAt
+          ? {
+              category: c.aiCategory,
+              severity: c.aiSeverity,
+              summary: c.aiSummary ?? '',
+              suggestedAt: c.aiSuggestedAt.toISOString(),
+            }
+          : null,
       assignable: assignable
         .map((id) => ({ id, name: names.get(id) ?? '' }))
         .sort((a, b) => a.name.localeCompare(b.name)),
@@ -266,6 +277,34 @@ export const createConcernsService = (deps: {
     createError(409, 'This case has moved on — reload it', { code: 'CONCERN_CONFLICT' });
 
   // ── Raise ────────────────────────────────────────────────────────────────
+
+  /** A track's category list (old whistleblower rows read as complaints). */
+  const categoriesOf = (c: Pick<ConcernRow, 'track'>): readonly string[] =>
+    c.track === 'dispute' ? CATEGORIES.dispute : CATEGORIES.complaint;
+
+  /**
+   * Admin-gated AI triage (concerns.aiTriage): only the case text and the
+   * category list go out — never the raiser, the subject or any id. Any
+   * failure leaves the case without a suggestion; it never throws.
+   */
+  const aiTriage = async (c: ConcernRow): Promise<void> => {
+    try {
+      const { enabled } = await settings.effective('concerns.aiTriage');
+      if (!enabled) return;
+      const s = await suggestTriage(
+        { title: c.title, detail: c.detail },
+        categoriesOf(c),
+      );
+      if (!s) return;
+      await repo.setAiSuggestion(c.id, {
+        aiCategory: s.category,
+        aiSeverity: s.severity,
+        aiSummary: s.summary,
+      });
+    } catch (err) {
+      logger.warn({ err, concern: c.id }, 'concern triage not stored');
+    }
+  };
 
   const create = async (input: CreateConcernInput, actor: ActorContext) => {
     if (input.category === POSH_CATEGORY) {
@@ -372,6 +411,8 @@ export const createConcernsService = (deps: {
             },
           ],
         );
+        // In the background, so raising never waits on (or fails with) the AI.
+        void aiTriage(row);
         return {
           concern: await toDto(
             row,
@@ -449,7 +490,8 @@ export const createConcernsService = (deps: {
       bySeverity: n.bySeverity,
       avgDaysToAck:
         n.ackDays.length > 0
-          ? Math.round((n.ackDays.reduce((a, b) => a + b, 0) / n.ackDays.length) * 10) / 10
+          ? Math.round((n.ackDays.reduce((a, b) => a + b, 0) / n.ackDays.length) * 10) /
+            10
           : null,
       closedThisQuarter: n.closedThisQuarter,
     }));
@@ -575,7 +617,9 @@ export const createConcernsService = (deps: {
   const assign = async (id: string, ownerId: string | null, actor: ActorContext) => {
     const { c, handlers } = await asTriager(id, actor.actorEmployeeId);
     if (ownerId !== null && !handlers.includes(ownerId)) {
-      throw createError(422, 'That person does not handle this case', { code: 'NOT_A_HANDLER' });
+      throw createError(422, 'That person does not handle this case', {
+        code: 'NOT_A_HANDLER',
+      });
     }
     const row = await repo.transition(
       id,
@@ -608,7 +652,39 @@ export const createConcernsService = (deps: {
     actor: ActorContext,
   ) => {
     const { c } = await asTriager(id, actor.actorEmployeeId);
-    const row = await repo.transition(id, c.status, { severity }, [], actor, 'severity_set', []);
+    const row = await repo.transition(
+      id,
+      c.status,
+      { severity },
+      [],
+      actor,
+      'severity_set',
+      [],
+    );
+    if (!row) throw conflict();
+    return get(id, actor.actorEmployeeId);
+  };
+
+  /**
+   * HR re-categorises the case within its own track's list (e.g. applying the
+   * AI suggestion). The category is already part of the raiser's view; no
+   * note or bell is added, so nothing new reaches them.
+   */
+  const setCategory = async (id: string, category: string, actor: ActorContext) => {
+    const { c } = await asTriager(id, actor.actorEmployeeId);
+    if (category === POSH_CATEGORY || !categoriesOf(c).includes(category)) {
+      throw createError(422, 'Pick a category from the list', { code: 'BAD_CATEGORY' });
+    }
+    if (category === c.category) return get(id, actor.actorEmployeeId);
+    const row = await repo.transition(
+      id,
+      c.status,
+      { category },
+      [],
+      actor,
+      'category_set',
+      [],
+    );
     if (!row) throw conflict();
     return get(id, actor.actorEmployeeId);
   };
@@ -959,6 +1035,7 @@ export const createConcernsService = (deps: {
     acknowledge,
     assign,
     setSeverity,
+    setCategory,
     decide,
     resolve,
     extend,

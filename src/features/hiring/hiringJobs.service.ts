@@ -1,5 +1,6 @@
 import { addDaysIso, addWorkingDays, localDateOf } from '../../shared/helpers/helpers.js';
 import { quarterOf } from '../performance/index.js';
+import { discardDriveFiles } from '../storage/index.js';
 import type { SettingsReader } from '../settings/index.js';
 import { MODE_TEXT, ROUND_TEXT } from './candidates.service.js';
 import type { InterviewRound } from './hiring.schema.js';
@@ -64,10 +65,13 @@ export const createHiringJobsService = (deps: {
       const title = `${rows.length} hiring line(s) for ${quarters} are waiting for your approval`;
       const perHead = new Map<string, number>();
       for (const r of rows) {
-        if (r.submitted_by) perHead.set(r.submitted_by, (perHead.get(r.submitted_by) ?? 0) + 1);
+        if (r.submitted_by)
+          perHead.set(r.submitted_by, (perHead.get(r.submitted_by) ?? 0) + 1);
       }
       return [
-        ...(hrbp.length ? [{ to: hrbp, type: 'hiring.plan_due', title, link: LINK_APPROVALS }] : []),
+        ...(hrbp.length
+          ? [{ to: hrbp, type: 'hiring.plan_due', title, link: LINK_APPROVALS }]
+          : []),
         ...[...perHead].map(([head, n]) => ({
           to: [head],
           type: 'hiring.plan_sent',
@@ -145,7 +149,10 @@ export const createHiringJobsService = (deps: {
 
   const retention = async (now: Date): Promise<Record<string, number>> => {
     const ids = await repo.expiredCandidateIds(localDateOf(now));
-    return { anonymised: await repo.anonymise(ids) };
+    const { count, driveFileIds } = await repo.anonymise(ids);
+    // Plan §5: an anonymised candidate's CV leaves the Shared Drive too.
+    const trashed = await discardDriveFiles(driveFileIds);
+    return { anonymised: count, driveFilesTrashed: trashed };
   };
 
   const carryOver = async (now: Date): Promise<Record<string, number>> => {

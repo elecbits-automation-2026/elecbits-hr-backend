@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
+import { followUpLimit } from '../../middleware/rateLimit.js';
 import { validateBody } from '../../middleware/validateBody.js';
 import { concernsController } from './concerns.controller.js';
 import {
   assignSchema,
+  categorySchema,
   createConcernSchema,
   decideSchema,
   declineSchema,
@@ -27,7 +29,7 @@ import {
  *   GET  /:id                 raiser view or handler view (else 404)
  *   POST /:id/notes           raiser note, or handler note / reply
  *   POST /:id/acknowledge | /decide | /resolve | /extend | /decline   handlers
- *   POST /:id/assign | /severity        HR-level triage (handlers)
+ *   POST /:id/assign | /severity | /category   HR-level triage (handlers)
  *   POST /:id/accept | /escalate                                       raiser (disputes)
  *   POST /follow-up · /follow-up/notes   anonymous raiser by code + key
  *
@@ -46,11 +48,14 @@ concernsRoutes.get('/queues', concernsController.queues);
 concernsRoutes.get('/queue/:queue', concernsController.queue);
 concernsRoutes.post(
   '/follow-up',
+  // Code + key guessing: failed lookups are capped per IP.
+  followUpLimit,
   validateBody(followUpSchema),
   concernsController.followUp,
 );
 concernsRoutes.post(
   '/follow-up/notes',
+  followUpLimit,
   validateBody(followUpNoteSchema),
   concernsController.followUpNote,
 );
@@ -58,7 +63,16 @@ concernsRoutes.get('/:id', concernsController.get);
 concernsRoutes.post('/:id/notes', validateBody(noteSchema), concernsController.note);
 concernsRoutes.post('/:id/acknowledge', concernsController.acknowledge);
 concernsRoutes.post('/:id/assign', validateBody(assignSchema), concernsController.assign);
-concernsRoutes.post('/:id/severity', validateBody(severitySchema), concernsController.severity);
+concernsRoutes.post(
+  '/:id/severity',
+  validateBody(severitySchema),
+  concernsController.severity,
+);
+concernsRoutes.post(
+  '/:id/category',
+  validateBody(categorySchema),
+  concernsController.category,
+);
 concernsRoutes.post('/:id/decide', validateBody(decideSchema), concernsController.decide);
 concernsRoutes.post(
   '/:id/resolve',

@@ -2,12 +2,18 @@ import { z } from '../../shared/zod.js';
 
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:mm');
 
+/** HR open door / department head / skip level (old tool's three modes). */
+export const SLOT_TYPES = ['hr_open_door', 'dept_head', 'skip_level'] as const;
+const SLOT_TYPE = z.enum(SLOT_TYPES);
+
 export const createSlotSchema = z
   .object({
     date: z.string().date(),
     startTime: HHMM,
     endTime: HHMM,
     capacity: z.number().int().min(1).max(20).optional(),
+    /** Defaults from the publisher: HR → hr_open_door, else dept_head. */
+    slotType: SLOT_TYPE.optional(),
     note: z.string().trim().max(300).optional(),
   })
   .strict()
@@ -16,6 +22,18 @@ export const createSlotSchema = z
     path: ['endTime'],
   })
   .openapi('CreateOpenDoorSlot');
+
+/** The owner edits a live slot: its type and/or note (null clears the note). */
+export const updateSlotSchema = z
+  .object({
+    slotType: SLOT_TYPE.optional(),
+    note: z.string().trim().max(300).nullable().optional(),
+  })
+  .strict()
+  .refine((v) => v.slotType !== undefined || v.note !== undefined, {
+    message: 'Nothing to change',
+  })
+  .openapi('UpdateOpenDoorSlot');
 
 export const bookSchema = z
   .object({
@@ -35,7 +53,12 @@ const owner = z.object({ id: z.string().uuid(), name: z.string() });
 export const slotSchema = z
   .object({
     id: z.string().uuid(),
-    owner,
+    /** With the owner's title and department, shown on the slot. */
+    owner: owner.extend({
+      designation: z.string().nullable(),
+      department: z.string().nullable(),
+    }),
+    slotType: SLOT_TYPE,
     date: z.string(),
     startTime: z.string(),
     endTime: z.string(),
@@ -73,6 +96,8 @@ export const myBookingSchema = z
 export const meSchema = z
   .object({
     canPublish: z.boolean(),
+    /** Slot types the caller may publish, their default first; empty if they cannot. */
+    slotTypes: z.array(SLOT_TYPE),
     horizonDays: z.number().int(),
     bookings: z.array(myBookingSchema),
     slots: z.array(ownerSlotSchema),
@@ -167,6 +192,7 @@ export type RequestDto = z.infer<typeof requestSchema>;
 export type RequestsDto = z.infer<typeof requestsSchema>;
 
 export type CreateSlotInput = z.infer<typeof createSlotSchema>;
+export type UpdateSlotInput = z.infer<typeof updateSlotSchema>;
 export type BookInput = z.infer<typeof bookSchema>;
 export type MarkInput = z.infer<typeof markSchema>;
 export type SlotDto = z.infer<typeof slotSchema>;

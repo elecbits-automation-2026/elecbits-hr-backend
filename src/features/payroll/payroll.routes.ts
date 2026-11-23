@@ -7,6 +7,7 @@ import { payrollController } from './payroll.controller.js';
 import {
   createCorrectionSchema,
   createRunSchema,
+  finalizeRunSchema,
   fnfRecoveryInputSchema,
   updatePayslipSchema,
   updateTdsSchema,
@@ -168,6 +169,7 @@ payrollRoutes.patch(
 payrollRoutes.post(
   '/runs/:id/finalize',
   requireAccess('pr.payroll', 'update', { orgOnly: true }),
+  validateBody(finalizeRunSchema),
   payrollController.finalize,
 );
 payrollRoutes.post(

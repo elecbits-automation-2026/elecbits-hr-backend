@@ -32,11 +32,12 @@ const actor = (req: Request) => ({
   actorEmployeeId: req.auth!.employeeId,
 });
 
-/** `?month=YYYY-MM`, defaulting to the current month. */
+/** `?month=YYYY-MM`, defaulting to the current month; a malformed month is a 400. */
 const monthParam = (req: Request): string => {
   const raw = String(req.query.month ?? '');
+  if (raw === '') return new Date().toLocaleDateString('en-CA').slice(0, 7);
   if (/^\d{4}-(0[1-9]|1[0-2])$/.test(raw)) return raw;
-  return new Date().toLocaleDateString('en-CA').slice(0, 7);
+  throw createError(400, 'month must be YYYY-MM', { code: 'BAD_MONTH' });
 };
 
 const requireId = (req: Request): string => {

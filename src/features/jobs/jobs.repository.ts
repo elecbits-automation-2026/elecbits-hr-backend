@@ -240,15 +240,13 @@ export const createJobsRepository = (db: DbClient) => ({
   sendReminders: async (items: ReminderToSend[]): Promise<void> => {
     if (items.length === 0) return;
     await db.transaction(async (tx) => {
-      await tx.orm
-        .insert(remindersSent)
-        .values(
-          items.map((i) => ({
-            kind: i.kind,
-            subjectId: i.subjectId,
-            recipientId: i.recipientId,
-          })),
-        );
+      await tx.orm.insert(remindersSent).values(
+        items.map((i) => ({
+          kind: i.kind,
+          subjectId: i.subjectId,
+          recipientId: i.recipientId,
+        })),
+      );
       for (const i of items) {
         // The 2-day approval nudge goes by email too; reminders_sent already
         // makes each one fire once, the key keeps a retried run from doubling it.

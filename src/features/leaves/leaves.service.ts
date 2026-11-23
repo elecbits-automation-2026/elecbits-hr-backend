@@ -10,6 +10,7 @@ import { createRmOrHrGate } from '../access/rmOrHr.gate.js';
 import { createSelfGovernance } from '../access/selfGovernance.js';
 import type { SettingsReader } from '../settings/index.js';
 import { checkUpload } from '../../shared/helpers/uploads.js';
+import { DRIVE_FOLDERS, loadStoredFile, withStoredFile } from '../storage/index.js';
 import {
   CAPPED_LEAVE_TYPES,
   EL_BALANCE_CAP,
@@ -466,7 +467,11 @@ export const createLeavesService = (deps: {
             },
           ]
         : []),
-      { to: hrIds, event: { type: 'leave.requested', title, link: '/hr/leaves' }, email: true },
+      {
+        to: hrIds,
+        event: { type: 'leave.requested', title, link: '/hr/leaves' },
+        email: true,
+      },
     ];
 
     const row = await repo.insertRequest(
@@ -822,9 +827,20 @@ export const createLeavesService = (deps: {
       maxBytes: CERT_MAX_BYTES,
       what: 'The certificate',
     });
-    await repo.upsertCertificate(
-      { leaveId: id, fileName: file.fileName, contentType: type, data: file.data },
-      actor,
+    await withStoredFile(
+      DRIVE_FOLDERS.leaveCertificates,
+      { fileName: `leave-${id}-${file.fileName}`, contentType: type, data: file.data },
+      (driveFileId) =>
+        repo.upsertCertificate(
+          {
+            leaveId: id,
+            fileName: file.fileName,
+            contentType: type,
+            data: file.data,
+            driveFileId,
+          },
+          actor,
+        ),
     );
     return withEmployee((await repo.findById(id))!);
   };
@@ -846,7 +862,7 @@ export const createLeavesService = (deps: {
     const file = await repo.getCertificate(id);
     if (!file)
       throw createError(404, 'Certificate not found', { code: 'CERT_NOT_FOUND' });
-    return file;
+    return loadStoredFile(file);
   };
 
   return {

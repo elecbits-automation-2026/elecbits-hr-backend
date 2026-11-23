@@ -30,7 +30,9 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
 
   const assertAdmin = async (actor: ActorContext) => {
     if (actor.actorEmployeeId !== (await repo.ownerEmployeeId())) {
-      throw createError(403, 'Only the Admin account manages seats', { code: 'OWNER_ONLY' });
+      throw createError(403, 'Only the Admin account manages seats', {
+        code: 'OWNER_ONLY',
+      });
     }
   };
 
@@ -119,7 +121,10 @@ export const createSeatsService = (deps: { repo: SeatsRepository }) => {
     }
   };
 
-  const assign = async (input: AssignSeatInput, actor: ActorContext): Promise<SeatDto> => {
+  const assign = async (
+    input: AssignSeatInput,
+    actor: ActorContext,
+  ): Promise<SeatDto> => {
     await assertAdmin(actor);
     return seat(input, actor);
   };

@@ -61,7 +61,9 @@ export const onboardingController = {
     const { id } = req.params;
     if (!isUuid(id)) throw createError(400, 'Invalid task id');
     if (!Buffer.isBuffer(req.body)) {
-      throw createError(422, 'Send the file as the raw request body', { code: 'NOT_A_FILE' });
+      throw createError(422, 'Send the file as the raw request body', {
+        code: 'NOT_A_FILE',
+      });
     }
     const fileName = String(req.query.filename ?? 'document').slice(0, 200);
     const journey = await service(req).uploadTaskFile(
@@ -78,7 +80,10 @@ export const onboardingController = {
     if (!isUuid(id)) throw createError(400, 'Invalid task id');
     const file = await service(req).taskFile(id, req.auth!.employeeId);
     res.setHeader('Content-Type', file.contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${file.fileName.replaceAll('"', '')}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${file.fileName.replaceAll('"', '')}"`,
+    );
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(file.data);
   },
