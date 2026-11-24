@@ -24,6 +24,8 @@ import type {
 
 const LINK_HR = '/hr/people';
 const LINK_TEAM = '/my-team';
+/** Where the employee sees their own probation and confirmation letter. */
+const LINK_MINE = '/onboarding';
 const OPEN: ReviewRow['status'][] = ['pending', 'recommended'];
 const AUTO_AFTER_DAYS = 7;
 const OPEN_BEFORE_DAYS = 7;
@@ -222,7 +224,7 @@ export const createProbationService = (deps: {
             event: {
               type: 'probation.confirmed',
               title: 'Your probation is confirmed — your confirmation letter is ready',
-              link: '/my-profile',
+              link: LINK_MINE,
             },
             email: true,
             dedupeKey: `probation.confirmed:${id}`,
@@ -356,13 +358,25 @@ export const createProbationService = (deps: {
               },
             },
             {
-              to: [r.employee_id, ...(r.rm_id ? [r.rm_id] : [])],
+              to: [r.employee_id],
               event: {
                 type: 'probation.confirmed',
-                title: `${r.name}'s probation is confirmed`,
-                link: '/my-profile',
+                title: 'Your probation is confirmed — your confirmation letter is ready',
+                link: LINK_MINE,
               },
             },
+            ...(r.rm_id
+              ? [
+                  {
+                    to: [r.rm_id],
+                    event: {
+                      type: 'probation.confirmed',
+                      title: `${r.name}'s probation is confirmed`,
+                      link: LINK_TEAM,
+                    },
+                  },
+                ]
+              : []),
           ],
         );
         if (ok) autoConfirmed += 1;
