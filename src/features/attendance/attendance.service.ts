@@ -635,7 +635,7 @@ export const createAttendanceService = (deps: {
         type: 'attendance.short_day',
         title: `Short day: ${me?.name ?? 'someone'} worked ${hrs} on ${today}`,
         body: `Under the ${rules.shortDayBelowHours} h day. It still counts as a full day.`,
-        link: '/attendance',
+        link: '/my-attendance',
       });
     }
     return {
