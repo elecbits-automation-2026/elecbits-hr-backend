@@ -261,6 +261,7 @@ const classifyMonth = (
     weekend: 0,
     lateIns: 0,
     earlyOuts: 0,
+    regularized: 0,
   };
   const days: AttendanceDayDto[] = [];
 
@@ -381,6 +382,8 @@ const classifyMonth = (
       if (inTiming === 'grace' || inTiming === 'late') summary.lateIns += 1;
       if (outTiming === 'grace' || outTiming === 'early') summary.earlyOuts += 1;
     }
+
+    if (punch?.source === 'regularized') summary.regularized += 1;
 
     // Off days keep the punch times but track no worked hours.
     days.push({
@@ -834,12 +837,20 @@ export const createAttendanceService = (deps: {
     const esc = (v: string) =>
       `"${(/^[=+\-@]/.test(v) ? `'${v}` : v).replaceAll('"', '""')}"`;
     const lines = [
-      'Employee code,Name,Department,Working days,Present,Half days,Absent,Leave,Remote,Late ins,Early outs',
+      'Employee code,Name,Department,Working days,Present,Half days,Absent,Leave,Remote,Late ins,Early outs,Marked by HR,Marked by HR (date: reason — by)',
     ];
     for (const p of people) {
       const { days, summary } = classifyMonth(p.id, month, data);
       const workingDays = days.length - summary.weekend - summary.holiday;
       const halfDays = days.filter((d) => d.status === 'half_day').length;
+      // Every HR-marked day with its reason, so Payroll sees why it counts.
+      const marked = days
+        .filter((d) => d.source === 'regularized')
+        .map(
+          (d) =>
+            `${d.date}: ${d.regularizedReason ?? 'no reason recorded'} — ${d.regularizedByName ?? 'HR'}`,
+        )
+        .join('; ');
       lines.push(
         [
           esc(p.employeeCode),
@@ -853,6 +864,8 @@ export const createAttendanceService = (deps: {
           summary.wfh,
           summary.lateIns,
           summary.earlyOuts,
+          summary.regularized,
+          esc(marked),
         ].join(','),
       );
     }

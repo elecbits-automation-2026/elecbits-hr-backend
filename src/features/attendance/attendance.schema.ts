@@ -65,6 +65,8 @@ export const attendanceSummarySchema = z
     // grace + late/early punches — the amber and red dots, counted together.
     lateIns: z.number(),
     earlyOuts: z.number(),
+    // Days HR marked by hand (source 'regularized'), whatever their status.
+    regularized: z.number(),
   })
   .openapi('AttendanceSummary');
 

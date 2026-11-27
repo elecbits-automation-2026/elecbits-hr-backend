@@ -124,6 +124,17 @@ describe('HR marking and views', () => {
     assert.equal(marked.source, 'regularized');
     assert.equal(marked.regularizedReason, 'Forgot to punch — badge log confirms');
     assert.ok(marked.regularizedByName, 'who marked it is shown');
+    assert.ok(mine.body.summary.regularized >= 1, 'counted in the month stats');
+
+    // Payroll's CSV carries the count and the reason too.
+    const csv = await t.call(
+      'meera.hrbp',
+      'GET',
+      `/attendance/export?month=${monthOf(day)}`,
+    );
+    assert.equal(csv.status, 200);
+    assert.match(String(csv.body), /Marked by HR/);
+    assert.match(String(csv.body), new RegExp(`${day}: Forgot to punch`));
 
     const bell = (await t.call('neha.intern', 'GET', '/notifications')).body;
     const items: Array<{ type: string; body: string | null }> = bell?.items ?? bell ?? [];
