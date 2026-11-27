@@ -31,6 +31,14 @@ const EMPTY_SALARY: SalaryDto = {
   otherDeductionAmount: null,
 };
 
+/**
+ * Show only the last 4 characters, like the payslip PDF (`XXXXXX1234`), so
+ * the full PAN and account number never reach the browser on the self view.
+ * Payroll still sees them in full through /employees/:id/salary.
+ */
+const maskLast4 = (value: string | null, prefix: string): string | null =>
+  value ? `${prefix}${value.trim().slice(-4)}` : null;
+
 /** Assemble the caller's own view: profile row + batches + owner/superadmin flags. */
 export const createMeService = (deps: { repo: MeRepository }) => {
   const { repo } = deps;
@@ -166,7 +174,10 @@ export const createMeService = (deps: { repo: MeRepository }) => {
     return getMe(employeeId);
   };
 
-  /** Own salary/bank view — me scope; an absent row reads as "not set yet". */
+  /**
+   * Own salary/bank view — me scope; an absent row reads as "not set yet".
+   * PAN and the bank account come back masked to the last 4 characters.
+   */
   const getMySalary = async (employeeId: string): Promise<SalaryDto> => {
     const row = await repo.findSalary(employeeId);
     if (!row) return EMPTY_SALARY;
@@ -175,13 +186,13 @@ export const createMeService = (deps: { repo: MeRepository }) => {
       payrollCostCenter: row.payrollCostCenter,
       salaryCurrency: row.salaryCurrency,
       salaryMode: row.salaryMode,
-      panNumber: row.panNumber,
+      panNumber: maskLast4(row.panNumber, 'XXXXXX'),
       uanNumber: row.uanNumber,
       esicIpNumber: row.esicIpNumber,
       providentFundAccount: row.providentFundAccount,
       employeeAdvanceAccount: row.employeeAdvanceAccount,
       bankName: row.bankName,
-      bankAccountNo: row.bankAccountNo,
+      bankAccountNo: maskLast4(row.bankAccountNo, 'XXXX'),
       ifscCode: row.ifscCode,
       basicPercent: row.basicPercent,
       hraPercent: row.hraPercent,

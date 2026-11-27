@@ -191,6 +191,27 @@ describe('salary and bank details', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
   });
 
+  it('the self view masks PAN and the bank account to the last 4', async () => {
+    const neha = t.ids['neha.intern'];
+    const bank = await t.call('priya.pr', 'PUT', `/employees/${neha}/bank-details`, {
+      bankName: 'HDFC Bank',
+      bankAccountNo: '50100123456789',
+      ifscCode: 'HDFC0001234',
+    });
+    assert.equal(bank.status, 200, JSON.stringify(bank.body));
+
+    const mine = await t.call('neha.intern', 'GET', '/me/salary');
+    assert.equal(mine.status, 200, JSON.stringify(mine.body));
+    assert.equal(mine.body.panNumber, 'XXXXXX234F');
+    assert.equal(mine.body.bankAccountNo, 'XXXX6789');
+    assert.equal(mine.body.bankName, 'HDFC Bank');
+
+    // Payroll still sees the full numbers.
+    const full = await t.call('priya.pr', 'GET', `/employees/${neha}/bank-details`);
+    assert.equal(full.status, 200, JSON.stringify(full.body));
+    assert.equal(full.body.bankAccountNo, '50100123456789');
+  });
+
   it('managers and OPS cannot read salary or bank details', async () => {
     const asha = t.ids['asha.eng'];
     const s = await t.call('kiran.ops', 'GET', `/employees/${asha}/salary`);
