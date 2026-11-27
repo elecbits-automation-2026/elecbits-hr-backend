@@ -35,6 +35,25 @@ export const registerAssistantDocs = (registry: OpenAPIRegistry): void => {
   });
 
   registry.registerPath({
+    method: 'get',
+    path: '/api/v1/assistant/access',
+    tags,
+    summary:
+      'Whether the HR Assistant would answer the caller: the Admin switch is on and they are HR or a manager (same rule as chat). Drives the Assistant button; never a 403',
+    security: bearer,
+    responses: {
+      200: {
+        description: '{ allowed: boolean }',
+        content: {
+          'application/json': {
+            schema: { type: 'object', properties: { allowed: { type: 'boolean' } } },
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
     method: 'post',
     path: '/api/v1/assistant/quick',
     tags,

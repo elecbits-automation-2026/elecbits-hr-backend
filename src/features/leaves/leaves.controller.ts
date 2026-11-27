@@ -7,7 +7,11 @@ import { createAuthzRepository } from '../access/authz.repository.js';
 import { privacyServiceFor } from '../privacy/index.js';
 import { createSettingsRepository } from '../settings/index.js';
 import { createLeavesRepository } from './leaves.repository.js';
-import type { CreateLeaveRequestInput, DecideLeaveInput } from './leaves.schema.js';
+import {
+  dayCountQuerySchema,
+  type CreateLeaveRequestInput,
+  type DecideLeaveInput,
+} from './leaves.schema.js';
 import { createLeavesService } from './leaves.service.js';
 
 /** Composition root: request-scoped repo + the same authz read requireAccess uses. */
@@ -88,6 +92,17 @@ export const leavesController = {
       throw createError(400, 'Unknown leave type', { code: 'BAD_TYPE' });
     }
     res.json(await service(req).approvalRoute(req.auth!.employeeId, type));
+  },
+
+  dayCount: async (req: Request, res: Response): Promise<void> => {
+    const parsed = dayCountQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      throw createError(400, parsed.error.issues[0]?.message ?? 'Invalid dates', {
+        code: 'BAD_DATES',
+      });
+    }
+    const { startDate, endDate } = parsed.data;
+    res.json(await service(req).dayCount(startDate, endDate));
   },
 
   listTeam: async (req: Request, res: Response): Promise<void> => {

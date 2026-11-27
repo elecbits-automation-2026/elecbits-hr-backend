@@ -39,6 +39,28 @@ export const createLeaveRequestSchema = z
   })
   .openapi('CreateLeaveRequest');
 
+/**
+ * The leave form's day count (GET /leaves/day-count): the same full-day
+ * range rules as raising, so the preview can never disagree with the server.
+ */
+export const dayCountQuerySchema = z
+  .object({ startDate: z.string().date(), endDate: z.string().date() })
+  .refine((v) => v.endDate >= v.startDate, {
+    message: 'endDate must not be before startDate',
+    path: ['endDate'],
+  })
+  .refine((v) => v.startDate.slice(0, 4) === v.endDate.slice(0, 4), {
+    message: 'A request must stay within one calendar year — raise two',
+    path: ['endDate'],
+  });
+
+export const leaveDayCountSchema = z
+  .object({
+    days: z.number(),
+    sickCertificateAfterDays: z.number().int(),
+  })
+  .openapi('LeaveDayCount');
+
 /** Approve or decline — the service works out which slot(s) the caller fills. */
 export const decideLeaveSchema = z
   .object({

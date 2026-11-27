@@ -46,9 +46,14 @@ export const createAuthService = (deps: {
   /** How long a started Google sign-in stays completable. */
   const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
-  const accessSession = (user: UserRow): SessionDto => ({
+  /**
+   * `sid` is the refresh family the token was minted from, so signing out
+   * (which ends the family) also stops every access token of that sign-in on
+   * its next request — another tab can't carry on until the token expires.
+   */
+  const accessSession = (user: UserRow, familyId: string): SessionDto => ({
     accessToken: jwt.sign(
-      { sub: user.id, employeeId: user.employeeId, email: user.email },
+      { sub: user.id, employeeId: user.employeeId, email: user.email, sid: familyId },
       env.auth.jwtSecret,
       { expiresIn: env.auth.jwtExpiresIn } as jwt.SignOptions,
     ),
@@ -66,7 +71,7 @@ export const createAuthService = (deps: {
     const refresh = newRefresh(user.id, randomUUID());
     await repo.insertRefreshToken(refresh.row);
     return {
-      session: accessSession(user),
+      session: accessSession(user, refresh.row.familyId),
       refresh: { token: refresh.token, expiresAt: refresh.row.expiresAt },
     };
   };
@@ -194,7 +199,7 @@ export const createAuthService = (deps: {
     const rotated = !inGrace && (await repo.rotateRefresh(row.id, next.row));
     if (!rotated) await repo.insertRefreshToken(next.row);
     return {
-      session: accessSession(user),
+      session: accessSession(user, row.familyId),
       refresh: { token: next.token, expiresAt: next.row.expiresAt },
     };
   };

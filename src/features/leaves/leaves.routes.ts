@@ -11,6 +11,8 @@ import { createLeaveRequestSchema, decideLeaveSchema } from './leaves.schema.js'
  *   GET  /mine          -> 200 LeaveRequest[]  (own requests — me scope)
  *   GET  /balances      -> 200 LeaveBalance[]  (own, ?year=; unpaid uncapped)
  *   GET  /approval-route?type= -> 200 LeaveApprovalRoute (who a request would go to)
+ *   GET  /day-count?startDate=&endDate= -> 200 { days, sickCertificateAfterDays }
+ *                           (the form's working-day count — same rule as raising)
  *   GET  /team          -> 200 LeaveRequest[]  (caller is the effective RM)
  *   GET  /              -> 200 LeaveRequest[]  (HR queue — hrbp.leaves read)
  *   POST /              -> 201 LeaveRequest    (raise; caller from the token)
@@ -28,6 +30,7 @@ leavesRoutes.use(authenticate);
 leavesRoutes.get('/mine', leavesController.listMine);
 leavesRoutes.get('/balances', leavesController.balances);
 leavesRoutes.get('/approval-route', leavesController.approvalRoute);
+leavesRoutes.get('/day-count', leavesController.dayCount);
 leavesRoutes.get('/team', leavesController.listTeam);
 // A report's balances for the RM person sheet (service-gated; menstrual stripped).
 leavesRoutes.get('/team/:employeeId/balances', leavesController.teamBalances);

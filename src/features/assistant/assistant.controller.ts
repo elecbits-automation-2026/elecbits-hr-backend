@@ -118,6 +118,11 @@ export const assistantController = {
     res.end();
   },
 
+  /** Would the Assistant answer this caller? Drives the button, never a 403. */
+  access: async (req: Request, res: Response): Promise<void> => {
+    res.json(await service(req).access(req.auth!.userId, req.auth!.employeeId));
+  },
+
   /** The offline buttons: one read, no model; same gating minus the key. */
   quick: async (req: Request, res: Response): Promise<void> => {
     const input: QuickInput = req.body;

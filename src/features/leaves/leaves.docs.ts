@@ -7,6 +7,7 @@ import {
   decideLeaveSchema,
   leaveApprovalRouteSchema,
   leaveBalanceSchema,
+  leaveDayCountSchema,
   leaveRequestSchema,
 } from './leaves.schema.js';
 
@@ -47,6 +48,22 @@ export const registerLeavesDocs = (registry: OpenAPIRegistry): void => {
     responses: {
       200: jsonResponse('LeaveApprovalRoute', leaveApprovalRouteSchema),
       400: errorResponse('Unknown leave type'),
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/v1/leaves/day-count',
+    tags: ['Leaves'],
+    summary:
+      "Working days in a full-day range (Sundays, the work week's off Saturdays and holidays are free) — the same count raising uses; the form compares it with sickCertificateAfterDays",
+    security: [{ bearerAuth: [] }],
+    request: {
+      query: z.object({ startDate: z.string().date(), endDate: z.string().date() }),
+    },
+    responses: {
+      200: jsonResponse('LeaveDayCount', leaveDayCountSchema),
+      400: errorResponse('BAD_DATES — missing, reversed or across a year end'),
     },
   });
 
