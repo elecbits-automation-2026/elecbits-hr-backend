@@ -289,6 +289,27 @@ export const createLeavesService = (deps: {
     return { rmId, hrRequired };
   };
 
+  /**
+   * The leave form's day count: working days only (Sundays, the work week's
+   * off Saturdays and holidays are free), counted by the same computeDays as
+   * raise — so the sick-certificate hint matches the server's rule.
+   */
+  const dayCount = async (
+    startDate: string,
+    endDate: string,
+  ): Promise<{ days: number; sickCertificateAfterDays: number }> => {
+    const [holidayDates, workWeek] = await Promise.all([
+      repo.listHolidayDates(startDate, endDate),
+      settings.effective('attendance.workWeek'),
+    ]);
+    const days = computeDays(
+      { type: 'sick', startDate, endDate, dayPart: 'full' },
+      new Set(holidayDates),
+      workWeek,
+    );
+    return { days, sickCertificateAfterDays: SICK_CERT_AFTER_DAYS };
+  };
+
   /** The leave form's "goes to …" line: self-approved, or the RM and/or HR. */
   const approvalRoute = async (
     employeeId: string,
@@ -874,6 +895,7 @@ export const createLeavesService = (deps: {
     balances,
     teamBalances,
     approvalRoute,
+    dayCount,
     raise,
     cancel,
     decide,

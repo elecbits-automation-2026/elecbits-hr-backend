@@ -218,6 +218,18 @@ describe('HR assistant (L7)', () => {
     assert.equal(errorCode(r), 'ASSISTANT_NOT_ALLOWED');
   });
 
+  it('/assistant/access says who gets the button: HR and managers, not TA-only or a plain employee', async () => {
+    const allowed = async (who: string) => {
+      const r = await t.call(who, 'GET', '/assistant/access');
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      return r.body.allowed as boolean;
+    };
+    assert.equal(await allowed('asha.eng'), false);
+    assert.equal(await allowed('pooja.ta'), false); // TA, nobody reports to them
+    assert.equal(await allowed('rahul.manager'), true);
+    assert.equal(await allowed('meera.hrbp'), true);
+  });
+
   it('a manager with no server key gets a 503 that says why', async () => {
     const r = await t.call('rahul.manager', 'POST', '/assistant/chat', {
       messages: [{ role: 'user', content: 'who is out today?' }],
@@ -227,6 +239,9 @@ describe('HR assistant (L7)', () => {
     await t.call('admin', 'PUT', '/settings/assistant.enabled', {
       value: { enabled: false },
     });
+    // Switched off: nobody gets the button.
+    const off = await t.call('meera.hrbp', 'GET', '/assistant/access');
+    assert.equal(off.body.allowed, false);
   });
 });
 

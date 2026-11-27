@@ -188,4 +188,29 @@ describe('sessions', () => {
     const afterB = await t.call(null, 'POST', '/auth/refresh', undefined, { cookie: b });
     assert.equal(afterB.status, 401);
   });
+
+  it('signing out ends every access token of that sign-in at once (another tab stops too)', async () => {
+    const l = await t.login('vikram.eng');
+    const bearer = { headers: { authorization: `Bearer ${l.body.accessToken}` } };
+    // A second tab renews from the same cookie: same sign-in, its own token.
+    const tab2 = await t.call(null, 'POST', '/auth/refresh', undefined, {
+      cookie: refreshCookie(l),
+    });
+    assert.equal(tab2.status, 200);
+    const bearer2 = { headers: { authorization: `Bearer ${tab2.body.accessToken}` } };
+    assert.equal((await t.call(null, 'GET', '/me', undefined, bearer)).status, 200);
+    assert.equal((await t.call(null, 'GET', '/me', undefined, bearer2)).status, 200);
+
+    const out = await t.call(null, 'POST', '/auth/logout', undefined, {
+      cookie: refreshCookie(tab2),
+    });
+    assert.ok(out.status === 204 || out.status === 200, String(out.status));
+    for (const b of [bearer, bearer2]) {
+      const r = await t.call(null, 'GET', '/me', undefined, b);
+      assert.equal(r.status, 401, JSON.stringify(r.body));
+      assert.equal(r.body?.error?.code, 'SESSION_ENDED');
+    }
+    // Other sign-ins of the same person are untouched.
+    assert.equal((await t.call('vikram.eng', 'GET', '/me')).status, 200);
+  });
 });

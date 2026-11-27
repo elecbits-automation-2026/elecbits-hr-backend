@@ -131,6 +131,28 @@ describe('leave: raise → RM → HR → cancel', () => {
 });
 
 describe('leave rules', () => {
+  it('day-count counts a working Saturday, like raising does (the sick-certificate hint)', async () => {
+    // Default week: 1st and 3rd Saturdays off. Jan 2027: the 9th works, the 16th is off.
+    const count = async (startDate: string, endDate: string) => {
+      const r = await t.call(
+        'asha.eng',
+        'GET',
+        `/leaves/day-count?startDate=${startDate}&endDate=${endDate}`,
+      );
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.equal(r.body.sickCertificateAfterDays, 3);
+      return r.body.days as number;
+    };
+    assert.equal(await count('2027-01-06', '2027-01-09'), 4); // Wed→Sat (working)
+    assert.equal(await count('2027-01-13', '2027-01-17'), 3); // Wed→Sun (Sat off)
+    const bad = await t.call(
+      'asha.eng',
+      'GET',
+      '/leaves/day-count?startDate=2027-01-09&endDate=2027-01-06',
+    );
+    assert.equal(bad.status, 400);
+  });
+
   it('sick leave over 3 days cannot be approved without a certificate', async () => {
     const s = weekday(addDays(today(), 7));
     const r = await t.call('arjun.eng', 'POST', '/leaves', {

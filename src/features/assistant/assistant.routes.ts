@@ -11,6 +11,7 @@ import { chatSchema, quickSchema } from './assistant.schema.js';
  *                (action tools only PROPOSE; the drawer's Confirm calls the
  *                existing endpoint — goals, trainings, recognitions, hiring)
  *   POST /quick  one whitelisted read, no model (the offline buttons)
+ *   GET  /access { allowed } — switch on and caller is HR or a manager
  *
  * No requireAccess: who may chat (HR or a manager) and which tools each
  * caller gets are resolved per request in the service, from grants and the
@@ -20,5 +21,6 @@ export const assistantRoutes = Router();
 
 assistantRoutes.use(authenticate);
 
+assistantRoutes.get('/access', assistantController.access);
 assistantRoutes.post('/chat', validateBody(chatSchema), assistantController.chat);
 assistantRoutes.post('/quick', validateBody(quickSchema), assistantController.quick);

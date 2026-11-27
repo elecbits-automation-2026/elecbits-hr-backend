@@ -16,12 +16,18 @@ import { createAuthRepository } from '../features/auth/auth.repository.js';
  * After the signature check, the identity's state is read from the DB on
  * EVERY request (refinement plan X1): a deactivated user or employee record
  * is turned away on their very next call, not when the token expires.
+ *
+ * The token's `sid` names the sign-in (refresh family) it came from. Once
+ * that sign-in is ended — sign-out, deactivation, a replayed refresh token —
+ * the token stops working at once, so signing out in one tab ends the other
+ * tabs too. Tokens minted before `sid` existed simply expire as before.
  */
 
 interface TokenPayload {
   sub: string; // users.id
   employeeId: string;
   email: string;
+  sid?: string; // refresh_tokens.family_id of the sign-in
 }
 
 export const authenticate: RequestHandler = async (req, _res, next) => {
@@ -40,8 +46,12 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
   }
 
   try {
-    const state = await createAuthRepository(req.db).sessionState(payload.sub);
-    if (!state || !state.isActive || state.employeeStatus === 'inactive') {
+    const repo = createAuthRepository(req.db);
+    const [state, ended] = await Promise.all([
+      repo.sessionState(payload.sub),
+      payload.sid ? repo.isFamilyEnded(payload.sid) : Promise.resolve(false),
+    ]);
+    if (!state || !state.isActive || state.employeeStatus === 'inactive' || ended) {
       return next(
         createError(401, 'Your session has ended — sign in again', {
           code: 'SESSION_ENDED',

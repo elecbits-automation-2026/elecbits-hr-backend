@@ -141,6 +141,21 @@ export const createAssistantService = (deps: {
     return caller;
   };
 
+  /**
+   * Whether the caller would get past the gate's "who" checks: the Admin
+   * switch is on and they are HR or a manager by the same rule as the gate.
+   * Lets the shell show the Assistant button only to people it will answer.
+   */
+  const access = async (
+    userId: string,
+    employeeId: string,
+  ): Promise<{ allowed: boolean }> => {
+    const { enabled } = await settings.effective('assistant.enabled');
+    if (!enabled) return { allowed: false };
+    const caller = await callerOf(userId, employeeId);
+    return { allowed: caller.roles.length > 0 };
+  };
+
   const gate = async (userId: string, employeeId: string): Promise<AssistantCaller> => {
     await requireOn();
     // Who may use it comes first: a plain employee gets the 403, not a 503
@@ -386,7 +401,7 @@ export const createAssistantService = (deps: {
     };
   };
 
-  return { gate, chat, quick };
+  return { access, gate, chat, quick };
 };
 
 export type AssistantService = ReturnType<typeof createAssistantService>;
