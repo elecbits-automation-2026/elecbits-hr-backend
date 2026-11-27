@@ -47,6 +47,10 @@ export const attendance = orgSchema.table(
     // 2026-11-14) — shows how much a punch's location can be trusted.
     checkInAccuracyM: integer('check_in_accuracy_m'),
     checkOutAccuracyM: integer('check_out_accuracy_m'),
+    // Set when HR marks the day (source 'regularized'): who did it and why —
+    // shown on the day so the employee and their manager can see it.
+    regularizedBy: uuid('regularized_by').references(() => employees.id),
+    regularizedReason: text('regularized_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

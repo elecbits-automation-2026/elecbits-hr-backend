@@ -98,6 +98,55 @@ describe('HR marking and views', () => {
     assert.ok(fut.status >= 400 && fut.status < 500);
   });
 
+  it('needs a reason, shows it on the day, and tells the employee', async () => {
+    const body = {
+      employeeId: t.ids['neha.intern'],
+      date: day,
+      checkInAt: `${day}T04:00:00Z`,
+      checkOutAt: `${day}T12:30:00Z`,
+    };
+    const none = await t.call('meera.hrbp', 'POST', '/attendance/hr-mark', body);
+    assert.equal(none.status, 400, JSON.stringify(none.body));
+
+    const r = await t.call('meera.hrbp', 'POST', '/attendance/hr-mark', {
+      ...body,
+      reason: 'Forgot to punch — badge log confirms',
+    });
+    assert.ok(r.status === 200 || r.status === 201, JSON.stringify(r.body));
+
+    const mine = await t.call(
+      'neha.intern',
+      'GET',
+      `/attendance/me?month=${monthOf(day)}`,
+    );
+    assert.equal(mine.status, 200, JSON.stringify(mine.body));
+    const marked = mine.body.days.find((d: { date: string }) => d.date === day);
+    assert.equal(marked.source, 'regularized');
+    assert.equal(marked.regularizedReason, 'Forgot to punch — badge log confirms');
+    assert.ok(marked.regularizedByName, 'who marked it is shown');
+    assert.ok(mine.body.summary.regularized >= 1, 'counted in the month stats');
+
+    // Payroll's CSV carries the count and the reason too.
+    const csv = await t.call(
+      'meera.hrbp',
+      'GET',
+      `/attendance/export?month=${monthOf(day)}`,
+    );
+    assert.equal(csv.status, 200);
+    assert.match(String(csv.body), /Marked by HR/);
+    assert.match(String(csv.body), new RegExp(`${day}: Forgot to punch`));
+
+    const bell = (await t.call('neha.intern', 'GET', '/notifications')).body;
+    const items: Array<{ type: string; body: string | null }> = bell?.items ?? bell ?? [];
+    assert.ok(
+      items.some(
+        (n) =>
+          n.type === 'attendance.hr_marked' && /badge log confirms/.test(n.body ?? ''),
+      ),
+      JSON.stringify(items.slice(0, 5)),
+    );
+  });
+
   it('manager sees the team; an employee cannot see the org', async () => {
     const m = monthOf(today());
     assert.equal(

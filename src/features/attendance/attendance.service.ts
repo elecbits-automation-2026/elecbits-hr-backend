@@ -213,6 +213,7 @@ const workedHours = (row: AttendanceRow): number | null =>
 interface ClassifierData {
   holidays: Map<string, string>; // date -> name
   punches: Map<string, AttendanceRow>; // `${employeeId}:${date}` -> row
+  names: Map<string, string>; // employeeId -> name, for who marked a regularized day
   leaves: Array<{
     employeeId: string;
     type: string;
@@ -260,6 +261,7 @@ const classifyMonth = (
     weekend: 0,
     lateIns: 0,
     earlyOuts: 0,
+    regularized: 0,
   };
   const days: AttendanceDayDto[] = [];
 
@@ -305,6 +307,12 @@ const classifyMonth = (
       checkOutTiming: outTiming,
       checkInAccuracyM: punch?.checkInAccuracyM ?? null,
       checkOutAccuracyM: punch?.checkOutAccuracyM ?? null,
+      regularizedReason:
+        punch?.source === 'regularized' ? (punch.regularizedReason ?? null) : null,
+      regularizedByName:
+        punch?.source === 'regularized' && punch.regularizedBy
+          ? (data.names.get(punch.regularizedBy) ?? null)
+          : null,
     };
     const holidayName = data.holidays.get(date);
     const leave = data.leaves.find(
@@ -374,6 +382,8 @@ const classifyMonth = (
       if (inTiming === 'grace' || inTiming === 'late') summary.lateIns += 1;
       if (outTiming === 'grace' || outTiming === 'early') summary.earlyOuts += 1;
     }
+
+    if (punch?.source === 'regularized') summary.regularized += 1;
 
     // Off days keep the punch times but track no worked hours.
     days.push({
@@ -668,9 +678,18 @@ export const createAttendanceService = (deps: {
           (w) => w.employeeId === p.employeeId && inRange(p.date, w.startDate, w.endDate),
         ),
     );
+    const markedBy = [
+      ...new Set(
+        counted.flatMap((p) =>
+          p.source === 'regularized' && p.regularizedBy ? [p.regularizedBy] : [],
+        ),
+      ),
+    ];
+    const names = await repo.listEmployeeNames(markedBy);
     return {
       holidays: new Map(holidayRows.map((h) => [h.date, h.name])),
       punches: new Map(counted.map((p) => [`${p.employeeId}:${p.date}`, p])),
+      names,
       leaves,
       wfh,
       schedules: new Map(
@@ -818,12 +837,20 @@ export const createAttendanceService = (deps: {
     const esc = (v: string) =>
       `"${(/^[=+\-@]/.test(v) ? `'${v}` : v).replaceAll('"', '""')}"`;
     const lines = [
-      'Employee code,Name,Department,Working days,Present,Half days,Absent,Leave,Remote,Late ins,Early outs',
+      'Employee code,Name,Department,Working days,Present,Half days,Absent,Leave,Remote,Late ins,Early outs,Marked by HR,Marked by HR (date: reason — by)',
     ];
     for (const p of people) {
       const { days, summary } = classifyMonth(p.id, month, data);
       const workingDays = days.length - summary.weekend - summary.holiday;
       const halfDays = days.filter((d) => d.status === 'half_day').length;
+      // Every HR-marked day with its reason, so Payroll sees why it counts.
+      const marked = days
+        .filter((d) => d.source === 'regularized')
+        .map(
+          (d) =>
+            `${d.date}: ${d.regularizedReason ?? 'no reason recorded'} — ${d.regularizedByName ?? 'HR'}`,
+        )
+        .join('; ');
       lines.push(
         [
           esc(p.employeeCode),
@@ -837,6 +864,8 @@ export const createAttendanceService = (deps: {
           summary.wfh,
           summary.lateIns,
           summary.earlyOuts,
+          summary.regularized,
+          esc(marked),
         ].join(','),
       );
     }
@@ -988,7 +1017,8 @@ export const createAttendanceService = (deps: {
         code: 'FUTURE_DATE',
       });
     }
-    if (!(await repo.findEmployeeApprovers(input.employeeId))) {
+    const person = await repo.findEmployeeApprovers(input.employeeId);
+    if (!person) {
       throw createError(404, 'Employee not found', { code: 'EMPLOYEE_NOT_FOUND' });
     }
     try {
@@ -998,9 +1028,33 @@ export const createAttendanceService = (deps: {
           date: input.date,
           checkInAt: new Date(input.checkInAt),
           checkOutAt: new Date(input.checkOutAt),
+          reason: input.reason,
         },
         actor,
       );
+      // Tell the employee and their manager (never the HR person who did it,
+      // never the Owner) — so a changed day is never a silent one.
+      const hm = (d: Date) =>
+        d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const span = `${hm(row.checkInAt)}–${hm(row.checkOutAt!)}`;
+      const rm = person.leaveApprover ?? person.reportsTo ?? null;
+      const ownerId = await authz.ownerId();
+      if (input.employeeId !== actor.actorEmployeeId) {
+        await repo.notify([input.employeeId], {
+          type: 'attendance.hr_marked',
+          title: `HR marked ${input.date} as present (${span})`,
+          body: `Reason: ${input.reason}`,
+          link: '/my-attendance',
+        });
+      }
+      if (rm && rm !== actor.actorEmployeeId && rm !== ownerId) {
+        await repo.notify([rm], {
+          type: 'attendance.hr_marked',
+          title: `HR marked ${person.name}'s ${input.date} as present (${span})`,
+          body: `Reason: ${input.reason}`,
+          link: '/my-team?tab=attendance',
+        });
+      }
       return {
         date: row.date,
         checkInAt: row.checkInAt.toISOString(),

@@ -48,6 +48,9 @@ export const attendanceDaySchema = z
     /** The punch fixes' accuracy in metres; null without a punch or a fix. */
     checkInAccuracyM: z.number().int().nullable(),
     checkOutAccuracyM: z.number().int().nullable(),
+    /** When HR marked the day (source 'regularized'): why, and who. */
+    regularizedReason: z.string().nullable(),
+    regularizedByName: z.string().nullable(),
   })
   .openapi('AttendanceDay');
 
@@ -62,6 +65,8 @@ export const attendanceSummarySchema = z
     // grace + late/early punches — the amber and red dots, counted together.
     lateIns: z.number(),
     earlyOuts: z.number(),
+    // Days HR marked by hand (source 'regularized'), whatever their status.
+    regularized: z.number(),
   })
   .openapi('AttendanceSummary');
 
@@ -177,7 +182,8 @@ export const hrMarkSchema = z
     date: z.string().date(),
     checkInAt: z.string().datetime(),
     checkOutAt: z.string().datetime(),
-    reason: z.string().max(1000).optional(),
+    // Required: shown to the employee and their manager on the day.
+    reason: z.string().trim().min(3, 'Give a reason (at least 3 characters)').max(500),
   })
   .strict()
   .refine((v) => Date.parse(v.checkOutAt) > Date.parse(v.checkInAt), {
