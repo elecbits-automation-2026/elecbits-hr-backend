@@ -467,6 +467,8 @@ how they connect are in [`technical-reference.md`](./technical-reference.md) §3
 | `check_out_lng`        | numeric(9, 6)            | yes  |                     |                      |
 | `check_in_accuracy_m`  | integer                  | yes  |                     |                      |
 | `check_out_accuracy_m` | integer                  | yes  |                     |                      |
+| `regularized_by`       | uuid                     | yes  |                     | → `org.employees.id` |
+| `regularized_reason`   | text                     | yes  |                     |                      |
 | `created_at`           | timestamp with time zone |      | `now()`             |                      |
 
 - Unique index `attendance_employee_date_uq` (`employee_id`, `date`)

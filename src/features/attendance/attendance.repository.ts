@@ -304,6 +304,16 @@ export const createAttendanceRepository = (db: DbClient) => ({
     return rows.length > 0;
   },
 
+  /** id -> name, for showing who marked a regularized day. */
+  listEmployeeNames: async (ids: string[]): Promise<Map<string, string>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await db.orm
+      .select({ id: employees.id, name: employees.name })
+      .from(employees)
+      .where(inArray(employees.id, ids));
+    return new Map(rows.map((r) => [r.id, r.name]));
+  },
+
   findEmployeeApprovers: async (employeeId: string) => {
     const rows = await db.orm
       .select({
@@ -530,7 +540,13 @@ export const createAttendanceRepository = (db: DbClient) => ({
    * first — a range cannot be split here).
    */
   hrMarkAttendance: async (
-    input: { employeeId: string; date: string; checkInAt: Date; checkOutAt: Date },
+    input: {
+      employeeId: string;
+      date: string;
+      checkInAt: Date;
+      checkOutAt: Date;
+      reason: string;
+    },
     actor: ActorContext,
   ) => {
     return db.transaction(async (tx) => {
@@ -595,6 +611,8 @@ export const createAttendanceRepository = (db: DbClient) => ({
           checkInAt: input.checkInAt,
           checkOutAt: input.checkOutAt,
           source: 'regularized',
+          regularizedBy: actor.actorEmployeeId,
+          regularizedReason: input.reason,
         })
         .onConflictDoUpdate({
           target: [attendance.employeeId, attendance.date],
@@ -602,6 +620,8 @@ export const createAttendanceRepository = (db: DbClient) => ({
             checkInAt: input.checkInAt,
             checkOutAt: input.checkOutAt,
             source: 'regularized',
+            regularizedBy: actor.actorEmployeeId,
+            regularizedReason: input.reason,
           },
         })
         .returning();
@@ -609,7 +629,11 @@ export const createAttendanceRepository = (db: DbClient) => ({
         actorUserId: actor.actorUserId,
         action: 'attendance.hr_marked',
         subject: `attendance:${rows[0]!.id}`,
-        detail: JSON.stringify({ employeeId: input.employeeId, date: input.date }),
+        detail: JSON.stringify({
+          employeeId: input.employeeId,
+          date: input.date,
+          reason: input.reason,
+        }),
       });
       return rows[0]!;
     });
